@@ -1,9 +1,21 @@
 # Trade study: how to sandbox the meal-plan folder
 
-**Status:** superseded as a recommendation by
-[ADR 0001](adr/0001-use-agentos-for-the-sandbox.md), which chose agentOS.
-This study remains the evidence base: the measurements, the threat model and the
-option comparison are unchanged and still hold.
+**Status:** the recommendation in §8 was superseded three times — by
+[ADR 0001](adr/0001-use-agentos-for-the-sandbox.md) (agentOS), then
+[ADR 0005](adr/0005-use-microsandbox-for-the-sandbox.md) (microsandbox, after agentOS
+was measured and failed), and finally
+[ADR 0008](adr/0008-use-bubblewrap-for-the-sandbox.md), which returns to **bubblewrap**
+for the single-household lens and makes multi-tenancy an open research question.
+This study remains the evidence base: the measurements, the threat model and the option
+comparison are unchanged and still hold.
+
+Two corrections a reader must carry:
+
+* **§8's command line is wrong as written.** `--ro-bind /usr /usr` hands the agent the
+  host's `python3`, `perl`, `curl`, `gcc` and the rest. ADR 0008 builds a small image
+  and binds that instead. See [the lockdown study](bubblewrap-lockdown-study.md).
+* **§11.6's two-layer model is deferred, not discarded.** ADR 0008 keeps the session in
+  the interface so the multi-tenant question stays answerable without a rewrite.
 **Date:** 2026-08-23
 **Decides:** the technology behind `features/sandbox.feature`
 

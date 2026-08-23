@@ -1,10 +1,14 @@
 ---
-status: accepted
+status: superseded by ADR-0005
 date: 2026-08-23
 decision-makers: gburgett
 consulted: sandbox trade study (docs/sandbox-trade-study.md)
 informed: all contributors
 ---
+
+> **Superseded by ADR-0005.** The spike this record demanded found that `git` does not execute in agentOS.
+That is the exit condition this record wrote for itself. See
+`docs/agent-runtime-spike.md` and ADR 0005.
 
 # Use agentOS for the sandbox
 

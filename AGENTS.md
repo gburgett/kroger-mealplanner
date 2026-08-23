@@ -45,10 +45,29 @@ OAuth consent redirect. Anything else belongs behind the sandbox.
 
 | Component | Primary driver | Choice | Record |
 | --- | --- | --- | --- |
-| Sandbox | multi-tenant cost and containment | agentOS | ADR 0001 |
+| Sandbox | speed and cost for one household | bubblewrap + seccomp + cgroup limits | ADR 0008 |
+| Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
 | MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
-| `mealplan` CLI | speed inside a WebAssembly sandbox | Rust → `wasm32-wasip1` | ADR 0003 |
+| `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
 | Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
+
+**The lens is one household on one machine. Multi-tenancy is an open research
+question, not a requirement.** That is what ADR 0008 settled, and it is why the
+sandbox is 3.3 ms of bubblewrap rather than a microVM per tenant. The session
+interface (`open` / `run` / `close`) stays in the design anyway, thin, so the
+question stays answerable without a rewrite.
+
+The sandbox took three records to settle, and the wrong turns are worth reading:
+agentOS (ADR 0001) cannot execute `git`; microsandbox (ADR 0005) works but buys a
+per-tenant kernel this product does not need. `docs/agent-runtime-spike.md` and
+`docs/bubblewrap-lockdown-study.md` hold the measurements.
+
+Two traps that measurement found, both easy to walk back into:
+
+- **Never `--ro-bind /usr /usr`.** The host `/usr` holds `python3`, `perl`, `curl`,
+  `gcc` and a dozen more. The trade study's §8 command line says to do this. Do not.
+- **A busybox base is a network client.** `busybox wget` works even when `wget` is
+  off `PATH`.
 
 Two languages, on purpose: the drivers genuinely differ, and the interface
 between them is a command line and an exit status — no shared library, no
@@ -57,7 +76,9 @@ reads a recipe; it runs commands and commits. That is what keeps the document
 format defined in exactly one place.
 
 `node server.ts` starts the server. There is no build step — Node 24 strips the
-types itself, so avoid enums and namespaces, which it cannot.
+types itself, so avoid enums and namespaces, which it cannot. One process holds
+both the server and the sandbox: `run()` is a `bwrap` child, so there is no
+daemon, no RPC and no KVM.
 
 **Use `pnpm`, never `npm install`.** The settings in `pnpm-workspace.yaml` block
 dependency build scripts and refuse packages published in the last seven days.
@@ -77,6 +98,12 @@ Working rhythm:
 2. Watch it fail for the right reason.
 3. Write the smallest implementation that passes it.
 4. Refactor with the suite green.
+
+Every scenario is a full integration test. Nothing in the stack is stubbed:
+a `When` step acts by sending a loopback web request to our own API, and a
+`Then` step asserts against the files that ended up on disk. The only thing
+ever mocked is a third-party HTTP API — Kroger, and nothing else. Our sandbox,
+our transport, our commands and our git history all run for real.
 
 Rules of thumb:
 
@@ -154,5 +181,5 @@ commands. Free to design in now, a rewrite to retrofit.
 ## Out of scope for now
 
 Kroger authentication and cart submission. The sandbox technology is decided —
-see ADR 0001. Keep shopping-list lines shaped so they can be matched to a real
+see ADR 0008. The plan for building it is in `docs/plans/`. Keep shopping-list lines shaped so they can be matched to a real
 product later: item name, quantity, unit.

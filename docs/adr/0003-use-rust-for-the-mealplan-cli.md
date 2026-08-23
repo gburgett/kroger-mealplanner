@@ -1,10 +1,14 @@
 ---
-status: accepted
+status: superseded by ADR-0007
 date: 2026-08-23
 decision-makers: gburgett
 consulted: ADR 0001, ADR 0002
 informed: all contributors
 ---
+
+> **Superseded by ADR-0007.** ADR 0005 replaced agentOS. A microVM runs a true Linux kernel, so the
+`wasm32-wasip1` requirement in this record is void. The choice of Rust holds.
+See ADR 0007.
 
 # Use Rust for the mealplan CLI
 
