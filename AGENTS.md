@@ -41,6 +41,23 @@ Consequences worth internalising before changing anything:
 a browser and a human at a keyboard. Today that is exactly one thing: the Kroger
 OAuth consent redirect. Anything else belongs behind the sandbox.
 
+## The stack
+
+| Component | Primary driver | Choice | Record |
+| --- | --- | --- | --- |
+| Sandbox | multi-tenant cost and containment | agentOS | ADR 0001 |
+| MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
+| `mealplan` CLI | speed inside a WebAssembly sandbox | Rust → `wasm32-wasip1` | ADR 0003 |
+
+Two languages, on purpose: the drivers genuinely differ, and the interface
+between them is a command line and an exit status — no shared library, no
+shared types. The corpus parser lives **only** in the CLI. The server never
+reads a recipe; it runs commands and commits. That is what keeps the document
+format defined in exactly one place.
+
+`node server.ts` starts the server. There is no build step — Node 24 strips the
+types itself, so avoid enums and namespaces, which it cannot.
+
 ## We practice BDD
 
 Behaviour is specified in Gherkin under `features/` **before** it is built, and
