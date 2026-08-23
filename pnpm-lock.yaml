@@ -11,6 +11,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(supports-color@11.0.0)(zod@4.4.3)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1(supports-color@11.0.0)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
