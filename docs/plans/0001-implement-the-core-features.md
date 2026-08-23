@@ -39,6 +39,14 @@ symlink**, because `busybox wget` works even when `wget` is off `PATH`. Do not i
 depends on `perl`. Stage the `mealplan` binary from Phase 4 into it. The spike produced
 24 MB this way with `docker export`.
 
+**Corrected 2026-08-23, measured in Phase 1:** deleting busybox is not sufficient. Two
+network clients survive it, and neither is on any list written before the image exists:
+`/usr/bin/ssl_client` is a real binary rather than an applet symlink, and
+`/usr/lib/bash/` holds Alpine's loadable builtins, one of which — `accept` — listens on
+a TCP port. Delete both, and `getent` with them. This is the argument for the manifest,
+which is the only control here that does not depend on foresight. See
+`bubblewrap-lockdown-study.md` §2b.
+
 Ship **no `/etc/passwd`**. Git takes its identity from `-c user.name` and
 `-c user.email`, which the server supplies when it commits. `cat /etc/passwd` then fails
 exactly as `features/sandbox.feature` already says it should — passing for the right
@@ -86,9 +94,15 @@ bwrap --unshare-all --die-with-parent --new-session
 ```
 
 `--unshare-all` gives a fresh network namespace, so there is no route and no DNS.
-`--clearenv` is the measured fix for the 99-variable leak through `/proc/1/environ`.
 `--unshare-pid` with a fresh `--proc` makes `/proc/1` the sandbox's own init. The bind is
 the only writable path.
+
+**Corrected 2026-08-23, measured in Phase 1:** `--clearenv` is *not* the fix for the
+99-variable leak through `/proc/1/environ`. It sets the environment of the child, but
+bubblewrap itself is PID 1, and bubblewrap keeps the environment the server launched it
+with — so `/proc/1/environ` is the server's environment. **Spawn `bwrap` with `env: {}`.**
+Keep `--clearenv` as well: it is the separate control that stops the environment
+travelling from one command to the next. See `bubblewrap-lockdown-study.md` §2b.
 
 **Limits.** Per session, a cgroup v2 scope with `MemoryMax`, `TasksMax` and `CPUQuota`
 through `systemd-run --user --scope`. cgroup v2 is present with all controllers and

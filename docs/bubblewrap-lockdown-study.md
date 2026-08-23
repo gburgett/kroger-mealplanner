@@ -181,6 +181,79 @@ not run all worked, and containment held:
 
 ---
 
+## Part 2b — What building the image found, that reading about it did not
+
+Added 2026-08-23, after Phase 1 of `plans/0001` was built. Two of the
+assumptions above were wrong. Both were found by enumerating the finished image
+rather than by trusting the package list, which is the argument for keeping
+`sandbox-image/manifest.txt` in the repository.
+
+### The image still had two network clients after every rule in Part 2
+
+Deleting busybox and installing the GNU packages is not sufficient.
+
+* **`/usr/bin/ssl_client`** is a real binary from Alpine's `ssl_client` package,
+  not a busybox applet symlink. `find / -type l -lname '*busybox*' -delete`
+  leaves it in place. It is the TLS half of `busybox wget`, and it stays behind
+  when busybox goes.
+* **`/usr/lib/bash/`** holds Alpine's bash loadable builtins. One of them is
+  `accept`, which **listens on a TCP port**. `enable -f /usr/lib/bash/accept
+  accept` reopens the network from inside the one interpreter the product must
+  ship. Nothing needs any of the loadables, so the folder is deleted.
+
+`getent` was a third, and that one at least was already named by ADR 0006.
+
+The conclusion is not that the list in ADR 0006 is wrong. It is that a list of
+programs **not** to install cannot be complete, because it is written before the
+image exists. The manifest is the control that does not depend on foresight.
+
+### `--clearenv` does not fix the `/proc/1/environ` leak
+
+Part 2 and `sandbox-trade-study.md` both record the 99-variable leak through
+`/proc/1/environ`, and `--clearenv` was assumed to answer it. It does not.
+
+```
+$ bwrap --unshare-all --clearenv --setenv PATH /usr/bin ... -- bash -c \
+      'cat /proc/1/environ | tr "\0" "\n"'
+SHELL=/bin/bash
+npm_command=exec
+...                                     # 99 variables of the LAUNCHING process
+CLAUDE_CODE_MESSAGING_TOKEN=1aeaac6...
+```
+
+`--clearenv` sets the environment of the **child**. With `--unshare-pid`,
+bubblewrap itself is PID 1 inside the namespace, and bubblewrap keeps the
+environment it was launched with. So `/proc/1/environ` is the server's
+environment, which is the process that holds every tenant's credentials.
+
+The fix is to scrub the environment of the **bubblewrap process**, not of the
+command it runs — `spawn(..., { env: {} })` from the server.
+
+```
+$ env -i bwrap --unshare-all --clearenv --setenv PATH /usr/bin ... -- bash -c \
+      'cat /proc/1/environ | tr "\0" "\n"; env'
+PWD=/workspace
+HOME=/workspace
+SHLVL=1
+PATH=/usr/bin
+```
+
+Both controls are needed, and they are not the same control. Keep `--clearenv`:
+it is what stops the environment travelling from one command to the next.
+
+This changes one scenario and confirms another:
+
+* `@security Scenario: The server's own secrets are not visible to the agent`
+  passes only with the spawn scrubbed. Without it, it fails and it is the most
+  serious failure in the suite.
+* `@security Scenario: The sandbox cannot be used to attack the host` asserts
+  that `cat /proc/1/environ` **fails**. It still does not: `/proc` is mounted, so
+  the command succeeds and prints the four variables above. The scenario has to
+  assert the property, which is that the output holds nothing of the host and
+  nothing of the server.
+
+---
+
 ## Part 3 — Residual risks
 
 These belong in the record, not in a footnote.
