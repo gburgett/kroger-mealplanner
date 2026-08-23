@@ -254,6 +254,64 @@ This changes one scenario and confirms another:
 
 ---
 
+## Part 2c — What one command costs, through the whole product
+
+Added 2026-08-23, at the close of `plans/0001`. ADR 0008's Confirmation asks for
+the time of one command, against the 3.3 ms recorded above. `bench.ts` measures
+it. Read the ratios, not the absolute numbers: this VM has two processors, the
+benchmark shares them with whatever else runs, and consecutive passes of one
+stage were seen to differ by three times. The rounds are interleaved and the
+median of seven is reported, so a busy minute lands on every stage instead of on
+whichever one it reached. The range is printed beside each number.
+
+```
+2 processors, load average 1.01, median of 7 rounds of 10
+
+bwrap alone: no seccomp, no limits                 7.9 ms   (7.0–8.3)
++ seccomp + rlimits, no cgroup scope               7.9 ms   (7.2–8.7)
++ the cgroup scope: the sandbox as shipped        28.9 ms   (17.3–41.6)
++ MCP over loopback, no commit hook                45.3 ms   (12.7–53.3)
+a read-only command, as shipped                    73.6 ms   (66.6–95.6)
+a command that writes, so it commits               88.1 ms   (69.1–97.4)
+a real command: ls recipes/ | wc -l                86.6 ms   (81.1–97.5)
+```
+
+Four things this says.
+
+**The seccomp filter is free.** It costs nothing that this machine can measure.
+The filter is 41 instructions and the kernel runs it on syscall entry; it does
+not show. There is no argument for a weaker filter on the grounds of speed.
+
+**The cgroup scope is the most expensive single item, at about 21 ms.** It is
+not the cgroup. It is `systemd-run --user --scope`, which is a D-Bus round trip
+to the user manager before the command starts. The measurement was taken by
+running the same session with `useUserScope` off: `prlimit` and the filter stay,
+only the scope goes, and the cost goes with it. This is the price of `MemoryMax`
+and `TasksMax`, and for the single-household lens it buys a control the person
+never sees against latency the person always feels. For the multi-tenant lens it
+is the opposite way round, and the answer is probably to write the cgroup
+directly rather than to ask systemd for it — which the common-ancestor rule
+refuses while the server sits in a root-owned slice. That is an open question,
+not a decision.
+
+**The automatic commit costs about 28 ms, and it costs it on commands that
+change nothing.** The hook runs `git status --porcelain` to decide whether to
+commit, and that is a second bubblewrap sandbox — so a read-only `ls` pays for
+two. It is correct and it is honest, because the server cannot know what a
+command touched without asking. It is also the obvious thing to make cheaper
+later, and the obvious way is to stop asking git and start asking the
+filesystem.
+
+**3.3 ms is bubblewrap's number, and the product's is twenty times it.** Nothing
+here contradicts ADR 0008: the same machine measures bare bubblewrap at 7.9 ms
+under this load, so the sandbox is still the cheapest part of a command by a
+wide margin, and the alternative it beat was 33 ms of sandbox *before* any of
+the rest. But 3.3 ms is not what the person feels. What the person feels is
+about 75 ms, and two thirds of that is the cgroup scope and the commit hook —
+neither of which is the sandbox, and neither of which the trade study measured.
+
+---
+
 ## Part 3 — Residual risks
 
 These belong in the record, not in a footnote.
@@ -303,4 +361,12 @@ bwrap --help | grep -E 'seccomp|remount-ro|perms|chmod'
 # whether the limits are reachable
 stat -fc %T /sys/fs/cgroup; cat /sys/fs/cgroup/cgroup.controllers
 ls -d /sys/fs/cgroup/user.slice/user-$(id -u).slice
+
+# what one command costs, through the whole product (Part 2c)
+node bench.ts
 ```
+
+Part 2c's numbers come from `bench.ts` in the repository root. It is not a test
+and `pnpm test` does not run it: the scenarios assert behaviour, and a timing
+that varies by three times with the load cannot assert anything. Run it by hand
+when something in the sandbox, the limits or the commit hook changes.

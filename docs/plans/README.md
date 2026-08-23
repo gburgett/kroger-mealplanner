@@ -13,4 +13,4 @@ and deleted once its work is done — that is the difference between a plan and 
 
 | Plan | Title | Status |
 | --- | --- | --- |
-| [0001](0001-implement-the-core-features.md) | Implement the core features | ready to start |
+| [0001](0001-implement-the-core-features.md) | Implement the core features | done, 2026-08-23 |

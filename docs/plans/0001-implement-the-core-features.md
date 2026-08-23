@@ -1,6 +1,13 @@
 # Plan 0001 — Implement the core features
 
-**Status:** ready to start. Not started.
+**Status:** done, 2026-08-23. All six phases built, `pnpm test` green at 129 scenarios.
+Read the amendments inside the phases before trusting the prose around them. Six of
+this plan's assumptions were wrong, and each is marked where it was found: one in
+Phase 1 (deleting busybox does not remove every network client), one in Phase 2
+(`--clearenv` does not stop the server's environment reaching `/proc/1/environ`), and
+four in Phase 3, items 5 to 8. Phase 6 carries one change of scope rather than a
+correction. The two that touched the security boundary are Phase 2's, and Phase 3's
+item 8 — `read_file` and `write_file` do not go through bubblewrap.
 **Decides nothing.** The decisions are in ADR 0002, 0004, 0006, 0007 and 0008. This
 plan is how they get built, and in what order.
 **Definition of done:** `pnpm test` green with `--tags "not @future"`.

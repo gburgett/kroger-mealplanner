@@ -108,11 +108,20 @@ export class Session {
 
   /** One command, one bubblewrap invocation. Serialised against the others. */
   run(command: string, options: RunOptions = {}): Promise<RunResult> {
+    return this.enqueue(() => this.#runNow(command, options));
+  }
+
+  /**
+   * Take the session's turn, and hold it until the work is done.
+   *
+   * write_file uses this: it writes and then commits, and a bash command
+   * arriving between the two would be committed under the wrong message — or
+   * would race it on .git/index.lock, which is a failure an agent cannot
+   * reason about, because it did not create the lock.
+   */
+  enqueue<T>(work: () => Promise<T>): Promise<T> {
     if (this.#closed) return Promise.reject(new Error('the sandbox session is closed'));
-    const next = this.#queue.then(
-      () => this.#runNow(command, options),
-      () => this.#runNow(command, options),
-    );
+    const next = this.#queue.then(work, work);
     this.#queue = next.catch(() => undefined);
     return next;
   }

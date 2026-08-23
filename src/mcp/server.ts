@@ -14,6 +14,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import { scaffold } from '../corpus/scaffold.ts';
+import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, type Clock } from '../git/repository.ts';
 import { open, type Session, type SessionOptions } from '../sandbox/session.ts';
 import {
@@ -59,6 +60,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // scaffold rather than an empty tree.
   await scaffold(session.folder);
   await ensureRepository(session, now);
+  // From here on, every command that changes a file commits itself.
+  commitAfterEveryCommand(session, now);
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -152,7 +155,7 @@ async function handle(
   await transport.handleRequest(request, response);
 }
 
-export function buildMcpServer(session: Session, folder: string, _now: Clock): McpServer {
+export function buildMcpServer(session: Session, folder: string, now: Clock): McpServer {
   const mcp = new McpServer(
     { name: 'kroger-mealplanner', version: '0.1.0' },
     {
@@ -207,7 +210,13 @@ export function buildMcpServer(session: Session, folder: string, _now: Clock): M
       outputSchema: writeFileOutputSchema,
     },
     async ({ path: requested, content }) => {
-      const bytes = await writeCorpusFile(folder, requested, content);
+      // Written and committed under one turn of the session, so a bash command
+      // arriving in between cannot be committed under this message.
+      const bytes = await session.enqueue(async () => {
+        const written = await writeCorpusFile(folder, requested, content);
+        await commitIfChanged(session, `write_file ${requested}`, now());
+        return written;
+      });
       return {
         content: [{ type: 'text', text: `wrote ${bytes} bytes to ${requested}` }],
         structuredContent: { path: requested, bytes },
