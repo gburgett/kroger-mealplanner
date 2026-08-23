@@ -2,17 +2,45 @@
 // bubblewrap child, so there is no daemon, no RPC and no KVM. See ADR 0002 and
 // ADR 0008.
 //
-// The transport is MCP Streamable HTTP bound to loopback, so a Cucumber `When`
-// step is a genuine web request against the real API rather than a function
-// call that skips the transport.
+// The transport is MCP Streamable HTTP, so a Cucumber `When` step is a genuine
+// web request against the real API rather than a function call that skips the
+// transport.
+//
+// THERE ARE NOW TWO BOUNDARIES, AND THIS FILE OWNS THE OUTER ONE. The sandbox
+// contains the agent once it is inside. Authentication decides whether it gets
+// in at all, and it matters because loopback stopped being the boundary the
+// moment the machine went on the public internet. See ADR 0009.
+//
+// Three kinds of path, and the difference is the whole design:
+//
+//   open           the OAuth discovery, registration and token endpoints. An
+//                  MCP client has no browser and cannot do an exe.dev login,
+//                  so these MUST be reachable with no credential at all.
+//   exe.dev        /authorize and /consent. The only pages a person opens.
+//   bearer token   /mcp. Ours, minted by us, never an exe.dev token.
+//
+// exe.dev cannot help with the first group and we cannot help with the second,
+// which is why the split falls exactly here. It is not a compromise: the proxy
+// has one public port and one on/off switch for the whole machine, so every
+// path has to decide for itself. docs/adr/0009 works through why.
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthRouter,
+} from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 
+import { notTheHouseholdPage } from '../auth/consent.ts';
+import { EXEDEV_PREFIX, identityOf, loginRedirect, sameEmail } from '../auth/exedev.ts';
+import { MealPlanOAuthProvider } from '../auth/provider.ts';
+import { AuthStore, assertOutsideFolder, defaultStorePath } from '../auth/store.ts';
 import { scaffold } from '../corpus/scaffold.ts';
 import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, type Clock } from '../git/repository.ts';
@@ -34,6 +62,10 @@ import {
 } from './tools.ts';
 
 export const MCP_PATH = '/mcp';
+export const CONSENT_PATH = '/consent';
+
+/** The household. One entry, on purpose — see ADR 0009. */
+export const DEFAULT_OWNER = 'gordon@gordonburgett.net';
 
 export type ServerOptions = Omit<SessionOptions, 'tenant'> & {
   tenant?: string;
@@ -42,18 +74,37 @@ export type ServerOptions = Omit<SessionOptions, 'tenant'> & {
   port?: number;
   /** Frozen by the scenarios so git dates are deterministic. */
   now?: Clock;
+  /** The only email that may approve a client. */
+  owner?: string;
+  /**
+   * The address clients reach this server at, and the OAuth issuer.
+   *
+   * NEVER derived from the Host or X-Forwarded-Host header. An issuer taken
+   * from a request header is host-header injection into the metadata document:
+   * a client that follows it would be sent to the attacker's token endpoint
+   * carrying our authorisation code.
+   */
+  publicUrl?: string;
+  /** The token store. Must be outside the meal-plan folder. */
+  statePath?: string;
 };
 
 export type RunningServer = {
+  /** The MCP endpoint, which is what an MCP client is given. */
   url: string;
+  /** The root, which is what a browser and the OAuth metadata are given. */
+  baseUrl: string;
   port: number;
   session: Session;
+  store: AuthStore;
+  provider: MealPlanOAuthProvider;
   close(): Promise<void>;
 };
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const tenant = options.tenant ?? 'household';
   const now = options.now ?? (() => new Date());
+  const owner = options.owner ?? process.env.MEALPLAN_OWNER ?? DEFAULT_OWNER;
 
   const session = await open({ ...options, tenant });
   // The folder first, then the repository, so the first commit holds the
@@ -63,21 +114,25 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // From here on, every command that changes a file commits itself.
   commitAfterEveryCommand(session, now);
 
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  const statePath = options.statePath ?? process.env.MEALPLAN_STATE ?? defaultStorePath();
+  // Refused here rather than discovered later: a store inside the folder is the
+  // agent holding the keys to its own front door.
+  assertOutsideFolder(statePath, session.folder);
+  const store = await AuthStore.open(statePath);
+  const provider = new MealPlanOAuthProvider({ store, owner, folder: session.folder });
 
+  // The port has to be known before the app is built, because the OAuth issuer
+  // is part of it and the tests ask for port 0. So: listen first, then build
+  // and attach. A request that lands in the gap is told to try again rather
+  // than being dropped on the floor.
+  let app: Express | null = null;
   const http = createServer((request, response) => {
-    handle(request, response, session, transports, options.folder, now).catch((error: unknown) => {
-      if (!response.headersSent) {
-        response.writeHead(500, { 'content-type': 'application/json' });
-      }
-      response.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
-          id: null,
-        }),
-      );
-    });
+    if (app === null) {
+      response.writeHead(503, { 'content-type': 'text/plain', 'retry-after': '1' });
+      response.end('the meal planner is still starting\n');
+      return;
+    }
+    app(request, response);
   });
 
   // Nagle's algorithm against delayed ACK costs about 38 ms on every single
@@ -87,17 +142,23 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // would have felt.
   http.on('connection', (socket) => socket.setNoDelay(true));
 
-  // Loopback only. The sandbox is the boundary for the agent; this is the
-  // boundary for the transport, and the product is one household on one
-  // machine.
   const host = options.host ?? '127.0.0.1';
   await new Promise<void>((resolve) => http.listen(options.port ?? 0, host, resolve));
   const port = (http.address() as AddressInfo).port;
 
+  const baseUrl = (options.publicUrl ?? process.env.MEALPLAN_PUBLIC_URL ?? `http://${host}:${port}`)
+    .replace(/\/+$/, '');
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  app = buildApp({ baseUrl, host, port, session, provider, owner, now, transports });
+
   return {
-    url: `http://${host}:${port}${MCP_PATH}`,
+    url: `${baseUrl}${MCP_PATH}`,
+    baseUrl,
     port,
     session,
+    store,
+    provider,
     async close() {
       for (const transport of transports.values()) {
         await transport.close().catch(() => undefined);
@@ -110,21 +171,192 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   };
 }
 
-async function handle(
-  request: IncomingMessage,
-  response: ServerResponse,
-  session: Session,
-  transports: Map<string, StreamableHTTPServerTransport>,
-  folder: string,
-  now: Clock,
+function buildApp(context: {
+  baseUrl: string;
+  host: string;
+  port: number;
+  session: Session;
+  provider: MealPlanOAuthProvider;
+  owner: string;
+  now: Clock;
+  transports: Map<string, StreamableHTTPServerTransport>;
+}): Express {
+  const { baseUrl, provider, owner } = context;
+  const app = express();
+  app.disable('x-powered-by');
+  // Behind the exe.dev proxy, which sets X-Forwarded-Proto and X-Forwarded-For.
+  // This affects req.protocol and req.ip only; the issuer is still the
+  // configured one, never a header.
+  app.set('trust proxy', true);
+
+  // --- the exe.dev gate, in front of everything a person opens ------------
+  //
+  // This runs BEFORE mcpAuthRouter, which is what puts it in front of the
+  // router's own /authorize. provider.authorize() is handed a Response and no
+  // Request, so it cannot read a header — the identity has to arrive on
+  // res.locals, and this is what puts it there.
+  app.use(['/authorize', CONSENT_PATH], householdOnly(owner));
+
+  // --- the consent page's Approve button ----------------------------------
+  app.post(
+    CONSENT_PATH,
+    express.urlencoded({ extended: false }),
+    (request, response, next) => {
+      completeConsent(request, response, provider).catch(next);
+    },
+  );
+
+  // --- the OAuth endpoints ------------------------------------------------
+  //
+  // /register, /authorize, /token, /revoke and both metadata documents. Open at
+  // the proxy by necessity: an MCP client cannot complete a browser login, so
+  // if these needed one there would be no way to get a token at all.
+  app.use(
+    mcpAuthRouter({
+      provider,
+      issuerUrl: new URL(baseUrl),
+      baseUrl: new URL(baseUrl),
+      resourceServerUrl: new URL(`${baseUrl}${MCP_PATH}`),
+      resourceName: 'Meal planner',
+      // Registration secrets that expire would make the household re-register
+      // an assistant every month for no gain. 0 means they do not.
+      clientRegistrationOptions: { clientSecretExpirySeconds: 0 },
+    }),
+  );
+
+  // --- the MCP endpoint ---------------------------------------------------
+  const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(new URL(`${baseUrl}${MCP_PATH}`));
+  app.all(
+    MCP_PATH,
+    requireBearerAuth({ verifier: provider, resourceMetadataUrl }),
+    (request, response, next) => {
+      // No body parser on this route. The transport reads the stream itself,
+      // and a parser here would consume it and leave the transport waiting.
+      handleMcp(request, response, context).catch(next);
+    },
+  );
+
+  // --- everything else ----------------------------------------------------
+  app.use((request, response) => {
+    response.status(404).type('text/plain').send(
+      `no such path: ${request.path}. The MCP endpoint is ${MCP_PATH}, ` +
+        `and the OAuth metadata is at /.well-known/oauth-protected-resource${MCP_PATH}.\n`,
+    );
+  });
+
+  app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!response.headersSent) response.status(500).type('text/plain');
+    response.end(`${message}\n`);
+  });
+
+  return app;
+}
+
+/**
+ * Let the household through, and nobody else.
+ *
+ * Three answers, and each one names what it saw:
+ *   no identity     -> the exe.dev login, and come back here afterwards
+ *   another account -> 403, naming both emails, because a person with two
+ *                      accounts needs to be told which one to use
+ *   the household   -> res.locals.identity, and on to the next handler
+ */
+export function householdOnly(owner: string) {
+  return (request: Request, response: Response, next: NextFunction): void => {
+    // Nothing of ours may live under the prefix exe.dev reserves.
+    if (request.path.startsWith(EXEDEV_PREFIX)) {
+      response.status(404).type('text/plain').send('that path belongs to exe.dev\n');
+      return;
+    }
+
+    const identity = identityOf(request.headers);
+    if (!identity) {
+      response.setHeader('Cache-Control', 'no-store');
+      response.redirect(302, loginRedirect(request.originalUrl));
+      return;
+    }
+
+    if (!sameEmail(identity.email, owner)) {
+      response.setHeader('Cache-Control', 'no-store');
+      response.status(403).type('html').send(notTheHouseholdPage(identity.email, owner));
+      return;
+    }
+
+    response.locals.identity = identity;
+    next();
+  };
+}
+
+/**
+ * The Approve button. This is the only place an authorisation code is minted,
+ * which is what makes the click, rather than the request, the thing that grants
+ * access.
+ */
+async function completeConsent(
+  request: Request,
+  response: Response,
+  provider: MealPlanOAuthProvider,
 ): Promise<void> {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  if (url.pathname !== MCP_PATH) {
-    response.writeHead(404, { 'content-type': 'text/plain' });
-    response.end(`no such path: ${url.pathname}. The MCP endpoint is ${MCP_PATH}.\n`);
+  const body = request.body as Record<string, unknown> | undefined;
+  const consentId = typeof body?.consent_id === 'string' ? body.consent_id : '';
+  const pending = provider.desk.take(consentId);
+
+  if (!pending) {
+    response
+      .status(400)
+      .type('text/plain')
+      .send(
+        'that consent page has expired or was already used. ' +
+          'Ask the assistant to connect again, and approve the new page.\n',
+      );
     return;
   }
 
+  const identity = response.locals.identity as { email: string };
+  // The page was rendered for one account. If the browser signed out and back
+  // in as somebody else between the page and the click, that is a different
+  // person answering the question, and the answer does not carry over.
+  if (!sameEmail(identity.email, pending.identity.email)) {
+    response
+      .status(403)
+      .type('text/plain')
+      .send(
+        `this page was opened by ${pending.identity.email}, and the click came from ` +
+          `${identity.email}. Start again.\n`,
+      );
+    return;
+  }
+
+  const redirect = new URL(pending.params.redirectUri);
+  if (body?.decision !== 'approve') {
+    redirect.searchParams.set('error', 'access_denied');
+    redirect.searchParams.set('error_description', 'the household did not approve this client');
+    if (pending.params.state !== undefined) redirect.searchParams.set('state', pending.params.state);
+    response.redirect(302, redirect.href);
+    return;
+  }
+
+  const code = await provider.issueCode(pending.client, pending.params, identity);
+  redirect.searchParams.set('code', code);
+  if (pending.params.state !== undefined) redirect.searchParams.set('state', pending.params.state);
+  response.setHeader('Cache-Control', 'no-store');
+  response.redirect(302, redirect.href);
+}
+
+async function handleMcp(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: {
+    session: Session;
+    baseUrl: string;
+    host: string;
+    port: number;
+    now: Clock;
+    transports: Map<string, StreamableHTTPServerTransport>;
+  },
+): Promise<void> {
+  const { transports } = context;
   const header = request.headers['mcp-session-id'];
   const sessionId = Array.isArray(header) ? header[0] : header;
   const existing = sessionId ? transports.get(sessionId) : undefined;
@@ -145,14 +377,34 @@ async function handle(
     // Every tool here is request/response and there is nothing to stream, so
     // a plain JSON reply rather than an SSE stream for each call.
     enableJsonResponse: true,
+    // The listener is no longer on loopback, so a page in a browser could point
+    // a DNS name at it and speak to it as the household's own machine. The Host
+    // header has to match somewhere we actually answer.
+    enableDnsRebindingProtection: true,
+    allowedHosts: allowedHostsFor(context),
   });
   transport.onclose = () => {
     if (transport.sessionId) transports.delete(transport.sessionId);
   };
 
-  const mcp = buildMcpServer(session, folder, now);
+  const mcp = buildMcpServer(context.session, context.session.folder, context.now);
   await mcp.connect(transport);
   await transport.handleRequest(request, response);
+}
+
+/** Every Host header this server legitimately answers to. */
+function allowedHostsFor(context: { baseUrl: string; host: string; port: number }): string[] {
+  const configured = new URL(context.baseUrl);
+  const hosts = new Set<string>([
+    configured.host,
+    configured.hostname,
+    `${context.host}:${context.port}`,
+    context.host,
+  ]);
+  // Binding 0.0.0.0 means "every interface", which is not a name anybody sends.
+  hosts.delete('0.0.0.0');
+  hosts.delete(`0.0.0.0:${context.port}`);
+  return [...hosts];
 }
 
 export function buildMcpServer(session: Session, folder: string, now: Clock): McpServer {

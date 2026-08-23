@@ -4,16 +4,38 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
 
-import { startServer } from './src/mcp/server.ts';
+import { DEFAULT_OWNER, startServer } from './src/mcp/server.ts';
+import { defaultStorePath } from './src/auth/store.ts';
 
 const folder = process.env.MEALPLAN_FOLDER ?? path.join(homedir(), 'meal-plan');
 const port = Number(process.env.MEALPLAN_PORT ?? 8765);
+// Loopback by default. Going public is a deliberate act, and it takes more than
+// this variable: the port has to be pinned and the machine marked public with
+// `ssh exe.dev share ...`. See docs/deploying-behind-exe-dev.md.
 const host = process.env.MEALPLAN_HOST ?? '127.0.0.1';
+const owner = process.env.MEALPLAN_OWNER ?? DEFAULT_OWNER;
+const statePath = process.env.MEALPLAN_STATE ?? defaultStorePath();
+const publicUrl = process.env.MEALPLAN_PUBLIC_URL;
 
-const running = await startServer({ folder, host, port });
+// The OAuth issuer must be an address clients can actually reach. Guessing it
+// from the bind address would put "http://0.0.0.0:8765" in a metadata document
+// that a real client then tries to follow.
+if (host !== '127.0.0.1' && host !== 'localhost' && !publicUrl) {
+  process.stderr.write(
+    `MEALPLAN_HOST is ${host}, so this server is reachable from outside the machine, ` +
+      'but MEALPLAN_PUBLIC_URL is not set.\n' +
+      'It is the OAuth issuer and it must be the HTTPS address clients reach, for example:\n' +
+      '  MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz\n',
+  );
+  process.exit(1);
+}
+
+const running = await startServer({ folder, host, port, owner, statePath, publicUrl });
 
 process.stderr.write(`meal planner on ${running.url}\n`);
 process.stderr.write(`meal-plan folder: ${folder}\n`);
+process.stderr.write(`the household is ${owner}\n`);
+process.stderr.write(`tokens: ${statePath}\n`);
 process.stderr.write(
   running.session.useUserScope
     ? 'resource limits: cgroup v2 scope, plus rlimits\n'
