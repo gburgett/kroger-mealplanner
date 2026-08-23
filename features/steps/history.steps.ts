@@ -72,3 +72,11 @@ Given(
     }
   },
 );
+
+Then('the output says the folder was initialised', function (this: MealPlanWorld) {
+  assert.match(
+    this.output(),
+    /initialis|initializ/i,
+    'the first commit does not say what it was for',
+  );
+});

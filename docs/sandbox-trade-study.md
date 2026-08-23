@@ -407,7 +407,15 @@ measuring, and this prototype can measure them cheaply:
 - **Concurrency is unspecified and will bite.** Two commands against one tenant
   folder race on `index.lock` today. Single-tenant that is a rare annoyance;
   multi-tenant, with an agent issuing parallel tool calls, it is routine. This
-  is a genuine gap in `history.feature`.
+  is a genuine gap in `history.feature`, and it stays open on purpose: two
+  scenarios for it were written during ADR 0008's implementation and then
+  removed, because concurrent commands are not a requirement of the
+  single-household lens. They did not pass. `Session#enqueue` serialises the
+  commands, so the commit is safe, but a burst of tool calls on one MCP session
+  did not all come back — the run stopped at the harness timeout rather than at
+  an assertion. Whatever holds them is above the sandbox, in the server or the
+  transport, and it is unmeasured. Anybody costing the multi-tenant lens must
+  measure it before quoting a number for parallel tool calls.
 - **Does the folder survive not being local?** Every scenario in `corpus.feature`
   assumes POSIX semantics. Over S3 or a VFS, `sed -i`, `mv` and `git` behave
   differently. Running the existing suite unchanged against a non-local backend

@@ -243,9 +243,16 @@ nowhere to leak to.
 
 Targets `history.feature`.
 
-Then: the full suite green; add the concurrency scenarios trade study §11.7 names — two
-commands racing on `.git/index.lock` — and confirm Phase 2's per-session serialisation
-answers them; record the ADR 0008 confirmation measurements.
+Then: the full suite green; record the ADR 0008 confirmation measurements.
+
+**Amended.** This phase originally added the concurrency scenarios that trade study
+§11.7 names — two commands racing on `.git/index.lock`. They were written, and they
+are removed again: concurrent commands are not a requirement of this iteration. The
+lens is one household with one assistant, which sends one command and waits for the
+answer. The serialisation Phase 2 builds (`Session#enqueue`) stays, because the
+automatic commit needs it whether or not anything races; what is gone is the claim
+that the scenarios prove it. §11.7 stays open, and it belongs to the multi-tenant
+lens, where the adversary is a paying customer with unlimited attempts.
 
 ---
 
