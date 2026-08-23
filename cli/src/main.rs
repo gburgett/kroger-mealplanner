@@ -14,6 +14,8 @@
 mod corpus;
 mod json;
 mod quantity;
+mod sections;
+mod shopping_list;
 mod validate;
 
 use std::env;
@@ -46,10 +48,7 @@ fn main() -> ExitCode {
 
     match arguments.first().map(String::as_str) {
         Some("validate") => validate_command(&root, &arguments[1..]),
-        Some("shopping-list") => {
-            eprintln!("mealplan: `shopping-list` is not built yet.");
-            ExitCode::from(2)
-        }
+        Some("shopping-list") => shopping_list_command(&root, &arguments[1..]),
         Some("--help") | Some("-h") | Some("help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -63,6 +62,69 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn shopping_list_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
+    let mut from: Option<String> = None;
+    let mut to: Option<String> = None;
+    let mut include_staples = false;
+
+    let mut index = 0;
+    while index < arguments.len() {
+        let argument = arguments[index].as_str();
+        match argument {
+            "--include-staples" => include_staples = true,
+            "--from" | "--to" => {
+                let Some(value) = arguments.get(index + 1) else {
+                    eprintln!("mealplan shopping-list: {argument} needs a date, written as YYYY-MM-DD.");
+                    return ExitCode::from(2);
+                };
+                index += 1;
+                if argument == "--from" { from = Some(value.clone()) } else { to = Some(value.clone()) }
+            }
+            other => {
+                eprintln!(
+                    "mealplan shopping-list: there is no `{other}` option. \
+                     It takes --from YYYY-MM-DD, --to YYYY-MM-DD and --include-staples."
+                );
+                return ExitCode::from(2);
+            }
+        }
+        index += 1;
+    }
+
+    let (Some(from), Some(to)) = (from, to) else {
+        eprintln!(
+            "mealplan shopping-list: --from and --to are both needed, and both take a date \
+             written as YYYY-MM-DD — for example `mealplan shopping-list --from 2026-08-24 \
+             --to 2026-08-30`."
+        );
+        return ExitCode::from(2);
+    };
+
+    for (flag, value) in [("--from", &from), ("--to", &to)] {
+        if !corpus::is_date(value) {
+            eprintln!(
+                "mealplan shopping-list: {flag} {value} is not a date. A date is written as \
+                 YYYY-MM-DD, for example 2026-08-25."
+            );
+            return ExitCode::from(2);
+        }
+    }
+
+    if to < from {
+        eprintln!(
+            "mealplan shopping-list: --to {to} is before --from {from}. The end date cannot come \
+             before the start date."
+        );
+        return ExitCode::from(2);
+    }
+
+    ExitCode::from(shopping_list::run(root, shopping_list::Request {
+        from: &from,
+        to: &to,
+        include_staples,
+    }) as u8)
 }
 
 fn validate_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
