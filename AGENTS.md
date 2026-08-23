@@ -38,8 +38,10 @@ Consequences worth internalising before changing anything:
   not optional and not "later".
 
 **UI exists only for setup the MCP interface cannot do**, i.e. a flow that needs
-a browser and a human at a keyboard. Today that is exactly one thing: the Kroger
-OAuth consent redirect. Anything else belongs behind the sandbox.
+a browser and a human at a keyboard. There are exactly two: **our own consent
+page**, where the household approves an assistant (ADR 0009), and the Kroger
+OAuth consent redirect, still to come. Both sit behind the same exe.dev gate.
+Anything else belongs behind the sandbox.
 
 ## The stack
 
@@ -50,6 +52,26 @@ OAuth consent redirect. Anything else belongs behind the sandbox.
 | MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
 | Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
+| Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
+| Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
+
+**The server is on the public internet, so there are two boundaries, not one.**
+The sandbox decides what an agent may do once it is inside; OAuth decides whether
+it gets in at all. Three traps that the exe.dev proxy sets, all recorded in
+ADR 0009 and worth knowing before touching `src/mcp/server.ts`:
+
+- **Only one port can be public, and auth is one switch for the whole machine.**
+  There is no per-path exclusion, so the "protected port for the login page, open
+  port for MCP" design cannot be built. Every path decides for itself instead.
+- **The OAuth endpoints must stay open.** An MCP client has no browser and cannot
+  complete an exe.dev login, so a login on `/register` or `/token` makes a first
+  credential impossible to get. Only `/authorize` and `/consent` are gated.
+- **The issuer is configuration, never a header.** An issuer read from `Host` is
+  host-header injection into the metadata document.
+
+The identity headers are not yet proven unforgeable — see
+`docs/exedev-identity-header-study.md`, which is open, and which explains why the
+measurement cannot be made from the VM.
 
 **The lens is one household on one machine. Multi-tenancy is an open research
 question, not a requirement.** That is what ADR 0008 settled, and it is why the
@@ -181,5 +203,6 @@ commands. Free to design in now, a rewrite to retrofit.
 ## Out of scope for now
 
 Kroger authentication and cart submission. The sandbox technology is decided —
-see ADR 0008. The plan for building it is in `docs/plans/`. Keep shopping-list lines shaped so they can be matched to a real
+see ADR 0008, and our own authentication is decided in ADR 0009. The plans for
+building both are in `docs/plans/`. Keep shopping-list lines shaped so they can be matched to a real
 product later: item name, quantity, unit.

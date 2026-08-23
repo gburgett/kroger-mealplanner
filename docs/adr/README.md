@@ -23,6 +23,7 @@ decision, write a new record. Give the old record the status
 | [0006](0006-the-sandbox-has-no-interpreter-and-no-network-client.md) | The sandbox has no interpreter and no network client | accepted |
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |
 | [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted |
+| [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and

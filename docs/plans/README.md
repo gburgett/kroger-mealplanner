@@ -14,3 +14,4 @@ and deleted once its work is done — that is the difference between a plan and 
 | Plan | Title | Status |
 | --- | --- | --- |
 | [0001](0001-implement-the-core-features.md) | Implement the core features | done, 2026-08-23 |
+| [0002](0002-authenticate-the-mcp-server.md) | Authenticate the MCP server | done, 2026-08-23, except Phase 0 |

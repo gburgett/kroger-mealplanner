@@ -15,6 +15,7 @@ exactly one of them:
 
 | Layer | File | What it pins down |
 | --- | --- | --- |
+| The door | `auth.feature` | Who gets in at all, and who may approve them |
 | The sandbox | `sandbox.feature` | What commands can do, and what they must never do |
 | The corpus | `corpus.feature` · `history.feature` | Folder layout, document shape, validation, git history |
 | The work | `recipes` · `dinners` · `shopping_list` · `pantry` | What the housewife actually gets out of it |
@@ -57,6 +58,12 @@ filesystem rather than something we have to enforce.
   way round adds nothing. **`When` steps must go through the real MCP server**:
   real transport, real sandbox, real command. The interface under test is never
   short-circuited.
+- **Every scenario authenticates**, because since ADR 0009 authentication is part
+  of that interface. The World registers a client, is shown the consent page as
+  the household and exchanges the code, all before the first `Given` runs. A
+  flag that turned it off for the tests would be exactly the short-circuit the
+  line above forbids. The only things stood in for are the exe.dev proxy, which
+  is one header, and the browser, which is a fetch and a form POST.
 - **Errors are actionable.** Every failure scenario asserts that the message
   names the file, the line, or the argument at fault. An agent can recover from
   "line 7 of recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`"; it
