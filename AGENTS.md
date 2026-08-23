@@ -48,6 +48,7 @@ OAuth consent redirect. Anything else belongs behind the sandbox.
 | Sandbox | multi-tenant cost and containment | agentOS | ADR 0001 |
 | MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
 | `mealplan` CLI | speed inside a WebAssembly sandbox | Rust → `wasm32-wasip1` | ADR 0003 |
+| Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
 
 Two languages, on purpose: the drivers genuinely differ, and the interface
 between them is a command line and an exit status — no shared library, no
@@ -57,6 +58,12 @@ format defined in exactly one place.
 
 `node server.ts` starts the server. There is no build step — Node 24 strips the
 types itself, so avoid enums and namespaces, which it cannot.
+
+**Use `pnpm`, never `npm install`.** The settings in `pnpm-workspace.yaml` block
+dependency build scripts and refuse packages published in the last seven days.
+This is the one defence that matters for a risk the sandbox does not cover: the
+server's dependencies run *outside* it, in the process holding tenant
+credentials. Commit `pnpm-lock.yaml`; use `--frozen-lockfile` in CI.
 
 ## We practice BDD
 

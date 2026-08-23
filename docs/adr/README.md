@@ -18,3 +18,4 @@ decision, write a new record. Give the old record the status
 | [0001](0001-use-agentos-for-the-sandbox.md) | Use agentOS for the sandbox | accepted |
 | [0002](0002-use-typescript-for-the-mcp-server.md) | Use TypeScript on Node.js for the MCP server | accepted |
 | [0003](0003-use-rust-for-the-mealplan-cli.md) | Use Rust for the mealplan CLI | accepted |
+| [0004](0004-use-pnpm-for-node-dependencies.md) | Use pnpm for Node.js dependencies | accepted |
