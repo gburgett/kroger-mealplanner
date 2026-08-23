@@ -164,6 +164,29 @@ Three scenarios must change, plus one new one:
    tests the same property and stays as written.
 4. **New:** the image contents match `sandbox-image/manifest.txt`.
 
+**Four more, found by running the suite rather than by reading it.** Recorded here
+because the plan claimed the rest passed "exactly as written", and four did not:
+
+5. **`Scenario Outline: Ordinary file and text commands are available`** has three rows
+   — `cp README.md README.bak`, `mv README.bak README.copy`, `rm README.copy` — where
+   each depends on the row before it. Every row is a separate scenario with a fresh
+   folder, so rows two and three always failed. Folded into one self-contained row.
+   `grep -r ingredients .` also exits 1 against the scaffolded README, which is `grep`
+   working correctly; the README says "ingredients" now.
+6. **`Scenario: A command that forks without end is stopped`** drives the classic
+   `:() { :|:& }; :`, which backgrounds every fork. The shell that starts it returns
+   success in milliseconds whatever the sandbox does, so the scenario could not observe
+   the limit at all. Without the `&`, each level waits for its children and the process
+   limit becomes something the command finds out about. It now fails, at the wall-clock
+   timeout, with the host at load 0.5.
+7. **New `@security`:** the seccomp filter, proved on its own. ADR 0008's Confirmation
+   #6 says not to assume it. `gawk` opening `/inet/tcp/…` is the case: a network
+   namespace alone would create the socket and fail later on the route, so
+   *Operation not permitted* is the `socket` call being refused and nothing else.
+8. **New `@security`:** `read_file` and `write_file` do not go through bubblewrap, so
+   they never had the mount namespace's containment. A symbolic link an agent plants
+   dangles in the sandbox and resolves on the host. Scenarios for both tools.
+
 ---
 
 ## Phase 4 — `mealplan validate`

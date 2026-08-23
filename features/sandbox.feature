@@ -105,16 +105,21 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | wc -l README.md                  |
       | sort README.md                   |
       | mkdir -p dinners                 |
-      | cp README.md README.bak          |
-      | mv README.bak README.copy        |
-      | rm README.copy                   |
+      | cp README.md copy.md && mv copy.md moved.md && rm moved.md |
       | sed -n '1,3p' README.md          |
 
   @security
-  Scenario Outline: The network is unreachable
+  Scenario Outline: No command that can reach the network exists in the sandbox
+    The image is built rather than borrowed, so containment does not depend on
+    one setting being correct. None of these programs is in it. This scenario
+    asserts what is actually true — that the command cannot be used — because a
+    "command not found" is not evidence about the network. The scenario that
+    proves the network is refused is "History cannot be pushed anywhere", and it
+    works because git IS in the image.
+
     When I run "<command>"
     Then the command fails
-    And the error output explains that network access is not allowed
+    And the error output says the command does not exist
 
     Examples:
       | command                                  |
@@ -122,7 +127,33 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | wget https://example.com                 |
       | nc example.com 80                        |
       | getent hosts example.com                 |
-      | python3 -c "import socket; socket.create_connection(('example.com',80))" |
+      | ssl_client                               |
+      | python3 -c "print(1)"                    |
+      | node -e "1"                              |
+      | perl -e "1"                              |
+      | gcc --version                            |
+      | busybox wget https://example.com         |
+
+  @security
+  Scenario: The seccomp filter refuses a socket to a program that is in the image
+    gawk can open a socket through its /inet/tcp special files, and gawk is in
+    the image because the specifications need awk. A network namespace alone
+    would let the socket be created and fail later, when it found no route.
+    "Operation not permitted" is the socket call itself being refused, which is
+    the filter and nothing else. See ADR 0008 and sandbox-image/seccomp.
+
+    When I run "awk 'BEGIN { print \"x\" |& \"/inet/tcp/0/example.com/80\" }'"
+    Then the command fails
+    And the error output mentions "Operation not permitted"
+
+  @security
+  Scenario: The image holds only the programs it is recorded as holding
+    An image that grows without a record is how ADR 0006 is lost. The list was
+    written by reading the built image, because two network clients — ssl_client
+    and bash's loadable "accept" builtin — were in it and on nobody's list.
+
+    When I list every program in the sandbox
+    Then the list matches "sandbox-image/manifest.txt"
 
   @security
   Scenario Outline: Nothing outside the meal-plan folder is readable
@@ -148,9 +179,40 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the command fails
 
   @security
-  Scenario: The sandbox cannot be used to attack the host
-    When I run "cat /proc/1/environ"
-    Then the command fails
+  Scenario Outline: The file tools cannot be steered outside the folder either
+    read_file and write_file do not run in bubblewrap — the server holds the
+    folder and reads it directly — so they do not get the mount namespace for
+    free. A symbolic link an agent plants dangles in the sandbox and resolves on
+    the host, which is the one way a path could leave the folder without a
+    command being run.
+
+    Given I have run "ln -s /etc/passwd recipes/escape.md"
+    When I read the file "<path>"
+    Then the file tool refuses, and names the path
+
+    Examples:
+      | path                     |
+      | recipes/escape.md        |
+      | ../../etc/passwd         |
+      | /etc/passwd              |
+
+  @security
+  Scenario: Writing through the file tool cannot leave the folder
+    When I write the file "../escape.md" with "anything"
+    Then the file tool refuses, and names the path
+
+  @security
+  Scenario: /proc/1 is the sandbox's own init and holds nothing of the host
+    This scenario used to assert that "cat /proc/1/environ" fails. It does not:
+    /proc is mounted, so the command succeeds and prints the environment of pid
+    1. What matters is whose environment that is. bubblewrap IS pid 1, and it
+    keeps what it was launched with, so the server's own environment leaks here
+    unless the spawn is scrubbed as well as --clearenv. It was 99 variables when
+    it was measured. See docs/bubblewrap-lockdown-study.md §2b.
+
+    When I run "cat /proc/1/environ | tr '\0' '\n'"
+    Then the command succeeds
+    And the output holds nothing from the server's own environment
 
   @security
   Scenario: The server's own secrets are not visible to the agent
@@ -160,12 +222,23 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     And the output does not contain "KROGER_CLIENT_SECRET"
 
   Scenario: A command that eats all the memory is stopped, not the whole machine
-    When I run "python3 -c \"x = bytearray(4 * 1024 * 1024 * 1024)\""
+    Driven through sort rather than python3, because python3 is not in the image
+    and a scenario that passes on "command not found" would say nothing about
+    the memory limit. sort holds its input in memory until it has to spill, and
+    the spill goes to a tmpfs, which counts against the same limit.
+
+    When I run "yes | sort > /dev/null"
     Then the command fails
     And the meal planner still answers the next command
 
   Scenario: A command that forks without end is stopped, not the whole machine
-    When I run ":() { :|:& }; : "
+    The classic ":() { :|:& }; :" backgrounds every fork, so the shell that
+    started it returns success within milliseconds however the sandbox behaves —
+    it cannot tell us whether the limit held. Dropping the "&" makes each level
+    wait for its children, so the process limit is something the command finds
+    out about and reports.
+
+    When I run ":() { :|: ; }; : "
     Then the command fails
     And the meal planner still answers the next command
 

@@ -46,6 +46,9 @@ export class MealPlanWorld extends World {
   commandsRun: string[] = [];
   /** How many commits the folder had once it was scaffolded and opened. */
   commitsAtStart = 0;
+  /** Why read_file or write_file refused, for the containment scenarios. */
+  lastFileToolError: string | null = null;
+  lastFileToolPath: string | null = null;
   /** Tools reported by the handshake. */
   tools: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
 
@@ -137,8 +140,10 @@ export class MealPlanWorld extends World {
       name: 'read_file',
       arguments: { path: target },
     });
+    const structured = (response.structuredContent as { content?: string })?.content;
     return {
-      content: (response.structuredContent as { content?: string })?.content ?? '',
+      // On a refusal there is no structured content; the reason is the text.
+      content: structured ?? textOf(response.content),
       isError: response.isError === true,
     };
   }
@@ -158,6 +163,13 @@ export class MealPlanWorld extends World {
   path(relative: string): string {
     return path.join(this.folder, relative);
   }
+}
+
+function textOf(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block) => (block as { text?: string }).text ?? '')
+    .join('\n');
 }
 
 setWorldConstructor(MealPlanWorld);
