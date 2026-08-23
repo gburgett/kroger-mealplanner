@@ -184,10 +184,15 @@ function buildApp(context: {
   const { baseUrl, provider, owner } = context;
   const app = express();
   app.disable('x-powered-by');
-  // Behind the exe.dev proxy, which sets X-Forwarded-Proto and X-Forwarded-For.
-  // This affects req.protocol and req.ip only; the issuer is still the
-  // configured one, never a header.
-  app.set('trust proxy', true);
+  // Exactly one hop: the exe.dev proxy, and nothing in front of it.
+  //
+  // `true` would be wrong, and express-rate-limit says so out loud. exe.dev
+  // APPENDS the client address to whatever X-Forwarded-For the client sent, so
+  // trusting the whole chain lets a caller write its own req.ip and rotate past
+  // the rate limiter on /register and /token. Trusting one hop takes the entry
+  // exe.dev added and ignores the rest. This affects req.ip and req.protocol
+  // only — the issuer is the configured one and never comes from a header.
+  app.set('trust proxy', 1);
 
   // --- the exe.dev gate, in front of everything a person opens ------------
   //

@@ -1,8 +1,12 @@
-// The World each scenario gets: a fresh meal-plan folder, a real MCP server on
-// loopback, and a real MCP client talking to it.
+// The World each scenario gets: a fresh meal-plan folder, a real MCP server, a
+// real OAuth handshake, and a real MCP client talking to it.
 //
 // Nothing here is stubbed. A `When` step is a web request against our own API,
 // and a `Then` step reads the files that ended up on disk.
+//
+// Since ADR 0009 that request carries a bearer token, and the token is one the
+// scenario actually went and got: register, consent as the household, exchange
+// the code. See features/support/oauth.ts for why it is done the long way.
 
 import { setWorldConstructor, World, type IWorldOptions } from '@cucumber/cucumber';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -11,10 +15,12 @@ import path from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 
-import { startServer, type RunningServer } from '../../src/mcp/server.ts';
+import { DEFAULT_OWNER, startServer, type RunningServer } from '../../src/mcp/server.ts';
 import type { RunResult, Session } from '../../src/sandbox/session.ts';
 import type { BashResult } from '../../src/mcp/tools.ts';
+import { HouseholdOAuthClient } from './oauth.ts';
 
 /**
  * A frozen clock. Scenarios use fixed dates, so the git history a scenario
@@ -34,9 +40,26 @@ export class FrozenClock {
 
 export class MealPlanWorld extends World {
   folder = '';
+  /**
+   * The token store, in its own temp directory.
+   *
+   * Two things it must not be, and both would be silent: inside the meal-plan
+   * folder, which the server refuses outright, and the real
+   * ~/.local/state/mealplan/auth.json, which would leak state between
+   * scenarios and stamp on whatever the developer is actually running.
+   */
+  statePath = '';
+  owner = DEFAULT_OWNER;
   server: RunningServer | null = null;
   client: Client | null = null;
   clock = new FrozenClock();
+
+  /**
+   * The household's own client. It outlives a restart on purpose: keeping the
+   * tokens across one is what "the token still works after the server
+   * restarts" actually measures.
+   */
+  household = new HouseholdOAuthClient(DEFAULT_OWNER);
 
   /** The result of the most recent bash command. */
   lastResult: BashResult | null = null;
@@ -52,12 +75,18 @@ export class MealPlanWorld extends World {
   /** Tools reported by the handshake. */
   tools: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
 
+  /** The last raw HTTP answer an auth scenario looked at. */
+  lastResponse: RawResponse | null = null;
+  /** A second registered client, for the scenarios that need one. */
+  otherClient: HouseholdOAuthClient | null = null;
+
   constructor(options: IWorldOptions) {
     super(options);
   }
 
   async start(): Promise<void> {
     this.folder = await mkdtemp(path.join(tmpdir(), 'mealplan-scenario-'));
+    this.statePath = path.join(await mkdtemp(path.join(tmpdir(), 'mealplan-state-')), 'auth.json');
     await this.launch();
     this.commitsAtStart = await this.commitCount();
   }
@@ -68,10 +97,55 @@ export class MealPlanWorld extends World {
       folder: this.folder,
       tenant: 'scenario',
       now: this.clock.now,
+      owner: this.owner,
+      statePath: this.statePath,
     });
-    this.client = new Client({ name: 'cucumber', version: '0.1.0' });
-    await this.client.connect(new StreamableHTTPClientTransport(new URL(this.server.url)));
+    this.client = await this.connect(this.household);
     this.tools = (await this.client.listTools()).tools;
+  }
+
+  /**
+   * Connect one MCP client, doing whatever authentication it takes.
+   *
+   * The SDK answers a 401 by running discovery and registration and then asking
+   * the provider to send the person to the consent page. It cannot go further
+   * on its own — a person has to act — so it raises UnauthorizedError, and the
+   * caller finishes with the code the consent page gave back. That is the
+   * documented shape of the flow, and this is a real client walking it.
+   */
+  async connect(provider: HouseholdOAuthClient): Promise<Client> {
+    const url = () => new URL(this.serverUrl());
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const transport = new StreamableHTTPClientTransport(url(), { authProvider: provider });
+      const client = new Client({ name: provider.name, version: '0.1.0' });
+      try {
+        await client.connect(transport);
+        return client;
+      } catch (error) {
+        await transport.close().catch(() => undefined);
+        if (!(error instanceof UnauthorizedError) || attempt > 0) throw error;
+
+        const code = provider.code;
+        if (!code) throw error;
+        provider.code = undefined;
+
+        const exchange = new StreamableHTTPClientTransport(url(), { authProvider: provider });
+        await exchange.finishAuth(code);
+        await exchange.close().catch(() => undefined);
+      }
+    }
+    throw new Error('the client could not authenticate, and did not say why');
+  }
+
+  serverUrl(): string {
+    if (!this.server) throw new Error('no server: the scenario has none running');
+    return this.server.url;
+  }
+
+  baseUrl(): string {
+    if (!this.server) throw new Error('no server: the scenario has none running');
+    return this.server.baseUrl;
   }
 
   /** "the server restarts": a new process over the same folder on disk. */
@@ -90,6 +164,9 @@ export class MealPlanWorld extends World {
   async stop(): Promise<void> {
     await this.stopServer();
     if (this.folder) await rm(this.folder, { recursive: true, force: true });
+    if (this.statePath) {
+      await rm(path.dirname(this.statePath), { recursive: true, force: true });
+    }
   }
 
   session(): Session {
@@ -148,6 +225,35 @@ export class MealPlanWorld extends World {
     };
   }
 
+  /** A raw request, for the scenarios that are about HTTP rather than about MCP. */
+  async fetchRaw(
+    target: string,
+    init: RequestInit & { headers?: Record<string, string> } = {},
+  ): Promise<RawResponse> {
+    const response = await fetch(new URL(target, this.baseUrl()), {
+      // Manual, because a redirect is the answer in several scenarios and
+      // following it would hide the thing under test.
+      redirect: 'manual',
+      ...init,
+    });
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      headers[name.toLowerCase()] = value;
+    });
+    this.lastResponse = {
+      status: response.status,
+      location: response.headers.get('location'),
+      headers,
+      body: await response.text(),
+    };
+    return this.lastResponse;
+  }
+
+  response(): RawResponse {
+    if (!this.lastResponse) throw new Error('no request has been made in this scenario');
+    return this.lastResponse;
+  }
+
   /** The result the last command produced, or a clear failure if there is none. */
   result(): BashResult {
     if (!this.lastResult) throw new Error('no command has been run in this scenario');
@@ -164,6 +270,13 @@ export class MealPlanWorld extends World {
     return path.join(this.folder, relative);
   }
 }
+
+export type RawResponse = {
+  status: number;
+  location: string | null;
+  headers: Record<string, string>;
+  body: string;
+};
 
 function textOf(content: unknown): string {
   if (!Array.isArray(content)) return '';

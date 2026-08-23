@@ -140,7 +140,19 @@ Feature: Only the household reaches the meal plan
 
   @security
   Scenario: The access token is not visible inside the sandbox
+    The shape of the KROGER_CLIENT_SECRET scenario in sandbox.feature, asking
+    the same question about the credential the agent could actually use.
+
+    This one deliberately does NOT also assert "the output holds nothing from
+    the server's own environment". That assertion compares every NAME=VALUE in
+    the server's environment against the output, and the sandbox sets
+    GIT_PAGER=cat and GIT_EDITOR=true on purpose (bubblewrap.ts) so that git
+    never waits for a pager or an editor nobody can see. A developer whose own
+    shell has GIT_EDITOR=true then fails this for a collision rather than a
+    leak. The environment property is proved on the /proc/1/environ dump alone,
+    in sandbox.feature, where nothing is deliberately set and the comparison
+    means what it says.
+
     Given the household has approved a client
     When the client runs "cat /proc/1/environ | tr '\0' '\n'; env"
     Then the output does not contain the client's access token
-    And the output holds nothing from the server's own environment
