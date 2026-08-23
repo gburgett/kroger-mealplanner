@@ -3,3 +3,4 @@ node_modules/
 target/
 *.wasm
 sandbox-image/rootfs/
+cli/target/

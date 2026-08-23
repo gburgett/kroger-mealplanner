@@ -103,11 +103,25 @@ export function linkedRecipes(document: string): Array<{ name: string; target: s
   }));
 }
 
+/**
+ * The ingredient lines of a recipe.
+ *
+ * Walked line by line rather than matched with one regular expression, because
+ * the obvious expression needs an end-of-input anchor and JavaScript has no
+ * \\Z. Written as a regex it silently matched nothing when `## Ingredients`
+ * was the last section in the file.
+ */
 export function ingredientsOf(document: string): string[] {
-  const section = /^##\s+Ingredients\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(document);
-  if (!section) return [];
-  return section[1]
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('- '));
+  const found: string[] = [];
+  let inside = false;
+  for (const raw of document.split('\n')) {
+    const line = raw.trim();
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    if (heading) {
+      inside = heading[1].trim() === 'Ingredients';
+      continue;
+    }
+    if (inside && line.startsWith('- ')) found.push(line);
+  }
+  return found;
 }

@@ -35,12 +35,16 @@ Then('the output is:', function (this: MealPlanWorld, expected: string) {
   assert.equal(this.result().stdout.trim(), expected.trim());
 });
 
+// "lists" is a set, not a sequence: `grep -r` walks the directory in whatever
+// order the filesystem hands it back. Where the ORDER is the point — `ls
+// dinners/` being the calendar — the scenario says "the output is:" instead.
 Then('the output lists:', function (this: MealPlanWorld, table: DataTable) {
   const lines = this.result()
     .stdout.split('\n')
     .map((line) => line.trim())
-    .filter((line) => line !== '');
-  const wanted = table.raw().map((row) => row[0].trim());
+    .filter((line) => line !== '')
+    .sort();
+  const wanted = table.raw().map((row) => row[0].trim()).sort();
   assert.deepEqual(lines, wanted);
 });
 

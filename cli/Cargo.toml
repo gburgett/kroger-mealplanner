@@ -1,0 +1,21 @@
+[package]
+name = "mealplan"
+version = "0.1.0"
+edition = "2021"
+description = "Unit-aware arithmetic and schema validation over a meal-plan folder"
+publish = false
+
+[dependencies]
+# Exact arithmetic. ADR 0007 names rust_decimal or num-rational; rationals are
+# chosen because a third of a cup is a real measurement and decimals cannot hold
+# one. "0.30000000000000004 cup" is a defect, and so is "0.333333 cup".
+num-rational = { version = "0.4", default-features = false }
+num-integer = { version = "0.1", default-features = false }
+num-traits = { version = "0.2", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
