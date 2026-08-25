@@ -27,6 +27,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -44,18 +45,41 @@ import { AuthStore, assertOutsideFolder, defaultStorePath } from '../auth/store.
 import { scaffold } from '../corpus/scaffold.ts';
 import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, type Clock } from '../git/repository.ts';
+import { DEFAULT_KROGER_API_BASE, KrogerApi } from '../kroger/api.ts';
+import {
+  isModality,
+  readKrogerConfig,
+  writeKrogerConfig,
+  type Modality,
+} from '../kroger/config.ts';
+import { LinkDesk } from '../kroger/link.ts';
+import {
+  krogerLinkGonePage,
+  krogerLinkedPage,
+  krogerStatusPage,
+  krogerStorePage,
+} from '../kroger/pages.ts';
+import { KrogerStore } from '../kroger/store.ts';
 import { open, type Session, type SessionOptions } from '../sandbox/session.ts';
 import {
   BASH_DESCRIPTION,
+  FIND_PRODUCTS_DESCRIPTION,
   READ_FILE_DESCRIPTION,
+  SEND_TO_CART_DESCRIPTION,
   WRITE_FILE_DESCRIPTION,
   bashInputSchema,
   bashOutputSchema,
+  findProducts,
+  findProductsInputSchema,
+  findProductsOutputSchema,
   readCorpusFile,
   readFileInputSchema,
   readFileOutputSchema,
   renderBashResult,
   runBash,
+  sendToCart,
+  sendToCartInputSchema,
+  sendToCartOutputSchema,
   writeCorpusFile,
   writeFileInputSchema,
   writeFileOutputSchema,
@@ -63,6 +87,9 @@ import {
 
 export const MCP_PATH = '/mcp';
 export const CONSENT_PATH = '/consent';
+/** Every Kroger screen lives under this, and the whole prefix is householdOnly. */
+export const KROGER_PATH = '/kroger';
+export const KROGER_CALLBACK_PATH = '/kroger/callback';
 
 /** The household. One entry, on purpose — see ADR 0009. */
 export const DEFAULT_OWNER = 'gordon@gordonburgett.net';
@@ -87,6 +114,19 @@ export type ServerOptions = Omit<SessionOptions, 'tenant'> & {
   publicUrl?: string;
   /** The token store. Must be outside the meal-plan folder. */
   statePath?: string;
+  /**
+   * Where the Kroger API lives. THE ONLY MOCK SEAM IN THIS PRODUCT.
+   *
+   * It covers the authorize host as well, because in production they are the
+   * same host. The scenarios pass this rather than setting an environment
+   * variable: they share one process, so an env mutation would leak from one
+   * scenario into the next. The same reasoning as `statePath`.
+   */
+  krogerApiBase?: string;
+  krogerClientId?: string;
+  krogerClientSecret?: string;
+  /** The Kroger token store. Must also be outside the meal-plan folder. */
+  krogerStatePath?: string;
 };
 
 export type RunningServer = {
@@ -98,6 +138,8 @@ export type RunningServer = {
   session: Session;
   store: AuthStore;
   provider: MealPlanOAuthProvider;
+  /** The household's Kroger credential, or an empty store when none is linked. */
+  krogerStore: KrogerStore;
   close(): Promise<void>;
 };
 
@@ -119,7 +161,40 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // agent holding the keys to its own front door.
   assertOutsideFolder(statePath, session.folder);
   const store = await AuthStore.open(statePath);
-  const provider = new MealPlanOAuthProvider({ store, owner, folder: session.folder });
+
+  const krogerClientId = options.krogerClientId ?? process.env.KROGER_CLIENT_ID ?? '';
+  const krogerClientSecret = options.krogerClientSecret ?? process.env.KROGER_CLIENT_SECRET ?? '';
+  const configuredPublicUrl = options.publicUrl ?? process.env.MEALPLAN_PUBLIC_URL;
+  // Kroger requires the redirect URI to match what was registered, EXACTLY, and
+  // the redirect URI is built from the public URL — never from a header, the
+  // same rule as the issuer. A server with Kroger credentials and no public URL
+  // would send people to a redirect Kroger refuses, so it refuses to start
+  // instead, while somebody is still looking at the terminal.
+  if (krogerClientId !== '' && !configuredPublicUrl) {
+    throw new Error(
+      'KROGER_CLIENT_ID is set but MEALPLAN_PUBLIC_URL is not. Kroger matches the ' +
+        'redirect URI exactly against the one registered with it, and this server ' +
+        'builds that from MEALPLAN_PUBLIC_URL, never from a request header. Set it to ' +
+        'the address a browser reaches this server at, and register ' +
+        '<MEALPLAN_PUBLIC_URL>/kroger/callback with Kroger.',
+    );
+  }
+
+  const krogerStatePath =
+    options.krogerStatePath ??
+    process.env.MEALPLAN_KROGER_STATE ??
+    // Beside auth.json, whichever state directory that turned out to be. One
+    // directory, two files: a scenario that redirects one redirects both.
+    path.join(path.dirname(statePath), 'kroger.json');
+  assertOutsideFolder(krogerStatePath, session.folder);
+  const krogerStore = await KrogerStore.open(krogerStatePath);
+
+  const provider = new MealPlanOAuthProvider({
+    store,
+    owner,
+    folder: session.folder,
+    kroger: { configured: krogerClientId !== '', connected: () => krogerStore.connected },
+  });
 
   // The port has to be known before the app is built, because the OAuth issuer
   // is part of it and the tests ask for port 0. So: listen first, then build
@@ -150,7 +225,31 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     .replace(/\/+$/, '');
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
-  app = buildApp({ baseUrl, host, port, session, provider, owner, now, transports });
+  // Built here rather than above, because the redirect URI is part of it and
+  // the public URL is only settled once the port is.
+  const kroger =
+    krogerClientId === ''
+      ? null
+      : new KrogerApi({
+          base: options.krogerApiBase ?? process.env.KROGER_API_BASE ?? DEFAULT_KROGER_API_BASE,
+          clientId: krogerClientId,
+          clientSecret: krogerClientSecret,
+          redirectUri: `${baseUrl}${KROGER_CALLBACK_PATH}`,
+          store: krogerStore,
+        });
+
+  app = buildApp({
+    baseUrl,
+    host,
+    port,
+    session,
+    provider,
+    owner,
+    now,
+    transports,
+    kroger,
+    linkDesk: new LinkDesk(),
+  });
 
   return {
     url: `${baseUrl}${MCP_PATH}`,
@@ -159,6 +258,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     session,
     store,
     provider,
+    krogerStore,
     async close() {
       for (const transport of transports.values()) {
         await transport.close().catch(() => undefined);
@@ -171,7 +271,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   };
 }
 
-function buildApp(context: {
+type AppContext = {
   baseUrl: string;
   host: string;
   port: number;
@@ -180,7 +280,12 @@ function buildApp(context: {
   owner: string;
   now: Clock;
   transports: Map<string, StreamableHTTPServerTransport>;
-}): Express {
+  /** Null when the server has no Kroger credentials. Then there is no cart. */
+  kroger: KrogerApi | null;
+  linkDesk: LinkDesk;
+};
+
+function buildApp(context: AppContext): Express {
   const { baseUrl, provider, owner } = context;
   const app = express();
   app.disable('x-powered-by');
@@ -200,16 +305,28 @@ function buildApp(context: {
   // router's own /authorize. provider.authorize() is handed a Response and no
   // Request, so it cannot read a header — the identity has to arrive on
   // res.locals, and this is what puts it there.
-  app.use(['/authorize', CONSENT_PATH], householdOnly(owner));
+  //
+  // /kroger joins them, and every path under it, including the callback Kroger
+  // itself redirects to. That is deliberate: Kroger redirects a TOP-LEVEL
+  // BROWSER NAVIGATION, so the exe.dev session cookie is on it and the headers
+  // are there. Nobody but the household can feed us a Kroger code at all, and
+  // the one-shot state is the second control rather than the only one. The open
+  // group stays exactly /register, /token, /revoke and /.well-known/*, and
+  // src/auth/exedev.ts is not touched — the coupling to exe.dev stays one file
+  // and one grep.
+  app.use(['/authorize', CONSENT_PATH, KROGER_PATH], householdOnly(owner));
 
   // --- the consent page's Approve button ----------------------------------
   app.post(
     CONSENT_PATH,
     express.urlencoded({ extended: false }),
     (request, response, next) => {
-      completeConsent(request, response, provider).catch(next);
+      completeConsent(request, response, context).catch(next);
     },
   );
+
+  // --- the Kroger screens -------------------------------------------------
+  mountKroger(app, context);
 
   // --- the OAuth endpoints ------------------------------------------------
   //
@@ -301,8 +418,9 @@ export function householdOnly(owner: string) {
 async function completeConsent(
   request: Request,
   response: Response,
-  provider: MealPlanOAuthProvider,
+  context: AppContext,
 ): Promise<void> {
+  const { provider } = context;
   const body = request.body as Record<string, unknown> | undefined;
   const consentId = typeof body?.consent_id === 'string' ? body.consent_id : '';
   const pending = provider.desk.take(consentId);
@@ -342,11 +460,263 @@ async function completeConsent(
     return;
   }
 
+  // The Kroger box, and the whole reason the link goes HERE rather than after
+  // the code. An authorisation code lives sixty seconds; a Kroger sign-in plus
+  // a store choice does not fit in sixty seconds. So the approved consent is
+  // parked — it already has a minutes-scale life — and the code is minted at
+  // the far end of the store picker, where it is spent at once.
+  if (context.kroger && body.connect_kroger === 'yes') {
+    const link = context.linkDesk.open(identity, pending);
+    response.setHeader('Cache-Control', 'no-store');
+    response.redirect(302, context.kroger.authorizeUrl(link.state ?? ''));
+    return;
+  }
+
   const code = await provider.issueCode(pending.client, pending.params, identity);
   redirect.searchParams.set('code', code);
   if (pending.params.state !== undefined) redirect.searchParams.set('state', pending.params.state);
   response.setHeader('Cache-Control', 'no-store');
   response.redirect(302, redirect.href);
+}
+
+// ---------------------------------------------------------------------------
+// The Kroger screens.
+//
+// The second and last flow in this product that needs a browser and a person at
+// a keyboard, and it is behind the same gate as the first. Everything here is
+// setup the MCP interface cannot do: an MCP client has no browser, so it cannot
+// complete a Kroger sign-in, and no amount of tooling changes that.
+// ---------------------------------------------------------------------------
+
+function mountKroger(app: Express, context: AppContext): void {
+  const { kroger, linkDesk, session, now } = context;
+  const form = express.urlencoded({ extended: false });
+  const folder = session.folder;
+
+  app.get(KROGER_PATH, (request, response, next) => {
+    void (async () => {
+      if (!kroger) {
+        response.status(200).type('html').send(
+          krogerStatusPage({ configured: false, connected: false, store: null }),
+        );
+        return;
+      }
+      // Read from the folder rather than asked of Kroger: the store is written
+      // down precisely so that nothing has to go and ask.
+      const config = await readKrogerConfig(folder);
+      response.setHeader('Cache-Control', 'no-store');
+      response.status(200).type('html').send(
+        krogerStatusPage({
+          configured: true,
+          connected: kroger.store.connected,
+          store: config.store
+            ? { name: config.store, address: '', modality: config.modality }
+            : null,
+        }),
+      );
+    })().catch(next);
+  });
+
+  app.post(`${KROGER_PATH}/connect`, form, (request, response) => {
+    if (!kroger) {
+      response.status(409).type('text/plain').send(krogerNotConfigured());
+      return;
+    }
+    const identity = response.locals.identity as { email: string };
+    const link = linkDesk.open(identity);
+    response.setHeader('Cache-Control', 'no-store');
+    response.redirect(302, kroger.authorizeUrl(link.state ?? ''));
+  });
+
+  app.get(KROGER_CALLBACK_PATH, (request, response, next) => {
+    void (async () => {
+      if (!kroger) {
+        response.status(409).type('text/plain').send(krogerNotConfigured());
+        return;
+      }
+
+      const state = String(request.query.state ?? '');
+      const link = linkDesk.claimState(state);
+      if (!link) {
+        // A state we did not issue, or one that has been spent already. Both
+        // are refused the same way: nothing about this request is trusted.
+        response
+          .status(403)
+          .type('text/plain')
+          .send(
+            'that Kroger sign-in does not match one this meal planner started. ' +
+              'Nothing has been changed. Open /kroger and start again.\n',
+          );
+        return;
+      }
+
+      const refused = request.query.error;
+      if (typeof refused === 'string' && refused !== '') {
+        response
+          .status(200)
+          .type('text/plain')
+          .send(
+            `Kroger did not complete the sign-in: ${refused}. Nothing has been ` +
+              'changed. Open /kroger to try again.\n',
+          );
+        return;
+      }
+
+      const code = String(request.query.code ?? '');
+      if (!code) {
+        response.status(400).type('text/plain').send('Kroger sent no code back.\n');
+        return;
+      }
+
+      const tokens = await kroger.tokenFromCode(code);
+      await kroger.store.save(tokens);
+      response.setHeader('Cache-Control', 'no-store');
+      response.redirect(302, `${KROGER_PATH}/store?link=${encodeURIComponent(link.id)}`);
+    })().catch(next);
+  });
+
+  app.get(`${KROGER_PATH}/store`, (request, response, next) => {
+    void (async () => {
+      if (!kroger) {
+        response.status(409).type('text/plain').send(krogerNotConfigured());
+        return;
+      }
+
+      // No link id means the household came from the status page to change a
+      // store, with no client waiting at the other end. That is a link too.
+      const identity = response.locals.identity as { email: string };
+      const asked = typeof request.query.link === 'string' ? request.query.link : '';
+      const link = asked ? linkDesk.get(asked) : linkDesk.open(identity);
+      if (!link) {
+        response.status(400).type('html').send(krogerLinkGonePage());
+        return;
+      }
+
+      const zip = typeof request.query.zip === 'string' ? request.query.zip.trim() : '';
+      let stores: Awaited<ReturnType<KrogerApi['locationsNear']>> = [];
+      let problem: string | undefined;
+      if (zip) {
+        try {
+          stores = await kroger.locationsNear(zip);
+        } catch (error) {
+          problem = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      response.setHeader('Cache-Control', 'no-store');
+      response
+        .status(200)
+        .type('html')
+        .send(krogerStorePage({ linkId: link.id, zipCode: zip, stores, searched: zip !== '', problem }));
+    })().catch(next);
+  });
+
+  app.post(`${KROGER_PATH}/store`, form, (request, response, next) => {
+    void (async () => {
+      if (!kroger) {
+        response.status(409).type('text/plain').send(krogerNotConfigured());
+        return;
+      }
+
+      const body = (request.body ?? {}) as Record<string, unknown>;
+      const link = linkDesk.take(String(body.link ?? ''));
+      if (!link) {
+        response.status(400).type('html').send(krogerLinkGonePage());
+        return;
+      }
+
+      const locationId = String(body.store ?? '');
+      const modality: Modality = isModality(body.modality) ? body.modality : 'pickup';
+      // The name and the address are looked up again rather than read off the
+      // form. They end up in a document the household reads, and the only
+      // honest source for them is Kroger.
+      const chosen = await storeNamed(kroger, locationId, String(body.zip ?? ''));
+      if (!chosen) {
+        response
+          .status(400)
+          .type('html')
+          .send(
+            krogerStorePage({
+              linkId: link.id,
+              zipCode: String(body.zip ?? ''),
+              stores: [],
+              searched: true,
+              problem: `Kroger has no store ${locationId}. Search again.`,
+            }),
+          );
+        return;
+      }
+
+      await writeKrogerConfig(session, folder, now, {
+        locationId: chosen.locationId,
+        name: chosen.name,
+        address: chosen.address,
+        modality,
+      });
+
+      // The code is minted last, and spent at once. With no consent waiting,
+      // this was somebody changing their shop, and there is nowhere to go back.
+      if (link.consent) {
+        const code = await context.provider.issueCode(
+          link.consent.client,
+          link.consent.params,
+          link.consent.identity,
+        );
+        const back = new URL(link.consent.params.redirectUri);
+        back.searchParams.set('code', code);
+        if (link.consent.params.state !== undefined) {
+          back.searchParams.set('state', link.consent.params.state);
+        }
+        response.setHeader('Cache-Control', 'no-store');
+        response.redirect(302, back.href);
+        return;
+      }
+
+      response.setHeader('Cache-Control', 'no-store');
+      response
+        .status(200)
+        .type('html')
+        .send(krogerLinkedPage({ name: chosen.name, address: chosen.address, modality }));
+    })().catch(next);
+  });
+
+  app.post(`${KROGER_PATH}/disconnect`, form, (request, response, next) => {
+    void (async () => {
+      if (kroger) await kroger.store.clear();
+      // The folder's half goes back to "not connected" too. `cat
+      // config/kroger.md` has to keep answering the question truthfully, and a
+      // store left behind for an account we no longer hold is a lie.
+      await writeKrogerConfig(session, folder, now, null);
+      response.setHeader('Cache-Control', 'no-store');
+      response.redirect(302, KROGER_PATH);
+    })().catch(next);
+  });
+}
+
+/**
+ * One store, by id, from a search Kroger answered. NEVER FROM A FORM FIELD.
+ *
+ * The name and the address end up in `config/kroger.md`, which the household
+ * and the assistant both read. Trusting the browser for them would let a
+ * crafted form put arbitrary text into a document in the meal-plan folder, and
+ * the whole point of the file is that it says something true.
+ */
+async function storeNamed(
+  kroger: KrogerApi,
+  locationId: string,
+  zipCode: string,
+): Promise<{ locationId: string; name: string; address: string } | null> {
+  if (!locationId || !zipCode) return null;
+  const near = await kroger.locationsNear(zipCode, 25);
+  return near.find((store) => store.locationId === locationId) ?? null;
+}
+
+function krogerNotConfigured(): string {
+  return (
+    'this meal planner has no Kroger credentials, so it cannot connect an account. ' +
+    'Whoever runs the server sets KROGER_CLIENT_ID, KROGER_CLIENT_SECRET and ' +
+    'MEALPLAN_PUBLIC_URL. See docs/deploying-behind-exe-dev.md.\n'
+  );
 }
 
 async function handleMcp(
@@ -392,7 +762,7 @@ async function handleMcp(
     if (transport.sessionId) transports.delete(transport.sessionId);
   };
 
-  const mcp = buildMcpServer(context.session, context.session.folder, context.now);
+  const mcp = buildMcpServer(context.session, context.session.folder, context.now, context.kroger);
   await mcp.connect(transport);
   await transport.handleRequest(request, response);
 }
@@ -412,7 +782,12 @@ function allowedHostsFor(context: { baseUrl: string; host: string; port: number 
   return [...hosts];
 }
 
-export function buildMcpServer(session: Session, folder: string, now: Clock): McpServer {
+export function buildMcpServer(
+  session: Session,
+  folder: string,
+  now: Clock,
+  kroger: KrogerApi | null = null,
+): McpServer {
   const mcp = new McpServer(
     { name: 'kroger-mealplanner', version: '0.1.0' },
     {
@@ -481,7 +856,96 @@ export function buildMcpServer(session: Session, folder: string, now: Clock): Mc
     },
   );
 
+  // --- the two that are the network ---------------------------------------
+  //
+  // Registered whether or not Kroger is configured. A tool that is absent tells
+  // an agent nothing; a tool that refuses says what to do about it, and "open
+  // /kroger in a browser" is exactly the sentence that has to reach a person.
+
+  mcp.registerTool(
+    'kroger_find_products',
+    {
+      title: 'Find Kroger products for the lines on a shopping list',
+      description: FIND_PRODUCTS_DESCRIPTION,
+      inputSchema: findProductsInputSchema,
+      outputSchema: findProductsOutputSchema,
+    },
+    async ({ path: requested }) => {
+      const result = await findProducts({ session, folder, now, kroger, requested });
+      return {
+        content: [{ type: 'text', text: renderFindProducts(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcp.registerTool(
+    'kroger_send_to_cart',
+    {
+      title: 'Add the chosen products to the household Kroger cart',
+      description: SEND_TO_CART_DESCRIPTION,
+      inputSchema: sendToCartInputSchema,
+      outputSchema: sendToCartOutputSchema,
+    },
+    async ({ path: requested, items }) => {
+      const result = await sendToCart({ session, folder, now, kroger, requested, only: items });
+      return {
+        content: [{ type: 'text', text: renderSendToCart(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   return mcp;
+}
+
+function renderFindProducts(result: {
+  path: string;
+  matched: number;
+  notFound: string[];
+  searched: number;
+}): string {
+  const lines = [
+    `${result.matched} line${result.matched === 1 ? '' : 's'} of ${result.path} now have ` +
+      `candidate products, from ${result.searched} search${result.searched === 1 ? '' : 'es'}.`,
+    'Nothing has been chosen and nothing has been sent. Read the file, delete the',
+    'candidates that are wrong, and set each count from the package size.',
+  ];
+  if (result.notFound.length > 0) {
+    lines.push(
+      '',
+      `Kroger had nothing at this store for: ${result.notFound.join(', ')}. ` +
+        'They are under "## Not found at this store".',
+    );
+  }
+  return lines.join('\n');
+}
+
+function renderSendToCart(result: {
+  path: string;
+  sent: Array<{ upc: string; quantity: number; description: string }>;
+  skipped: string[];
+}): string {
+  if (result.sent.length === 0) {
+    return (
+      `Nothing on ${result.path} had a product chosen, so nothing was sent. ` +
+      'Run kroger_find_products, then delete the candidates you do not want.'
+    );
+  }
+  const lines = [
+    `Sent ${result.sent.length} product${result.sent.length === 1 ? '' : 's'} to the Kroger cart:`,
+    ...result.sent.map((item) => `  ${item.quantity} × ${item.upc} ${item.description}`),
+    '',
+    'This ADDED TO THE CART. It did not place an order — no money moves until',
+    'somebody opens the Kroger app and checks out.',
+    '',
+    'Kroger\'s cart cannot be read back, so this is what was SENT, not what the',
+    'cart holds. Do not say what is in the cart.',
+  ];
+  if (result.skipped.length > 0) {
+    lines.push('', `Nothing was chosen for: ${result.skipped.join('; ')}.`);
+  }
+  return lines.join('\n');
 }
 
 /** node:http keeps keep-alive sockets open past close(); the tests must not hang. */

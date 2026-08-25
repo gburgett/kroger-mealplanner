@@ -30,12 +30,32 @@ if (host !== '127.0.0.1' && host !== 'localhost' && !publicUrl) {
   process.exit(1);
 }
 
-const running = await startServer({ folder, host, port, owner, statePath, publicUrl });
+// A refusal at start-up is for a person who is still looking at the terminal,
+// so it reads as a sentence rather than as a stack trace. startServer throws
+// rather than exiting, because bench.ts and the scenarios call it as a library.
+let running;
+try {
+  running = await startServer({ folder, host, port, owner, statePath, publicUrl });
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
 
 process.stderr.write(`meal planner on ${running.url}\n`);
 process.stderr.write(`meal-plan folder: ${folder}\n`);
 process.stderr.write(`the household is ${owner}\n`);
 process.stderr.write(`tokens: ${statePath}\n`);
+// Kroger is optional. Without it the meal plan works exactly as before, and the
+// two Kroger tools refuse and say what is missing rather than being absent —
+// a tool that is not there tells an agent nothing. See ADR 0010.
+process.stderr.write(
+  process.env.KROGER_CLIENT_ID
+    ? `kroger: ${running.krogerStore.connected ? 'connected' : 'not connected yet'}` +
+        `, credential in ${running.krogerStore.file}\n` +
+        `        link it at ${running.baseUrl}/kroger\n`
+    : 'kroger: not configured. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET to ' +
+        'enable the cart.\n',
+);
 process.stderr.write(
   running.session.useUserScope
     ? 'resource limits: cgroup v2 scope, plus rlimits\n'

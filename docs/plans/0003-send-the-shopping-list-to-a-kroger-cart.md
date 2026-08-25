@@ -1,6 +1,9 @@
 # Plan 0003 — Send the shopping list to a Kroger cart
 
-**Status:** not started.
+**Status:** done, 2026-08-25, except one Phase 0 measurement. `pnpm test` green at
+173 scenarios, `pnpm test:security` green at 46. ADR 0010 is written and accepted
+with the repeated-add semantics open — see Phase 0 below for what was measured
+and what was not.
 **Implements:** ADR 0010, which Phase 9 of this plan writes. The decisions it has
 to record were taken in the session that produced this plan; they are summarised
 under "What ADR 0010 must decide" so the record can be written from it. This plan
@@ -61,20 +64,48 @@ is the agent picking a line it can already see in the file.
 
 ## Phase 0 — Measure how a repeated add behaves
 
-**Cannot be done in CI**, and it is handed to the operator the same way Plan
-0002's Phase 0 was. It needs a real developer account, a real household account
-and a look at the cart in the Kroger app.
+**DONE IN PART, 2026-08-25.** A real developer credential was available, so
+everything reachable with an application token was measured against the live
+API. Everything that needs a household account and a browser was not, and stays
+open.
 
-Send `PUT /v1/cart/add` twice with quantity 1 for one UPC, then open the cart. Does
-the quantity read 1 or 2? Measure three more things in the same sitting:
+**Measured, and each one changed the build:**
 
+- **`product.compact` returns no price at all without `filter.locationId`.**
+  A search with no location gives products with a size and no `price` field; a
+  search with one gives `price.regular`, `inventory.stockLevel` and the
+  fulfilment methods. So the price column stays on the candidate line, and
+  `kroger_find_products` refuses until a store is chosen rather than writing a
+  list of prices that are not prices.
+- **`filter.limit` must be between 1 and 50.** 60 is a 400, `PRODUCT-2013`.
+- **A search that matches nothing is a 200 with `{"data":[]}`**, not a 404. That
+  is the "nothing found at this store" path, and it is a success.
+- **Errors come in two shapes.** `/v1/products` answers
+  `{"errors":{timestamp,code,reason}}`; `/v1/cart/add` and the token endpoint
+  answer a flat `{timestamp,code,reason}`. `describeFailure` in
+  `src/kroger/api.ts` reads both, and the mock sends both.
+- **`soldBy` came back as `UNIT`, upper case**, where the document writes it in
+  lower case. Never compared without folding the case.
+- **`price.promo` was absent rather than 0** on the products measured, though
+  the document says 0. Both are handled: `promo` is used only when it is above
+  zero and below `regular`.
+- **A cart add with an application token is a 403**, `AUTH-1007`. The two tokens
+  really are not interchangeable.
+
+**Still open, and it needs a real household account, a browser and a look at the
+cart in the Kroger app:**
+
+- Send `PUT /v1/cart/add` twice with quantity 1 for one UPC, then open the cart.
+  Does the quantity read 1 or 2?
 - Does `/v1/cart/add` validate the UPC against the chosen location?
-- What is the maximum number of items in one call?
-- Does `product.compact` return a price with no `locationId`? If not, drop the
-  price column from the candidate line.
+- What is the maximum number of items in one call? Until this is known there is
+  a ceiling of our own, `MAX_CART_ITEMS = 50`, which refuses and names the
+  number.
 
-Until this is answered, the tools say what was sent and say that the cart cannot
-be read. The `@future` scenario named in Phase 1 covers the branch we do not take.
+Until the first of those is answered, the tools say what was sent and say that
+the cart cannot be read. The `@future` scenario named in Phase 1 covers the
+branch we do not take, and `features/support/kroger.ts` can be told to behave
+either way.
 
 ## Phase 1 — The scenarios
 

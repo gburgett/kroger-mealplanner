@@ -52,6 +52,15 @@ export type ProviderOptions = {
   owner: string;
   /** Shown on the consent page, so a person can see which folder they are opening. */
   folder: string;
+  /**
+   * Whether to offer "also connect my Kroger account" on the consent page.
+   *
+   * `configured` is false when the server has no Kroger credentials, and then
+   * the box is not shown at all — a box that cannot do anything is worse than
+   * no box. See src/kroger/link.ts for why the link goes here rather than after
+   * the authorisation code.
+   */
+  kroger?: { configured: boolean; connected: () => boolean };
 };
 
 export class MealPlanOAuthProvider implements OAuthServerProvider {
@@ -59,11 +68,13 @@ export class MealPlanOAuthProvider implements OAuthServerProvider {
   readonly owner: string;
   readonly desk = new ConsentDesk();
   readonly #folder: string;
+  readonly #kroger: { configured: boolean; connected: () => boolean };
 
   constructor(options: ProviderOptions) {
     this.store = options.store;
     this.owner = options.owner;
     this.#folder = options.folder;
+    this.#kroger = options.kroger ?? { configured: false, connected: () => false };
   }
 
   /**
@@ -105,7 +116,17 @@ export class MealPlanOAuthProvider implements OAuthServerProvider {
     res
       .status(200)
       .type('html')
-      .send(consentPage({ consentId, client, params, identity, folder: this.#folder }));
+      .send(
+        consentPage({
+          consentId,
+          client,
+          params,
+          identity,
+          folder: this.#folder,
+          offerKroger: this.#kroger.configured,
+          krogerConnected: this.#kroger.connected(),
+        }),
+      );
   }
 
   /**

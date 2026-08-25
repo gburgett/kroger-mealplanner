@@ -50,10 +50,12 @@ Feature: Only the household reaches the meal plan
     When the client runs "ls"
     Then the command succeeds
     And the output lists:
-      | README.md |
-      | dinners   |
-      | pantry    |
-      | recipes   |
+      | README.md      |
+      | config         |
+      | dinners        |
+      | pantry         |
+      | recipes        |
+      | shopping-lists |
 
   Scenario: The token still works after the server restarts
     Given the household has approved a client

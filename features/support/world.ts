@@ -10,6 +10,8 @@
 
 import { setWorldConstructor, World, type IWorldOptions } from '@cucumber/cucumber';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -20,6 +22,7 @@ import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { DEFAULT_OWNER, startServer, type RunningServer } from '../../src/mcp/server.ts';
 import type { RunResult, Session } from '../../src/sandbox/session.ts';
 import type { BashResult } from '../../src/mcp/tools.ts';
+import { CLIENT_ID, CLIENT_SECRET, KrogerMock } from './kroger.ts';
 import { HouseholdOAuthClient } from './oauth.ts';
 
 /**
@@ -55,6 +58,38 @@ export class MealPlanWorld extends World {
   clock = new FrozenClock();
 
   /**
+   * The port, reserved before the server starts.
+   *
+   * Every scenario now runs with a configured public URL rather than one
+   * derived from the bound address, because Kroger matches the redirect URI
+   * exactly and the server refuses to start with credentials and no public URL.
+   * The port has to be known before startServer is called, so it is asked for
+   * and given back. A restart reuses it, which is more faithful anyway: the
+   * address a client was given does not change because the process did.
+   */
+  port = 0;
+
+  /**
+   * Kroger, stood in for. The only mock in the suite — see
+   * features/support/kroger.ts.
+   */
+  kroger: KrogerMock | null = null;
+
+  /** Which browser session the raw-request steps are speaking as. */
+  signedInAs: string | undefined;
+
+  /** The shopping list the Kroger steps are working on. */
+  listPath = '';
+  /** What the last Kroger tool call answered, or why it refused. */
+  lastToolText = '';
+  lastToolError: string | null = null;
+  /** The link in flight through the Kroger screens. */
+  krogerLinkId = '';
+  krogerZip = '45202';
+  /** The callback URL Kroger last sent the browser to, for the replay scenario. */
+  krogerCallbackUrl = '';
+
+  /**
    * The household's own client. It outlives a restart on purpose: keeping the
    * tokens across one is what "the token still works after the server
    * restarts" actually measures.
@@ -87,6 +122,8 @@ export class MealPlanWorld extends World {
   async start(): Promise<void> {
     this.folder = await mkdtemp(path.join(tmpdir(), 'mealplan-scenario-'));
     this.statePath = path.join(await mkdtemp(path.join(tmpdir(), 'mealplan-state-')), 'auth.json');
+    this.port = await freePort();
+    this.kroger = await KrogerMock.start();
     await this.launch();
     this.commitsAtStart = await this.commitCount();
   }
@@ -99,6 +136,14 @@ export class MealPlanWorld extends World {
       now: this.clock.now,
       owner: this.owner,
       statePath: this.statePath,
+      port: this.port,
+      publicUrl: `http://127.0.0.1:${this.port}`,
+      // Passed as options, NEVER as process.env: the scenarios share one
+      // process, so a mutation here would leak into the next one. The same
+      // reasoning as statePath, and the reason the mock takes a base URL at all.
+      krogerApiBase: this.kroger?.base,
+      krogerClientId: CLIENT_ID,
+      krogerClientSecret: CLIENT_SECRET,
     });
     this.client = await this.connect(this.household);
     this.tools = (await this.client.listTools()).tools;
@@ -163,10 +208,34 @@ export class MealPlanWorld extends World {
 
   async stop(): Promise<void> {
     await this.stopServer();
+    await this.kroger?.stop().catch(() => undefined);
+    this.kroger = null;
     if (this.folder) await rm(this.folder, { recursive: true, force: true });
     if (this.statePath) {
       await rm(path.dirname(this.statePath), { recursive: true, force: true });
     }
+  }
+
+  krogerMock(): KrogerMock {
+    if (!this.kroger) throw new Error('no Kroger mock: the scenario has none running');
+    return this.kroger;
+  }
+
+  /** The headers exe.dev would add for whoever is signed in, and none when nobody is. */
+  browserHeaders(): Record<string, string> {
+    return this.signedInAs ? { 'X-ExeDev-Email': this.signedInAs } : {};
+  }
+
+  /**
+   * Call one of the two Kroger tools, and remember what it said.
+   *
+   * A refusal is an ordinary tool result with isError set, not an exception, so
+   * the assertions read the text the agent would actually be shown.
+   */
+  async callTool(name: string, args: Record<string, unknown>): Promise<void> {
+    const response = await this.mcp().callTool({ name, arguments: args });
+    this.lastToolText = textOf(response.content);
+    this.lastToolError = response.isError === true ? this.lastToolText : null;
   }
 
   session(): Session {
@@ -277,6 +346,20 @@ export type RawResponse = {
   headers: Record<string, string>;
   body: string;
 };
+
+/**
+ * A free port, learned by asking for one and giving it straight back.
+ *
+ * A listening socket that never accepted a connection leaves no TIME_WAIT, so
+ * rebinding it immediately is safe.
+ */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const port = (probe.address() as AddressInfo).port;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
+}
 
 function textOf(content: unknown): string {
   if (!Array.isArray(content)) return '';

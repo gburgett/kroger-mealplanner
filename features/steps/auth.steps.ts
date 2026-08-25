@@ -18,12 +18,11 @@ import path from 'node:path';
 import { MealPlanWorld } from '../support/world.ts';
 import { CALLBACK_URL, consentIdIn } from '../support/oauth.ts';
 
-type Registered = { client_id: string; client_secret?: string; client_name?: string };
+export type Registered = { client_id: string; client_secret?: string; client_name?: string };
 
 /** What a scenario is holding between its steps. */
 type Scratch = {
   registered?: Registered;
-  signedInAs?: string;
   verifier?: string;
   state?: string;
   refreshed?: string;
@@ -45,10 +44,14 @@ function pkce(): { verifier: string; challenge: string } {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 }
 
-/** The headers exe.dev would add for a signed-in person, and nothing when nobody is. */
+/**
+ * The headers exe.dev would add for a signed-in person, and nothing when nobody
+ * is. Held on the World rather than in this file's scratch pad, because the
+ * Kroger steps sign in as the household too and there is one browser session
+ * per scenario, not one per step file.
+ */
 function asBrowser(world: MealPlanWorld): Record<string, string> {
-  const who = pad(world).signedInAs;
-  return who ? { 'X-ExeDev-Email': who } : {};
+  return world.browserHeaders();
 }
 
 async function register(world: MealPlanWorld, name = 'Test Assistant'): Promise<Registered> {
@@ -78,11 +81,11 @@ Given('the meal plan belongs to {string}', function (this: MealPlanWorld, email:
 });
 
 Given('{string} is signed in to exe.dev', function (this: MealPlanWorld, email: string) {
-  pad(this).signedInAs = email;
+  this.signedInAs = email;
 });
 
 Given('nobody is signed in to exe.dev', function (this: MealPlanWorld) {
-  pad(this).signedInAs = undefined;
+  this.signedInAs = undefined;
 });
 
 // --- discovery -------------------------------------------------------------

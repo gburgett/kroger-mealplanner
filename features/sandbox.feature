@@ -16,13 +16,21 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Given a meal-plan folder mounted at "/workspace"
 
   Scenario: Discovering the interface
+    Five tools, and the split between them is the design. Three ARE the sandbox.
+    Two are the network the sandbox does not have, and they exist for that
+    reason alone: a tool exists only when the sandbox cannot do the job by
+    construction. "Is Kroger set up" is not such a job — `cat config/kroger.md`
+    answers it — which is why there is no tool for it. See ADR 0010.
+
     When a client connects to the meal planner over MCP
     Then the handshake succeeds
     And the server reports the tools:
-      | tool       | purpose                                       |
-      | bash       | run a shell command in the sandbox            |
-      | read_file  | read a file from the meal-plan folder         |
-      | write_file | create or overwrite a file in the folder      |
+      | tool                 | purpose                                       |
+      | bash                 | run a shell command in the sandbox            |
+      | read_file            | read a file from the meal-plan folder         |
+      | write_file           | create or overwrite a file in the folder      |
+      | kroger_find_products | find Kroger products for a shopping list      |
+      | kroger_send_to_cart  | add the chosen products to the Kroger cart    |
     And every tool has a description and a JSON schema for its input
     And the "bash" tool description explains the folder layout
 

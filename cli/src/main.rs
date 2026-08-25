@@ -31,8 +31,12 @@ mealplan — the two jobs that are not exploration
       --json prints what the parser read, rather than what is wrong with it.
 
   mealplan shopping-list --from YYYY-MM-DD --to YYYY-MM-DD [--include-staples]
+                         [--out PATH] [--json]
       One shopping list for a range of nights, with the units added up and the
       pantry staples left out. Derived from the folder every time, never stored.
+      --out writes it to a document in shopping-lists/ instead of printing it,
+      with the range and the Kroger store from config/kroger.md in front matter.
+      --json prints the same list as structure. Both together do both.
 
 Run in the meal-plan folder. Everything else is bash.";
 
@@ -68,12 +72,26 @@ fn shopping_list_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
     let mut from: Option<String> = None;
     let mut to: Option<String> = None;
     let mut include_staples = false;
+    let mut out: Option<String> = None;
+    let mut as_json = false;
 
     let mut index = 0;
     while index < arguments.len() {
         let argument = arguments[index].as_str();
         match argument {
             "--include-staples" => include_staples = true,
+            "--json" => as_json = true,
+            "--out" => {
+                let Some(value) = arguments.get(index + 1) else {
+                    eprintln!(
+                        "mealplan shopping-list: --out needs a path, in shopping-lists/ — for \
+                         example `--out shopping-lists/2026-08-25--2026-08-31.md`."
+                    );
+                    return ExitCode::from(2);
+                };
+                index += 1;
+                out = Some(value.clone());
+            }
             "--from" | "--to" => {
                 let Some(value) = arguments.get(index + 1) else {
                     eprintln!("mealplan shopping-list: {argument} needs a date, written as YYYY-MM-DD.");
@@ -85,7 +103,8 @@ fn shopping_list_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
             other => {
                 eprintln!(
                     "mealplan shopping-list: there is no `{other}` option. \
-                     It takes --from YYYY-MM-DD, --to YYYY-MM-DD and --include-staples."
+                     It takes --from YYYY-MM-DD, --to YYYY-MM-DD, --include-staples, \
+                     --out PATH and --json."
                 );
                 return ExitCode::from(2);
             }
@@ -124,6 +143,8 @@ fn shopping_list_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
         from: &from,
         to: &to,
         include_staples,
+        out: out.as_deref(),
+        json: as_json,
     }) as u8)
 }
 

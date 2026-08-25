@@ -72,10 +72,29 @@ export function consentPage(options: {
   params: AuthorizationParams;
   identity: Identity;
   folder: string;
+  /**
+   * Offer to connect Kroger on the way through.
+   *
+   * Off when the server has no Kroger credentials, so a household whose server
+   * cannot do it is never shown a box that does nothing. With the box unticked,
+   * nothing about this flow changes at all. See ADR 0010 and src/kroger/link.ts
+   * for why the link has to happen BEFORE the authorisation code.
+   */
+  offerKroger?: boolean;
+  krogerConnected?: boolean;
 }): string {
   const { consentId, client, params, identity, folder } = options;
   const name = client.client_name?.trim() || client.client_id;
   const scopes = params.scopes ?? [];
+  const kroger = options.offerKroger
+    ? `<p><label>
+  <input type="checkbox" name="connect_kroger" value="yes">
+  Also connect my Kroger account${options.krogerConnected ? ' again' : ''}, and choose which store I shop at
+</label></p>
+<p class="quiet">Kroger's own sign-in opens next. The meal planner can only ADD
+to your cart — there is no way for it to place an order, so no money moves until
+you open the Kroger app yourself.</p>`
+    : '';
 
   return `<!doctype html>
 <html lang="en">
@@ -91,9 +110,10 @@ export function consentPage(options: {
   dd { margin: 0; overflow-wrap: anywhere; }
   code { background: #f2f2f2; padding: .1rem .3rem; border-radius: 3px; }
   .warn { background: #fff8e5; border-left: 3px solid #e0a800; padding: .75rem 1rem; }
-  form { display: flex; gap: .75rem; margin-top: 2rem; }
-  button { font: inherit; padding: .6rem 1.4rem; border-radius: 5px; border: 1px solid #bbb; cursor: pointer; }
+  form { margin-top: 2rem; }
+  button { font: inherit; padding: .6rem 1.4rem; border-radius: 5px; border: 1px solid #bbb; cursor: pointer; margin-right: .75rem; }
   button.approve { background: #1a6b3c; border-color: #1a6b3c; color: #fff; }
+  .quiet { color: #666; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -116,6 +136,7 @@ is committed, so it can be undone — but only if you notice.</p>
 
 <form method="post" action="/consent">
   <input type="hidden" name="consent_id" value="${escape(consentId)}">
+  ${kroger}
   <button type="submit" name="decision" value="approve" class="approve">Approve</button>
   <button type="submit" name="decision" value="deny">Deny</button>
 </form>

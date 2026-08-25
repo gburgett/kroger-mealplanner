@@ -1,8 +1,8 @@
 # Kroger Meal Planner
 
 A meal-planning agent for a household: record recipes, plan a dinner for each
-date, and derive one shopping list for a date range. Eventually that list gets
-pushed into a real Kroger cart.
+date, derive one shopping list for a date range, and push that list into a real
+Kroger cart.
 
 ## The interface is MCP, and MCP is a sandboxed shell
 
@@ -16,6 +16,9 @@ Consequences worth internalising before changing anything:
 - **The folder is the database.** Its layout and document conventions are the
   schema. They must stay guessable from a directory listing and stable enough to
   grep for. See `features/corpus.feature` — that file is the schema definition.
+  A bare `ls` prints six names: `README.md`, `config`, `dinners`, `pantry`,
+  `recipes`, `shopping-lists`. That listing is asserted in two places, and both
+  have to change together.
 - **The filename is the primary key.** `recipes/chicken-tacos.md`,
   `dinners/2026-08-25.md`. Uniqueness and ordering come free from the
   filesystem; do not add an index that can drift out of step.
@@ -29,6 +32,12 @@ Consequences worth internalising before changing anything:
 - **Prefer bash over new tools.** Before adding a command, ask whether `grep`
   already answers it. Only two things justify a command: unit-aware arithmetic
   (`mealplan shopping-list`) and schema validation (`mealplan validate`).
+- **A tool exists only when the sandbox cannot do the job by construction.**
+  There is exactly one such job — the network, which the sandbox does not have
+  and must never get — so there are exactly two such tools,
+  `kroger_find_products` and `kroger_send_to_cart`. "Is Kroger set up" is not
+  one: `cat config/kroger.md` answers it, which is why the store is a document.
+  See ADR 0010, and `src/mcp/tools.ts`, where the test is written down.
 - **Error messages are the documentation.** An agent recovers from "line 7 of
   recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`". It cannot recover
   from "invalid input". Name the file, the line, or the argument.
@@ -38,10 +47,13 @@ Consequences worth internalising before changing anything:
   not optional and not "later".
 
 **UI exists only for setup the MCP interface cannot do**, i.e. a flow that needs
-a browser and a human at a keyboard. There are exactly two: **our own consent
-page**, where the household approves an assistant (ADR 0009), and the Kroger
-OAuth consent redirect, still to come. Both sit behind the same exe.dev gate.
-Anything else belongs behind the sandbox.
+a browser and a human at a keyboard. There are exactly two, and both are built:
+**our own consent page**, where the household approves an assistant (ADR 0009),
+and **the `/kroger` screens**, where the household signs in to Kroger and picks
+which shop it walks into (ADR 0010). Both sit behind the same exe.dev gate —
+`/kroger/callback` included, because Kroger redirects a top-level browser
+navigation and the exe.dev session is on it. Anything else belongs behind the
+sandbox.
 
 ## The stack
 
@@ -54,6 +66,7 @@ Anything else belongs behind the sandbox.
 | Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
+| Kroger | the sandbox has no network and must not get one | two MCP tools in the server, built-in `fetch`, no package | ADR 0010 |
 
 **The server is on the public internet, so there are two boundaries, not one.**
 The sandbox decides what an agent may do once it is inside; OAuth decides whether
@@ -124,8 +137,10 @@ Working rhythm:
 Every scenario is a full integration test. Nothing in the stack is stubbed:
 a `When` step acts by sending a loopback web request to our own API, and a
 `Then` step asserts against the files that ended up on disk. The only thing
-ever mocked is a third-party HTTP API — Kroger, and nothing else. Our sandbox,
-our transport, our commands and our git history all run for real.
+ever mocked is a third-party HTTP API — Kroger, and nothing else. It lives in
+one file, `features/support/kroger.ts`, which is what makes that rule something
+a person can check. Our sandbox, our transport, our commands and our git history
+all run for real.
 
 Rules of thumb:
 
@@ -176,6 +191,14 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
 - Countable items round up. You cannot buy 1.5 onions.
 - A broken document fails the shopping list loudly. Quietly under-buying is
   worse than an error, because the housewife only finds out at the store.
+- **Nothing is chosen for the household.** `filter.term` on "boneless chicken
+  thighs" returns noise, so `kroger_find_products` writes every candidate down
+  and stops. Choosing is deleting the lines you do not want, which is an
+  ordinary edit to an ordinary file. "I was shown candidates and chose nothing"
+  is an outcome, not a failure.
+- **A cart add is at most once.** No idempotency key, no response body, no way
+  to read the cart back. It is never retried, and an ambiguous line stops the
+  whole send rather than half of it.
 
 ## This is also a playground
 
@@ -202,7 +225,15 @@ commands. Free to design in now, a rewrite to retrofit.
 
 ## Out of scope for now
 
-Kroger authentication and cart submission. The sandbox technology is decided —
-see ADR 0008, and our own authentication is decided in ADR 0009. The plans for
-building both are in `docs/plans/`. Keep shopping-list lines shaped so they can be matched to a real
-product later: item name, quantity, unit.
+**Checkout.** Kroger's public API adds to a cart and cannot place an order, so no
+money moves until a person opens the Kroger app. Never write a message that
+implies otherwise.
+
+**Reading the Kroger cart.** There is no read, no update and no delete on the
+public cart — adding is the whole of it. The meal planner can say what it SENT
+and never what the cart HOLDS. Partner access would give the rest, and it needs
+a contractual agreement with Kroger Digital, so it is not available to this
+product.
+
+**Multi-tenancy**, still. `kroger.json` is not keyed by tenant and the
+`open(tenant)` seam is untouched. See ADR 0008.

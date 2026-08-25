@@ -15,9 +15,11 @@ Feature: The meal plan is a folder of markdown documents
     Then the output is:
       """
       README.md
+      config
       dinners
       pantry
       recipes
+      shopping-lists
       """
 
   Scenario: One recipe is one file, named after the recipe

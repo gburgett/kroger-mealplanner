@@ -15,4 +15,4 @@ and deleted once its work is done — that is the difference between a plan and 
 | --- | --- | --- |
 | [0001](0001-implement-the-core-features.md) | Implement the core features | done, 2026-08-23 |
 | [0002](0002-authenticate-the-mcp-server.md) | Authenticate the MCP server | done, 2026-08-23, except Phase 0 |
-| [0003](0003-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart | not started |
+| [0003](0003-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart | done, 2026-08-25, except one Phase 0 measurement |

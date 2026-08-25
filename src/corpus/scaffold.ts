@@ -1,21 +1,33 @@
 // The folder the agent finds when it opens a brand new meal plan.
 //
 // The folder is the database and its layout is the schema, so this file and
-// features/corpus.feature have to agree exactly. A bare `ls` must print four
+// features/corpus.feature have to agree exactly. A bare `ls` must print six
 // names and nothing else:
 //
 //     README.md
+//     config
 //     dinners
 //     pantry
 //     recipes
+//     shopping-lists
 //
 // which is why the empty folders are held open by a dotfile rather than by
-// anything `ls` would show.
+// anything `ls` would show. config/ is the exception: it holds kroger.md from
+// the first moment, because `cat config/kroger.md` is how "is Kroger set up"
+// gets answered, and a question answered by `cat` needs no tool. See ADR 0010.
 
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export const CORPUS_DIRECTORIES = ['dinners', 'pantry', 'recipes'] as const;
+import { KROGER_CONFIG_PATH, krogerConfigDocument } from '../kroger/config.ts';
+
+export const CORPUS_DIRECTORIES = [
+  'config',
+  'dinners',
+  'pantry',
+  'recipes',
+  'shopping-lists',
+] as const;
 
 /**
  * The map, written for whichever agent opens the folder first. It has to
@@ -87,6 +99,49 @@ Without \`servings\` of its own, a dinner feeds what its recipes feed.
 has in. The shopping list leaves them out unless you pass
 \`--include-staples\`.
 
+## config/
+
+\`config/kroger.md\` says which Kroger store the shopping is matched against and
+whether it is picked up or delivered. \`cat config/kroger.md\` answers "is Kroger
+set up", which is why there is no command for the question.
+
+**The Kroger account link is not in this folder and cannot be reached from it.**
+The credential lives outside the folder, where nothing in here can read it. To
+connect an account, to change the store or to disconnect, a person opens
+\`/kroger\` in a browser. That is one of exactly two screens this product has.
+
+## shopping-lists/
+
+One document per range of nights, named for the range:
+\`shopping-lists/2026-08-25--2026-08-31.md\`. The list itself is still derived
+from the folder every time — writing it down is not storing it, it is the sheet
+of paper the Kroger products get written onto.
+
+\`\`\`markdown
+---
+from: 2026-08-25
+to: 2026-08-31
+store: 01400513
+modality: pickup
+---
+
+# Shopping list for 2026-08-25 to 2026-08-31
+
+## Dairy
+
+- 8 oz shredded cheddar — 2026-08-25
+  - 1 \`0001111050158\` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
+\`\`\`
+
+An indented list item under a line is a **candidate product**, and the shape is
+fixed so that \`grep -o '\\\`[0-9]\\{13\\}\\\`'\` lists every UPC in play:
+
+    - <count> \`<upc>\` <description> — <size> — <price>
+
+Nothing is ever chosen for you. Choose by deleting the candidates you do not
+want, until one is left. Set \`<count>\` yourself, by comparing what the line
+needs against the package size — three 8 oz bags is \`3\`, not \`1\`.
+
 ## The ingredient line
 
 A recipe's ingredients are one markdown list item each, and the shape is:
@@ -129,6 +184,13 @@ export async function scaffold(folder: string): Promise<void> {
     if (!(await exists(keep))) {
       await writeFile(keep, '', 'utf8');
     }
+  }
+
+  // config/ is held open by a document rather than by a dotfile, because the
+  // document is the answer to a question somebody will ask on day one.
+  const kroger = path.join(folder, KROGER_CONFIG_PATH);
+  if (!(await exists(kroger))) {
+    await writeFile(kroger, krogerConfigDocument(null), 'utf8');
   }
 }
 

@@ -104,8 +104,24 @@ impl Measure {
     /// "1.75 lb" — and stops at the cup, because a shopping list says "3 cup"
     /// and not "1.5 pint".
     pub fn render(self) -> String {
+        match self.render_parts() {
+            (quantity, None) => quantity,
+            (quantity, Some(unit)) => format!("{quantity} {unit}"),
+        }
+    }
+
+    /// The same rendering, split.
+    ///
+    /// `shopping-list --json` needs the quantity and the unit as two values,
+    /// because a Kroger product has a package size and something has to compare
+    /// "8 oz" against it. Splitting the renderer rather than keeping the written
+    /// unit on the line is deliberate: `of` normalises into the family's base
+    /// unit and throws the written unit away, and two ingredients that combine
+    /// may not have been written in the same unit at all. What the reader wants
+    /// is the unit the line actually READS in, and that is chosen here.
+    pub fn render_parts(self) -> (String, Option<&'static str>) {
         if self.family == Family::Count {
-            return format_number(round_up(self.amount));
+            return (format_number(round_up(self.amount)), None);
         }
         let ladder: Vec<Unit> = UNITS
             .iter()
@@ -120,7 +136,7 @@ impl Measure {
             }
         }
         let value = self.amount / Ratio::from_integer(chosen.base);
-        format!("{} {}", format_number(value), chosen.canonical)
+        (format_number(value), Some(chosen.canonical))
     }
 }
 

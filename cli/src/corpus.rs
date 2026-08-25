@@ -311,13 +311,13 @@ fn missing_front_matter(path: &str, kind: &str, fields: &str) -> Problem {
     }
 }
 
-fn front_matter(text: &str) -> Option<String> {
+pub fn front_matter(text: &str) -> Option<String> {
     let rest = text.strip_prefix("---\n")?;
     let end = rest.find("\n---")?;
     Some(rest[..end].to_string())
 }
 
-fn field(front: &str, name: &str) -> Option<String> {
+pub fn field(front: &str, name: &str) -> Option<String> {
     for line in front.lines() {
         let Some((key, value)) = line.split_once(':') else { continue };
         if key.trim() == name {
