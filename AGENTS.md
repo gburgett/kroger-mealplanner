@@ -138,17 +138,30 @@ covered by it:
   binds the image afresh. `sandbox-image/rootfs/` is gitignored, so a fresh
   checkout has to run `./sandbox-image/build.sh` and `./cli/build.sh` before
   anything works.
-- **A change to the unit file** needs `systemctl --user daemon-reload` first, or
-  systemd restarts the old one and says nothing.
+- **A change to the unit file** is a change to `deploy/mealplan.service`, which
+  then has to be copied into place and followed by
+  `systemctl --user daemon-reload`, or systemd restarts the old one and says
+  nothing.
 
-**The unit file is `~/.config/systemd/user/mealplan.service`, and it is NOT in
-this repository.** Configuration lives there and nowhere else:
-`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE`, and
+**The unit is `deploy/mealplan.service`, in this repository.** It is installed by
+copying it to `~/.config/systemd/user/mealplan.service`, and the two drift the
+moment somebody edits the installed copy instead:
+
+```bash
+diff deploy/mealplan.service ~/.config/systemd/user/mealplan.service
+```
+
+It is **concrete, not a template** — every path and address in it is this
+machine's, because the lens is one household on one machine and a template with
+placeholders would describe a story this product does not have. It carries
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE` and
 `MEALPLAN_PORT=8000`, which has to match what `ssh exe.dev share port` pinned.
-`KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` come from
-`EnvironmentFile=-.env` instead, because the unit is world-readable and `.env` is
-0600 and gitignored. The leading `-` makes that file optional: without it the
-server still starts and the Kroger tools refuse by name, which is a better
+
+**The one thing it does not carry is the Kroger credential.**
+`KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` arrive through
+`EnvironmentFile=-.env`, because this unit is world-readable and in git, and
+`.env` is 0600 and is not. The leading `-` makes that file optional: without it
+the server still starts and the Kroger tools refuse by name, which is a better
 failure than the meal planner not starting at all.
 
 **The start-up lines in the journal are the health check.** They name the folder,

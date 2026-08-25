@@ -68,9 +68,8 @@ To undo the last one: `ssh exe.dev share set-private gb-kroger-mealplanner`.
 ## Running it
 
 **On this VM it already runs as a user systemd service**, `mealplan.service`, and
-that is the supported way to run it. The unit lives at
-`~/.config/systemd/user/mealplan.service`, outside this repository, and holds the
-configuration below.
+that is the supported way to run it. The unit is `deploy/mealplan.service` in
+this repository, installed by copying it into `~/.config/systemd/user/`.
 
 ```bash
 systemctl --user restart mealplan.service     # deploy a change to the server
@@ -78,15 +77,37 @@ systemctl --user status  mealplan.service
 journalctl --user -u mealplan.service -f
 ```
 
+Installing it from scratch, or reinstalling after editing it:
+
+```bash
+cp deploy/mealplan.service ~/.config/systemd/user/mealplan.service
+systemctl --user daemon-reload
+systemctl --user enable --now mealplan.service
+loginctl enable-linger "$USER"
+```
+
+The installed copy is a copy, so the two drift the moment somebody edits the
+wrong one, and nothing warns about it. The check:
+
+```bash
+diff deploy/mealplan.service ~/.config/systemd/user/mealplan.service
+```
+
+The unit is concrete rather than a template: every path and address in it is
+this machine's. That follows the product's own lens — one household on one
+machine (ADR 0008). On another machine, change `WorkingDirectory`, `ExecStart`,
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE` and
+`EnvironmentFile`.
+
 There is no build step, so `git pull` plus that restart is the whole deployment
 of a server change. A change under `cli/` needs `./cli/build.sh` instead, and
 takes effect on the next sandbox command with no restart, because every command
 is a fresh `bwrap` that binds the image again. A change to the unit file itself
 needs `systemctl --user daemon-reload` before the restart.
 
-Lingering is enabled for the user (`loginctl enable-linger exedev`), which is
-what makes a *user* service survive a logout and come back after a reboot.
-Without it the service stops when the last session ends.
+Lingering is what makes a *user* service survive a logout and come back after a
+reboot. Without it the service stops when the last session ends. It is already
+enabled here; `loginctl show-user "$USER" --property=Linger` says so.
 
 **Read the start-up lines in the journal after every restart.** They name the
 folder, the household, the token store and whether Kroger is configured and
