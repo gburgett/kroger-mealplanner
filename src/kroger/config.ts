@@ -25,6 +25,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { commitIfChanged } from '../git/commit.ts';
+import { krogerHowTo } from './help.ts';
 import type { Clock } from '../git/repository.ts';
 import type { Session } from '../sandbox/session.ts';
 
@@ -48,7 +49,19 @@ export type StoreChoice = {
  * before they go in, because a newline in a store name would end the front
  * matter early and a `---` in one would end it twice.
  */
-export function krogerConfigDocument(choice: StoreChoice | null): string {
+export function krogerConfigDocument(choice: StoreChoice | null, baseUrl?: string): string {
+  // The procedure comes from src/kroger/help.ts, the same text the tool
+  // descriptions and the refusals carry. `cat config/kroger.md` is how "is
+  // Kroger set up" gets answered, so it is also where "and how do I change it"
+  // has to be answered — an agent that has read this file needs nothing else.
+  const howTo = `## Connecting, or changing shops
+
+${krogerHowTo(baseUrl)}
+
+The account link is not in this folder and cannot be reached from it. The store
+comes back here; the credential does not, and never will.
+`;
+
   if (!choice) {
     return `---
 store:
@@ -59,11 +72,7 @@ modality: pickup
 
 No Kroger account is connected, and no store is chosen.
 
-The account link is not in this folder and cannot be reached from it. Open
-\`/kroger\` in a browser on the machine this meal planner runs on, sign in to
-Kroger, and choose the store you shop at. The store comes back here. The
-credential does not, and never will.
-`;
+${howTo}`;
   }
 
   const name = oneLine(choice.name);
@@ -82,10 +91,7 @@ A Kroger account is connected. The shopping is matched against **${name}**${
 \`mealplan shopping-list --out shopping-lists/<from>--<to>.md\` writes a list
 against this store, and the prices on it are this store's prices.
 
-The account link is not in this folder and cannot be reached from it. To change
-the store, to reconnect or to disconnect, open \`/kroger\` in a browser on the
-machine this meal planner runs on.
-`;
+${howTo}`;
 }
 
 /**
@@ -100,6 +106,7 @@ export async function writeKrogerConfig(
   folder: string,
   now: Clock,
   choice: StoreChoice | null,
+  baseUrl?: string,
 ): Promise<void> {
   const target = path.join(folder, KROGER_CONFIG_PATH);
   const message = choice
@@ -108,7 +115,7 @@ export async function writeKrogerConfig(
 
   await session.enqueue(async () => {
     await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, krogerConfigDocument(choice), 'utf8');
+    await writeFile(target, krogerConfigDocument(choice, baseUrl), 'utf8');
     await commitIfChanged(session, message, now());
   });
 }

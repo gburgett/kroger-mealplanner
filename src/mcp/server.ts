@@ -52,6 +52,7 @@ import {
   writeKrogerConfig,
   type Modality,
 } from '../kroger/config.ts';
+import { krogerHowTo } from '../kroger/help.ts';
 import { LinkDesk } from '../kroger/link.ts';
 import {
   krogerLinkGonePage,
@@ -63,13 +64,12 @@ import { KrogerStore } from '../kroger/store.ts';
 import { open, type Session, type SessionOptions } from '../sandbox/session.ts';
 import {
   BASH_DESCRIPTION,
-  FIND_PRODUCTS_DESCRIPTION,
   READ_FILE_DESCRIPTION,
-  SEND_TO_CART_DESCRIPTION,
   WRITE_FILE_DESCRIPTION,
   bashInputSchema,
   bashOutputSchema,
   findProducts,
+  findProductsDescription,
   findProductsInputSchema,
   findProductsOutputSchema,
   readCorpusFile,
@@ -78,6 +78,7 @@ import {
   renderBashResult,
   runBash,
   sendToCart,
+  sendToCartDescription,
   sendToCartInputSchema,
   sendToCartOutputSchema,
   writeCorpusFile,
@@ -149,12 +150,6 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const owner = options.owner ?? process.env.MEALPLAN_OWNER ?? DEFAULT_OWNER;
 
   const session = await open({ ...options, tenant });
-  // The folder first, then the repository, so the first commit holds the
-  // scaffold rather than an empty tree.
-  await scaffold(session.folder);
-  await ensureRepository(session, now);
-  // From here on, every command that changes a file commits itself.
-  commitAfterEveryCommand(session, now);
 
   const statePath = options.statePath ?? process.env.MEALPLAN_STATE ?? defaultStorePath();
   // Refused here rather than discovered later: a store inside the folder is the
@@ -223,6 +218,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
   const baseUrl = (options.publicUrl ?? process.env.MEALPLAN_PUBLIC_URL ?? `http://${host}:${port}`)
     .replace(/\/+$/, '');
+
+  // The folder first, then the repository, so the first commit holds the
+  // scaffold rather than an empty tree. AFTER the address is settled, because
+  // config/kroger.md names the page a person has to open and a relative
+  // "/kroger" is no use to somebody reading it in a chat window. Nothing is
+  // being served yet: the listener answers 503 until `app` is assigned.
+  await scaffold(session.folder, baseUrl);
+  await ensureRepository(session, now);
+  // From here on, every command that changes a file commits itself.
+  commitAfterEveryCommand(session, now);
+
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   // Built here rather than above, because the redirect URI is part of it and
@@ -235,6 +241,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           clientId: krogerClientId,
           clientSecret: krogerClientSecret,
           redirectUri: `${baseUrl}${KROGER_CALLBACK_PATH}`,
+          publicUrl: baseUrl,
           store: krogerStore,
         });
 
@@ -647,12 +654,18 @@ function mountKroger(app: Express, context: AppContext): void {
         return;
       }
 
-      await writeKrogerConfig(session, folder, now, {
-        locationId: chosen.locationId,
-        name: chosen.name,
-        address: chosen.address,
-        modality,
-      });
+      await writeKrogerConfig(
+        session,
+        folder,
+        now,
+        {
+          locationId: chosen.locationId,
+          name: chosen.name,
+          address: chosen.address,
+          modality,
+        },
+        context.baseUrl,
+      );
 
       // The code is minted last, and spent at once. With no consent waiting,
       // this was somebody changing their shop, and there is nowhere to go back.
@@ -686,7 +699,7 @@ function mountKroger(app: Express, context: AppContext): void {
       // The folder's half goes back to "not connected" too. `cat
       // config/kroger.md` has to keep answering the question truthfully, and a
       // store left behind for an account we no longer hold is a lie.
-      await writeKrogerConfig(session, folder, now, null);
+      await writeKrogerConfig(session, folder, now, null, context.baseUrl);
       response.setHeader('Cache-Control', 'no-store');
       response.redirect(302, KROGER_PATH);
     })().catch(next);
@@ -762,7 +775,13 @@ async function handleMcp(
     if (transport.sessionId) transports.delete(transport.sessionId);
   };
 
-  const mcp = buildMcpServer(context.session, context.session.folder, context.now, context.kroger);
+  const mcp = buildMcpServer(
+    context.session,
+    context.session.folder,
+    context.now,
+    context.kroger,
+    context.baseUrl,
+  );
   await mcp.connect(transport);
   await transport.handleRequest(request, response);
 }
@@ -787,14 +806,25 @@ export function buildMcpServer(
   folder: string,
   now: Clock,
   kroger: KrogerApi | null = null,
+  baseUrl?: string,
 ): McpServer {
   const mcp = new McpServer(
     { name: 'kroger-mealplanner', version: '0.1.0' },
     {
       capabilities: { tools: {} },
+      // Read at the handshake, so this is the one piece of documentation that is
+      // always in the agent's context. It carries the Kroger procedure because
+      // the household will ask for it in conversation — "which shop are we
+      // buying from, and can we change it" — and an agent that has to guess an
+      // address gives an answer nobody can act on.
       instructions:
         'A meal plan is a folder of markdown documents. Read README.md in the folder first; ' +
-        'it is the schema. Plan meals with ordinary shell commands.',
+        'it is the schema. Plan meals with ordinary shell commands.\n\n' +
+        'KROGER. Which shop the shopping is matched against lives in ' +
+        'config/kroger.md, so "cat config/kroger.md" answers "is Kroger set up" ' +
+        'and "which shop". There is no tool for that question and there should ' +
+        'not be one.\n\n' +
+        krogerHowTo(baseUrl),
     },
   );
 
@@ -866,12 +896,12 @@ export function buildMcpServer(
     'kroger_find_products',
     {
       title: 'Find Kroger products for the lines on a shopping list',
-      description: FIND_PRODUCTS_DESCRIPTION,
+      description: findProductsDescription(baseUrl),
       inputSchema: findProductsInputSchema,
       outputSchema: findProductsOutputSchema,
     },
     async ({ path: requested }) => {
-      const result = await findProducts({ session, folder, now, kroger, requested });
+      const result = await findProducts({ session, folder, now, kroger, requested, baseUrl });
       return {
         content: [{ type: 'text', text: renderFindProducts(result) }],
         structuredContent: result,
@@ -883,12 +913,20 @@ export function buildMcpServer(
     'kroger_send_to_cart',
     {
       title: 'Add the chosen products to the household Kroger cart',
-      description: SEND_TO_CART_DESCRIPTION,
+      description: sendToCartDescription(baseUrl),
       inputSchema: sendToCartInputSchema,
       outputSchema: sendToCartOutputSchema,
     },
     async ({ path: requested, items }) => {
-      const result = await sendToCart({ session, folder, now, kroger, requested, only: items });
+      const result = await sendToCart({
+        session,
+        folder,
+        now,
+        kroger,
+        requested,
+        only: items,
+        baseUrl,
+      });
       return {
         content: [{ type: 'text', text: renderSendToCart(result) }],
         structuredContent: result,

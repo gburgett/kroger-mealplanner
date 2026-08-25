@@ -16,10 +16,14 @@
 // the first moment, because `cat config/kroger.md` is how "is Kroger set up"
 // gets answered, and a question answered by `cat` needs no tool. See ADR 0010.
 
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { KROGER_CONFIG_PATH, krogerConfigDocument } from '../kroger/config.ts';
+import {
+  KROGER_CONFIG_PATH,
+  krogerConfigDocument,
+  readKrogerConfig,
+} from '../kroger/config.ts';
 
 export const CORPUS_DIRECTORIES = [
   'config',
@@ -103,12 +107,14 @@ has in. The shopping list leaves them out unless you pass
 
 \`config/kroger.md\` says which Kroger store the shopping is matched against and
 whether it is picked up or delivered. \`cat config/kroger.md\` answers "is Kroger
-set up", which is why there is no command for the question.
+set up", which is why there is no command for the question — **and it also holds
+the address to open and the steps to follow to connect an account or change
+shops.** Read it before telling anybody anything about Kroger.
 
 **The Kroger account link is not in this folder and cannot be reached from it.**
-The credential lives outside the folder, where nothing in here can read it. To
-connect an account, to change the store or to disconnect, a person opens
-\`/kroger\` in a browser. That is one of exactly two screens this product has.
+The credential lives outside the folder, where nothing in here can read it.
+Connecting one needs a person at a browser, on one of exactly two screens this
+product has.
 
 ## shopping-lists/
 
@@ -168,8 +174,14 @@ recipe to that night's servings and adds the quantities up with the units. It is
 derived from the folder every time and never stored.
 `;
 
-/** Create anything that is missing. Never overwrites a document that is there. */
-export async function scaffold(folder: string): Promise<void> {
+/**
+ * Create anything that is missing. Never overwrites a document that is there.
+ *
+ * `baseUrl` is this server's own address, and it reaches `config/kroger.md` so
+ * that the file can name the page a person actually opens. It is the configured
+ * public URL and never a request header — see src/kroger/help.ts.
+ */
+export async function scaffold(folder: string, baseUrl?: string): Promise<void> {
   await mkdir(folder, { recursive: true });
 
   const readme = path.join(folder, 'README.md');
@@ -188,9 +200,30 @@ export async function scaffold(folder: string): Promise<void> {
 
   // config/ is held open by a document rather than by a dotfile, because the
   // document is the answer to a question somebody will ask on day one.
+  //
+  // WHILE NO STORE IS SET, THIS DOCUMENT IS REGENERATED ON EVERY START. It is
+  // boilerplate until somebody picks a shop: it holds no choice, only the
+  // address to open and the steps to follow, and both of those change when the
+  // server is redeployed at a new address. Regenerating is what carries a
+  // corrected address into a folder that already exists.
+  //
+  // The moment a store IS set the file is never touched here again — that one
+  // is a choice, and `writeKrogerConfig` owns it. Nothing is lost either way:
+  // the folder is a git repository and every version is in the history.
   const kroger = path.join(folder, KROGER_CONFIG_PATH);
-  if (!(await exists(kroger))) {
-    await writeFile(kroger, krogerConfigDocument(null), 'utf8');
+  const { store } = await readKrogerConfig(folder);
+  if (store === '') {
+    const wanted = krogerConfigDocument(null, baseUrl);
+    if ((await read(kroger)) !== wanted) await writeFile(kroger, wanted, 'utf8');
+  }
+}
+
+/** The file's contents, or null when it is not there. */
+async function read(target: string): Promise<string | null> {
+  try {
+    return await readFile(target, 'utf8');
+  } catch {
+    return null;
   }
 }
 

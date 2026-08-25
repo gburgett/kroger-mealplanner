@@ -46,12 +46,18 @@ Given(
     const store = storeNamed(name);
     await this.writeFile(
       'config/kroger.md',
-      krogerConfigDocument({
-        locationId: store.locationId,
-        name: store.name,
-        address: store.address,
-        modality: modality as Modality,
-      }),
+      // The address is passed because the real store picker passes it. A setup
+      // step that wrote a document the server would never write would prove
+      // something about a file that does not exist in production.
+      krogerConfigDocument(
+        {
+          locationId: store.locationId,
+          name: store.name,
+          address: store.address,
+          modality: modality as Modality,
+        },
+        this.baseUrl(),
+      ),
     );
   },
 );
@@ -442,6 +448,72 @@ Then('the output does not contain the Kroger client secret', function (this: Mea
     'the Kroger client secret is readable from inside the sandbox',
   );
   assert.ok(!this.output().includes('KROGER_CLIENT_SECRET'), 'even the name leaked in');
+});
+
+// --- what the agent can find out about linking ------------------------------
+//
+// The agent cannot connect an account or change a shop — it needs a person and
+// a browser. What it CAN do is say where to go, and these steps check that the
+// answer is one somebody can act on: the real address, and the actual steps.
+
+/** The four beats a person has to walk, wherever the text is found. */
+function saysHowToChangeShops(text: string, where: string): void {
+  for (const beat of [/postcode/i, /find stores/i, /pickup or delivery/i, /config\/kroger\.md/]) {
+    assert.match(text, beat, `${where} never mentions ${beat}`);
+  }
+  // It must be honest about who does it. An agent that thinks it can do this
+  // itself will try, fail, and tell the household nothing useful.
+  assert.match(text, /person at a browser|needs a person|cannot do it/i, `${where} does not say a person has to do it`);
+}
+
+Then("the meal planner's instructions say how to change shops", function (this: MealPlanWorld) {
+  const instructions = this.mcp().getInstructions() ?? '';
+  saysHowToChangeShops(instructions, 'the handshake instructions');
+  this.documentation = [instructions];
+});
+
+Then(
+  'the {string} tool description says how to change shops',
+  function (this: MealPlanWorld, name: string) {
+    const tool = this.tools.find((candidate) => candidate.name === name);
+    assert.ok(tool, `there is no "${name}" tool`);
+    const description = tool.description ?? '';
+    saysHowToChangeShops(description, `the "${name}" description`);
+    this.documentation.push(description);
+  },
+);
+
+Then("each of those names this server's own address", function (this: MealPlanWorld) {
+  assert.ok(this.documentation.length > 0, 'nothing was collected to check');
+  for (const text of this.documentation) {
+    assert.ok(
+      text.includes(`${this.baseUrl()}/kroger`),
+      `this names no address a person could open — a bare "/kroger" is no use ` +
+        `in a chat window:\n${text}`,
+    );
+  }
+});
+
+Then('the output says how to change shops', function (this: MealPlanWorld) {
+  saysHowToChangeShops(this.output(), 'the output');
+});
+
+Then("the output names this server's own address", function (this: MealPlanWorld) {
+  assert.ok(
+    this.output().includes(`${this.baseUrl()}/kroger`),
+    `the output names no address a person could open:\n${this.output()}`,
+  );
+});
+
+Then('the refusal says how to change shops', function (this: MealPlanWorld) {
+  saysHowToChangeShops(refusal(this), 'the refusal');
+});
+
+Then("the refusal names this server's own address", function (this: MealPlanWorld) {
+  assert.ok(
+    refusal(this).includes(`${this.baseUrl()}/kroger`),
+    `the refusal names no address a person could open:\n${this.lastToolError}`,
+  );
 });
 
 // ---------------------------------------------------------------------------

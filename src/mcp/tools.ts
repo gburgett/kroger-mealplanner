@@ -24,7 +24,8 @@ import { resolveInsideFolder } from '../corpus/files.ts';
 import type { Clock } from '../git/repository.ts';
 import { commitIfChanged } from '../git/commit.ts';
 import type { KrogerApi } from '../kroger/api.ts';
-import { NotLinkedError } from '../kroger/api.ts';
+import { NotConfiguredError, NotLinkedError } from '../kroger/api.ts';
+import { krogerHowTo } from '../kroger/help.ts';
 import { readKrogerConfig } from '../kroger/config.ts';
 import {
   appendSent,
@@ -192,6 +193,22 @@ function messageOf(error: unknown): string {
 // against a racing bash command.
 // ---------------------------------------------------------------------------
 
+export function findProductsDescription(baseUrl?: string): string {
+  return `${FIND_PRODUCTS_DESCRIPTION}
+
+CHANGING WHICH SHOP THE PRICES COME FROM
+
+${krogerHowTo(baseUrl)}`;
+}
+
+export function sendToCartDescription(baseUrl?: string): string {
+  return `${SEND_TO_CART_DESCRIPTION}
+
+CONNECTING AN ACCOUNT, OR CHANGING WHICH SHOP
+
+${krogerHowTo(baseUrl)}`;
+}
+
 export const FIND_PRODUCTS_DESCRIPTION = `Find Kroger products for the lines on a shopping list.
 
 Give it a list written by "mealplan shopping-list --from ... --to ... --out
@@ -224,9 +241,8 @@ Lines that already have candidates are left alone, so running this again never
 undoes a choice. To search for something again, move its line back out of "##
 Not found at this store" first.
 
-It needs a connected Kroger account and a chosen store. "cat config/kroger.md"
-says whether there is one; connecting needs a person and a browser, so it
-cannot be done from here.`;
+It needs a chosen store, because Kroger returns no price at all without one.
+"cat config/kroger.md" says which shop is set, and how to change it.`;
 
 export const SEND_TO_CART_DESCRIPTION = `Add the chosen products on a shopping list to the household's Kroger cart.
 
@@ -248,7 +264,10 @@ TWO THINGS TO SAY OUT LOUD RATHER THAN GUESS AT:
     contains" anything.
 
 What was sent is appended to the document under "## Sent", as a record of what
-was asked for. That is not a claim about what the cart holds either.`;
+was asked for. That is not a claim about what the cart holds either.
+
+It needs a connected Kroger account. "cat config/kroger.md" says whether there
+is one.`;
 
 export const findProductsInputSchema = {
   path: z
@@ -317,20 +336,21 @@ export async function findProducts(options: {
   now: Clock;
   kroger: KrogerApi | null;
   requested: string;
+  /** This server's address, so a refusal can say where a person has to go. */
+  baseUrl?: string;
 }): Promise<FindProductsResult> {
-  const { session, folder, now, kroger, requested } = options;
+  const { session, folder, now, kroger, requested, baseUrl } = options;
   // Searching uses the SERVER'S application token, not the household's, so a
   // link is not needed for it — only a store, because Kroger returns no price
   // without one. Sending is what needs the household's credential.
-  if (!kroger) throw new NotLinkedError();
+  if (!kroger) throw new NotConfiguredError();
 
   const resolved = await resolveInsideFolder(folder, requested);
   const config = await readKrogerConfig(folder);
   if (!config.store) {
     throw new Error(
-      'no Kroger store is chosen, and Kroger returns no prices without one. ' +
-        'Open /kroger in a browser and pick the shop you walk into. ' +
-        '"cat config/kroger.md" says which one is set.',
+      'no Kroger shop is chosen, and Kroger returns no prices at all without one.\n\n' +
+        krogerHowTo(baseUrl ?? kroger.publicUrl),
     );
   }
 
@@ -401,10 +421,12 @@ export async function sendToCart(options: {
   kroger: KrogerApi | null;
   requested: string;
   only?: Array<{ upc: string; quantity: number }>;
+  /** This server's address, so a refusal can say where a person has to go. */
+  baseUrl?: string;
 }): Promise<SendToCartResult> {
-  const { session, folder, now, kroger, requested, only } = options;
-  if (!kroger) throw new NotLinkedError();
-  if (!kroger.store.connected) throw new NotLinkedError();
+  const { session, folder, now, kroger, requested, only, baseUrl } = options;
+  if (!kroger) throw new NotConfiguredError();
+  if (!kroger.store.connected) throw new NotLinkedError(baseUrl ?? kroger.publicUrl);
 
   const resolved = await resolveInsideFolder(folder, requested);
   const before = await readFile(resolved, 'utf8').catch((error: unknown) => {

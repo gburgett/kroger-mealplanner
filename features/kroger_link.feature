@@ -85,6 +85,44 @@ Feature: Connecting a Kroger account
     When I run "cat config/kroger.md"
     Then the output mentions "No Kroger account is connected"
 
+  @core
+  Scenario: The assistant can tell me how to change shops
+    The assistant cannot change the shop and no tool can — it needs a person and
+    a browser. What it CAN do is say exactly where to go, and it must not have
+    to guess the address: "/kroger" is no use to somebody reading a chat window
+    on a laptop, and "the machine this meal planner runs on" is worse.
+
+    When a client connects to the meal planner over MCP
+    Then the meal planner's instructions say how to change shops
+    And the "kroger_find_products" tool description says how to change shops
+    And the "kroger_send_to_cart" tool description says how to change shops
+    And each of those names this server's own address
+
+  @core
+  Scenario: The folder itself says how to change shops
+    `cat config/kroger.md` is how "is Kroger set up" gets answered, so it is also
+    where "and how do I change it" has to be answered.
+
+    Given my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    When I run "cat config/kroger.md"
+    Then the output says how to change shops
+    And the output names this server's own address
+
+  @core
+  Scenario: A brand new folder says how to sign in to Kroger
+    Given the meal-plan folder is brand new
+    When I run "cat config/kroger.md"
+    Then the output says how to change shops
+    And the output names this server's own address
+
+  @core
+  Scenario: A refusal says how to link, with an address I can open
+    Given the shopping list for "2026-08-25" to "2026-08-31" has been written
+    When I send the shopping list to my Kroger cart
+    Then the refusal says how to change shops
+    And the refusal names this server's own address
+
   @security
   Scenario: Only the household can start the link
     Given "someone.else@example.com" is signed in to exe.dev

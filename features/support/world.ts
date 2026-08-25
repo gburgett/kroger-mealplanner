@@ -88,6 +88,8 @@ export class MealPlanWorld extends World {
   krogerZip = '45202';
   /** The callback URL Kroger last sent the browser to, for the replay scenario. */
   krogerCallbackUrl = '';
+  /** Pieces of documentation a scenario has collected, to assert against together. */
+  documentation: string[] = [];
 
   /**
    * The household's own client. It outlives a restart on purpose: keeping the

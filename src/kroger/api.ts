@@ -28,6 +28,7 @@
 //   * Errors come in two shapes: `{"errors":{code,reason}}` from products, and
 //     a flat `{code,reason}` from auth and cart. `describeFailure` reads both.
 
+import { krogerHowTo, krogerNotConfiguredHowTo } from './help.ts';
 import type { KrogerStore, KrogerTokens } from './store.ts';
 
 export const DEFAULT_KROGER_API_BASE = 'https://api.kroger.com';
@@ -64,6 +65,8 @@ export type KrogerOptions = {
    * an injection and fail.
    */
   redirectUri: string;
+  /** This server's own address, for the "here is how to link" messages. */
+  publicUrl?: string;
   store: KrogerStore;
 };
 
@@ -106,15 +109,31 @@ export class KrogerError extends Error {
   }
 }
 
-/** The household has not linked an account, or has disconnected one. */
+/**
+ * The household has not linked an account, or has disconnected one.
+ *
+ * The message carries the whole procedure and the real address, because this is
+ * the moment an agent needs it: it has just been asked to do the shopping and
+ * cannot. "No Kroger account is connected" alone leaves the household with
+ * nowhere to go.
+ */
 export class NotLinkedError extends Error {
-  constructor() {
-    super(
-      'no Kroger account is connected. Open /kroger in a browser, sign in to Kroger, ' +
-        'and choose the store you shop at. The link needs a person and a browser, so ' +
-        'it cannot be done from here.',
-    );
+  constructor(baseUrl?: string) {
+    super(`no Kroger account is connected, so there is nothing to shop with.\n\n${krogerHowTo(baseUrl)}`);
     this.name = 'NotLinkedError';
+  }
+}
+
+/**
+ * The SERVER has no Kroger credentials, which is a different problem.
+ *
+ * Sending the household to a browser page would waste their time: the page
+ * cannot connect anything either. This one is for whoever runs the server.
+ */
+export class NotConfiguredError extends Error {
+  constructor() {
+    super(krogerNotConfiguredHowTo());
+    this.name = 'NotConfiguredError';
   }
 }
 
@@ -122,6 +141,7 @@ export class KrogerApi {
   readonly base: string;
   readonly clientId: string;
   readonly redirectUri: string;
+  readonly publicUrl: string | undefined;
   readonly store: KrogerStore;
   readonly #clientSecret: string;
 
@@ -133,6 +153,7 @@ export class KrogerApi {
     this.clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.redirectUri = options.redirectUri;
+    this.publicUrl = options.publicUrl;
     this.store = options.store;
   }
 
@@ -175,7 +196,7 @@ export class KrogerApi {
    */
   async householdToken(): Promise<string> {
     const held = this.store.tokens;
-    if (!held) throw new NotLinkedError();
+    if (!held) throw new NotLinkedError(this.publicUrl);
     // Thirty seconds of slack, so a token that expires in flight does not.
     if (held.expiresAt > nowSeconds() + 30) return held.accessToken;
 
