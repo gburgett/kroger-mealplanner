@@ -4,3 +4,5 @@ target/
 *.wasm
 sandbox-image/rootfs/
 cli/target/
+
+.env
