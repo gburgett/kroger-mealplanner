@@ -115,6 +115,55 @@ types itself, so avoid enums and namespaces, which it cannot. One process holds
 both the server and the sandbox: `run()` is a `bwrap` child, so there is no
 daemon, no RPC and no KVM.
 
+### How it actually runs, and how to restart it
+
+On this VM the server is a **user** systemd service, `mealplan.service`. Every
+command below is `systemctl --user`; `sudo systemctl` addresses a different
+manager and will not find it. Lingering is on, so it survives a logout and comes
+back after a reboot.
+
+```bash
+systemctl --user restart mealplan.service        # deploy a code change
+systemctl --user status  mealplan.service        # is it up, and since when
+journalctl --user -u mealplan.service -f         # follow the log
+```
+
+**Restarting IS the deploy.** There is no build step, so a `git pull` followed by
+a restart is the whole procedure for a change to the server. Two things are not
+covered by it:
+
+- **A change to `cli/`** needs `./cli/build.sh`, which compiles the musl binary
+  and stages it into `sandbox-image/rootfs/`. That takes effect on the **next
+  command** with no restart at all, because every command is a fresh `bwrap` that
+  binds the image afresh. `sandbox-image/rootfs/` is gitignored, so a fresh
+  checkout has to run `./sandbox-image/build.sh` and `./cli/build.sh` before
+  anything works.
+- **A change to the unit file** needs `systemctl --user daemon-reload` first, or
+  systemd restarts the old one and says nothing.
+
+**The unit file is `~/.config/systemd/user/mealplan.service`, and it is NOT in
+this repository.** Configuration lives there and nowhere else:
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE`, and
+`MEALPLAN_PORT=8000`, which has to match what `ssh exe.dev share port` pinned.
+`KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` come from
+`EnvironmentFile=-.env` instead, because the unit is world-readable and `.env` is
+0600 and gitignored. The leading `-` makes that file optional: without it the
+server still starts and the Kroger tools refuse by name, which is a better
+failure than the meal planner not starting at all.
+
+**The start-up lines in the journal are the health check.** They name the folder,
+the household, the token store, and whether Kroger is configured and linked.
+Read them after every restart rather than trusting `active (running)` — the
+process being up says nothing about which folder it opened.
+
+`Restart=on-failure`, and the server exits 0 on `SIGTERM`, so
+`systemctl --user stop` stays stopped. Running `node server.ts` by hand while the
+service is up collides on port 8000; stop the service first, or use a different
+`MEALPLAN_PORT`.
+
+`docs/deploying-behind-exe-dev.md` holds the rest: pinning the port, going
+public, the variables in full, and what to register with Kroger.
+
 **Use `pnpm`, never `npm install`.** The settings in `pnpm-workspace.yaml` block
 dependency build scripts and refuse packages published in the last seven days.
 This is the one defence that matters for a risk the sandbox does not cover: the
