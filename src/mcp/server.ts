@@ -44,7 +44,7 @@ import { MealPlanOAuthProvider } from '../auth/provider.ts';
 import { AuthStore, assertOutsideFolder, defaultStorePath } from '../auth/store.ts';
 import { scaffold } from '../corpus/scaffold.ts';
 import { snapshot, renderTree } from '../corpus/tree.ts';
-import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
+import { commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, recentHistory, type Clock } from '../git/repository.ts';
 import { DEFAULT_KROGER_API_BASE, KrogerApi } from '../kroger/api.ts';
 import {
@@ -227,8 +227,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // being served yet: the listener answers 503 until `app` is assigned.
   await scaffold(session.folder, baseUrl);
   await ensureRepository(session, now);
-  // From here on, every command that changes a file commits itself.
-  commitAfterEveryCommand(session, now);
+  // From here on, every mutating tool commits its own changes.
+  // There is no per-command auto-commit — the agent provides the message.
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -844,8 +844,10 @@ export async function buildMcpServer(
       inputSchema: bashInputSchema,
       outputSchema: bashOutputSchema,
     },
-    async ({ command }) => {
+    async ({ command, message }) => {
       const result = await runBash(session, command);
+      // Commit if the command changed anything. No commit when nothing changed.
+      await commitIfChanged(session, message, now());
       return {
         content: [{ type: 'text', text: renderBashResult(result) }],
         structuredContent: result,
@@ -879,12 +881,12 @@ export async function buildMcpServer(
       inputSchema: writeFileInputSchema,
       outputSchema: writeFileOutputSchema,
     },
-    async ({ path: requested, content }) => {
+    async ({ path: requested, content, message }) => {
       // Written and committed under one turn of the session, so a bash command
       // arriving in between cannot be committed under this message.
       const bytes = await session.enqueue(async () => {
         const written = await writeCorpusFile(folder, requested, content);
-        await commitIfChanged(session, `write_file ${requested}`, now());
+        await commitIfChanged(session, message, now());
         return written;
       });
       return {
@@ -908,8 +910,8 @@ export async function buildMcpServer(
       inputSchema: findProductsInputSchema,
       outputSchema: findProductsOutputSchema,
     },
-    async ({ path: requested }) => {
-      const result = await findProducts({ session, folder, now, kroger, requested, baseUrl });
+    async ({ path: requested, message }) => {
+      const result = await findProducts({ session, folder, now, kroger, requested, message, baseUrl });
       return {
         content: [{ type: 'text', text: renderFindProducts(result) }],
         structuredContent: result,
@@ -925,13 +927,14 @@ export async function buildMcpServer(
       inputSchema: sendToCartInputSchema,
       outputSchema: sendToCartOutputSchema,
     },
-    async ({ path: requested, items }) => {
+    async ({ path: requested, items, message }) => {
       const result = await sendToCart({
         session,
         folder,
         now,
         kroger,
         requested,
+        message,
         only: items,
         baseUrl,
       });

@@ -58,7 +58,7 @@ links, so "grep -rl chicken-tacos.md dinners/" answers "when did we last make
 this".
 
 The folder is a git repository and every command that changes a file is
-committed for you, with this command line as the message. git log, git diff and
+committed for you, with the message you provide. git log, git diff and
 git restore all work, so nothing is lost by overwriting it.
 
 Two commands are not exploration and should not be done from memory:
@@ -92,13 +92,19 @@ Equivalent to "cat" through the bash tool; this is the convenient form.`;
 export const WRITE_FILE_DESCRIPTION = `Create or overwrite a file in the meal-plan folder.
 
 The path is relative to the folder root, for example "recipes/chicken-tacos.md".
-The whole file is replaced, and the change is committed, so an overwrite can
-always be walked back with git restore.
+The whole file is replaced, and the change is committed with the message you
+provide, so an overwrite can always be walked back with git restore.
 
 Missing directories on the way to the file are created.`;
 
 export const bashInputSchema = {
   command: z.string().describe('The shell command to run, as bash would read it.'),
+  message: z
+    .string()
+    .describe(
+      'A commit message describing what this change does. Required — ' +
+        'every command that changes a file is committed with this message.',
+    ),
 };
 
 export const bashOutputSchema = {
@@ -120,6 +126,12 @@ export const readFileOutputSchema = {
 export const writeFileInputSchema = {
   path: z.string().describe('Path relative to the meal-plan folder root.'),
   content: z.string().describe('The whole new contents of the file.'),
+  message: z
+    .string()
+    .describe(
+      'A commit message describing what this change does. Required — ' +
+        'the change is committed with this message.',
+    ),
 };
 
 export const writeFileOutputSchema = {
@@ -276,6 +288,12 @@ export const findProductsInputSchema = {
       'The shopping list, relative to the folder root, for example ' +
         '"shopping-lists/2026-08-25--2026-08-31.md".',
     ),
+  message: z
+    .string()
+    .describe(
+      'A commit message describing what this search is for. Required — ' +
+        'candidates written to the list are committed with this message.',
+    ),
 };
 
 export const findProductsOutputSchema = {
@@ -289,6 +307,12 @@ export const sendToCartInputSchema = {
   path: z
     .string()
     .describe('The shopping list, relative to the folder root.'),
+  message: z
+    .string()
+    .describe(
+      'A commit message describing what is being sent. Required — ' +
+        'the sent status written to the list is committed with this message.',
+    ),
   items: z
     .array(
       z.object({
@@ -336,10 +360,11 @@ export async function findProducts(options: {
   now: Clock;
   kroger: KrogerApi | null;
   requested: string;
+  message: string;
   /** This server's address, so a refusal can say where a person has to go. */
   baseUrl?: string;
 }): Promise<FindProductsResult> {
-  const { session, folder, now, kroger, requested, baseUrl } = options;
+  const { session, folder, now, kroger, requested, message, baseUrl } = options;
   // Searching uses the SERVER'S application token, not the household's, so a
   // link is not needed for it — only a store, because Kroger returns no price
   // without one. Sending is what needs the household's credential.
@@ -403,7 +428,7 @@ export async function findProducts(options: {
 
   await session.enqueue(async () => {
     await writeFile(resolved, after, 'utf8');
-    await commitIfChanged(session, `kroger_find_products ${requested}`, now());
+    await commitIfChanged(session, message, now());
   });
 
   return {
@@ -420,11 +445,12 @@ export async function sendToCart(options: {
   now: Clock;
   kroger: KrogerApi | null;
   requested: string;
+  message: string;
   only?: Array<{ upc: string; quantity: number }>;
   /** This server's address, so a refusal can say where a person has to go. */
   baseUrl?: string;
 }): Promise<SendToCartResult> {
-  const { session, folder, now, kroger, requested, only, baseUrl } = options;
+  const { session, folder, now, kroger, requested, message, only, baseUrl } = options;
   if (!kroger) throw new NotConfiguredError();
   if (!kroger.store.connected) throw new NotLinkedError(baseUrl ?? kroger.publicUrl);
 
@@ -495,7 +521,7 @@ export async function sendToCart(options: {
   const after = appendSent(before, sending, now());
   await session.enqueue(async () => {
     await writeFile(resolved, after, 'utf8');
-    await commitIfChanged(session, `kroger_send_to_cart ${requested}`, now());
+    await commitIfChanged(session, message, now());
   });
 
   return { path: requested, sent: sending, skipped };

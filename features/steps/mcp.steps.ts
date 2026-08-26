@@ -30,6 +30,14 @@ When(/^I (?:have )?run "(.*)"$/, async function (this: MealPlanWorld, command: s
   await this.run(unescape(command));
 });
 
+When(/^I (?:have )?run "(.*)" with the message "(.*)"$/, async function (
+  this: MealPlanWorld,
+  command: string,
+  message: string,
+) {
+  await this.run(unescape(command), message);
+});
+
 When(/^I (?:have )?run:$/, async function (this: MealPlanWorld, command: string) {
   await this.run(command);
 });

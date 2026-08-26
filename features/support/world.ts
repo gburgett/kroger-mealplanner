@@ -265,17 +265,20 @@ export class MealPlanWorld extends World {
   }
 
   /** Run a command through the real MCP interface, and remember the result. */
-  async run(command: string): Promise<BashResult> {
-    const response = await this.mcp().callTool({ name: 'bash', arguments: { command } });
+  async run(command: string, message?: string): Promise<BashResult> {
+    const response = await this.mcp().callTool({
+      name: 'bash',
+      arguments: { command, message: message ?? command },
+    });
     this.commandsRun.push(command);
     this.lastResult = response.structuredContent as BashResult;
     return this.lastResult;
   }
 
-  async writeFile(target: string, content: string): Promise<void> {
+  async writeFile(target: string, content: string, message?: string): Promise<void> {
     const response = await this.mcp().callTool({
       name: 'write_file',
-      arguments: { path: target, content },
+      arguments: { path: target, content, message: message ?? `write_file ${target}` },
     });
     if (response.isError) {
       throw new Error(`write_file ${target} failed: ${JSON.stringify(response.content)}`);

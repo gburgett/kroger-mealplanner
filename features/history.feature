@@ -5,10 +5,11 @@ Feature: The meal plan remembers what it used to say
   So that an agent editing a file freehand can never lose Grandma's tortilla trick
 
   The mounted folder is a git repository. Nothing about that is exposed as a
-  concept the housewife has to learn: the server commits after every command
-  that changes a file, so history accumulates whether or not the agent thinks to
-  ask for it. What the agent gets in return is "git log", "git diff" and a way
-  back — the undo button that a folder of files otherwise does not have.
+  concept the housewife has to learn: the server commits after every mutating
+  tool call, with the message the agent provides. git log, git diff and
+  git restore all work, so history accumulates whether or not the agent thinks
+  to ask for it. What the agent gets in return is a way back — the undo button
+  that a folder of files otherwise does not have.
 
   Background:
     Given a meal-plan folder mounted at "/workspace"
@@ -61,11 +62,11 @@ Feature: The meal plan remembers what it used to say
     And the last commit touched the file "recipes/taco-night.md"
     And the last commit touched the file "dinners/2026-08-25.md"
 
-  Scenario: The commit message says what was run
+  Scenario: The commit message is what the agent provided
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    When I run "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md"
+    When I run "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md" with the message "Double the chicken tacos"
     And I run "git log -1 --format=%s"
-    Then the output mentions "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md"
+    Then the output is "Double the chicken tacos"
 
   Scenario: Reading the history of one recipe
     Given the recipe "Chicken Tacos" has been edited on:
