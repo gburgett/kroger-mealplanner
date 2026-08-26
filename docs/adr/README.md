@@ -25,6 +25,7 @@ decision, write a new record. Give the old record the status
 | [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted |
 | [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted |
 | [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted, one item open |
+| [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and

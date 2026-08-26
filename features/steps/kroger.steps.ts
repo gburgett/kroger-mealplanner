@@ -36,7 +36,7 @@ Given('my Kroger account is connected', async function (this: MealPlanWorld) {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: Math.floor(Date.now() / 1000) + tokens.expiresIn,
-    scope: 'cart.basic:write profile.compact',
+    scope: 'cart.basic:write',
   });
 });
 
@@ -556,6 +556,22 @@ Then('I am sent to Kroger to sign in', function (this: MealPlanWorld) {
   // the sixty-second code is issued last.
   assert.ok(!/[?&]code=/.test(response.location ?? ''), 'a code was issued before the link finished');
 });
+
+Then(
+  'the sign-in asks Kroger for only {string}',
+  function (this: MealPlanWorld, scopes: string) {
+    // Read off the redirect rather than the mock's log: what is under test is
+    // what we ASK for, and the ask is the thing the household's browser carries
+    // to Kroger. A scope Kroger has not granted this application never reaches
+    // a password box — it is refused at /authorize.
+    const sent = new URL(this.response().location ?? '', this.krogerMock().base);
+    assert.equal(
+      sent.searchParams.get('scope'),
+      scopes,
+      `the sign-in asked Kroger for "${sent.searchParams.get('scope')}"`,
+    );
+  },
+);
 
 When('Kroger sends me back with a code', async function (this: MealPlanWorld) {
   await followKrogerSignIn(this);

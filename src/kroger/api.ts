@@ -33,8 +33,15 @@ import type { KrogerStore, KrogerTokens } from './store.ts';
 
 export const DEFAULT_KROGER_API_BASE = 'https://api.kroger.com';
 
-/** What the household's link is for. `profile.compact` comes with the consent. */
-export const HOUSEHOLD_SCOPES = 'cart.basic:write profile.compact';
+/**
+ * What the household's link is for. The cart, and nothing else.
+ *
+ * `profile.compact` was asked for here until a household's sign-in died on
+ * `invalid_scope`: an application is granted the scopes it registered for, and
+ * an unused one is not a harmless extra. Nothing in this product ever read a
+ * Kroger profile. See ADR 0011.
+ */
+export const HOUSEHOLD_SCOPES = 'cart.basic:write';
 
 /** What the server's own token is for. Products and locations, nothing else. */
 export const APPLICATION_SCOPE = 'product.compact';

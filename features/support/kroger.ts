@@ -66,6 +66,20 @@ export type TokenGrant = {
   scope?: string;
 };
 
+/**
+ * The scopes this application registration was granted.
+ *
+ * A Kroger application is registered with a fixed set, and `/authorize` refuses
+ * anything outside it rather than dropping it: the household sees
+ * `invalid_scope` and never reaches a password box. That refusal is what caught
+ * the meal planner asking for `profile.compact` — a permission it never
+ * registered for and never used. See ADR 0011.
+ *
+ * These two are what docs/deploying-behind-exe-dev.md tells a household to
+ * register, so this list and that instruction fail together.
+ */
+export const GRANTED_SCOPES = ['product.compact', 'cart.basic:write'];
+
 /** The credentials a scenario's server is configured with. */
 export const CLIENT_ID = 'mealplan-test-client';
 export const CLIENT_SECRET = 'mealplan-test-secret-not-a-real-one';
@@ -205,6 +219,19 @@ export class KrogerMock {
     }
     if (url.searchParams.get('client_id') !== CLIENT_ID) {
       fail(response, 400, 'AUTH-1002', 'unknown client_id');
+      return;
+    }
+
+    // Unlike the rest of this file, this refusal is modelled from a household's
+    // report of the live sign-in and not from a measurement: the shape may
+    // differ, the refusal does not. What matters to us is that asking for an
+    // ungranted scope fails, and fails here.
+    const ungranted = (url.searchParams.get('scope') ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((scope) => !GRANTED_SCOPES.includes(scope));
+    if (ungranted.length > 0) {
+      fail(response, 400, 'invalid_scope', ungranted.join(' '));
       return;
     }
 
@@ -395,7 +422,7 @@ export class KrogerMock {
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_in: 1800,
-      scope: 'cart.basic:write profile.compact',
+      scope: 'cart.basic:write',
       accessToken,
       refreshToken,
       expiresIn: 1800,

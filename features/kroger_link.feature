@@ -30,6 +30,19 @@ Feature: Connecting a Kroger account
     Then the meal planner holds my Kroger credential
     And I am asked which store I shop at
 
+  @security
+  Scenario: The link asks for only the permission it uses
+    A Kroger application grants the scopes it was registered for and refuses
+    every other one, so an unused permission is not a harmless extra — it fails
+    the sign-in outright, before the household reaches a password box. The
+    household token exists for PUT /v1/cart/add and for nothing else.
+
+    Given a client has registered itself
+    And "gordon@gordonburgett.net" is signed in to exe.dev
+    When the client asks for authorisation
+    And I approve the client and ask to connect Kroger
+    Then the sign-in asks Kroger for only "cart.basic:write"
+
   @core
   Scenario: Choosing which store to shop at
     Given I have connected my Kroger account through the consent page
