@@ -45,7 +45,7 @@ import { AuthStore, assertOutsideFolder, defaultStorePath } from '../auth/store.
 import { scaffold } from '../corpus/scaffold.ts';
 import { snapshot, renderTree } from '../corpus/tree.ts';
 import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
-import { ensureRepository, type Clock } from '../git/repository.ts';
+import { ensureRepository, recentHistory, type Clock } from '../git/repository.ts';
 import { DEFAULT_KROGER_API_BASE, KrogerApi } from '../kroger/api.ts';
 import {
   isModality,
@@ -810,6 +810,7 @@ export async function buildMcpServer(
   baseUrl?: string,
 ): Promise<McpServer> {
   const tree = renderTree(await snapshot(folder));
+  const history = await recentHistory(session);
 
   const mcp = new McpServer(
     { name: 'kroger-mealplanner', version: '0.1.0' },
@@ -822,6 +823,8 @@ export async function buildMcpServer(
       // address gives an answer nobody can act on.
       instructions:
         tree +
+        '\n\n' +
+        history +
         '\n\n' +
         'A meal plan is a folder of markdown documents. Read README.md in the folder first; ' +
         'it is the schema. Plan meals with ordinary shell commands.\n\n' +

@@ -107,3 +107,33 @@ export async function commitAll(
 export function quote(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
+
+/**
+ * Last 3 commit subjects and the first 5 files changed in HEAD, for the
+ * session-open tree view. Runs git inside the sandbox so that hooks and
+ * filters are contained there — see the module docstring.
+ */
+export async function recentHistory(session: Session): Promise<string> {
+  const log = await session.run(
+    'git log --oneline -3 --no-decorate',
+    { commit: false },
+  );
+  const files = await session.run(
+    'git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | head -5',
+    { commit: false },
+  );
+
+  const lines: string[] = ['recent commits:'];
+  if (log.exitCode === 0 && log.stdout.trim()) {
+    for (const line of log.stdout.trim().split('\n')) {
+      lines.push(`  ${line}`);
+    }
+  }
+  if (files.exitCode === 0 && files.stdout.trim()) {
+    lines.push('', 'files in HEAD:');
+    for (const line of files.stdout.trim().split('\n')) {
+      lines.push(`  ${line}`);
+    }
+  }
+  return lines.join('\n');
+}
