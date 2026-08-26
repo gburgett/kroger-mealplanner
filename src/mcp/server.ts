@@ -43,6 +43,7 @@ import { EXEDEV_PREFIX, identityOf, loginRedirect, sameEmail } from '../auth/exe
 import { MealPlanOAuthProvider } from '../auth/provider.ts';
 import { AuthStore, assertOutsideFolder, defaultStorePath } from '../auth/store.ts';
 import { scaffold } from '../corpus/scaffold.ts';
+import { snapshot, renderTree } from '../corpus/tree.ts';
 import { commitAfterEveryCommand, commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, type Clock } from '../git/repository.ts';
 import { DEFAULT_KROGER_API_BASE, KrogerApi } from '../kroger/api.ts';
@@ -775,7 +776,7 @@ async function handleMcp(
     if (transport.sessionId) transports.delete(transport.sessionId);
   };
 
-  const mcp = buildMcpServer(
+  const mcp = await buildMcpServer(
     context.session,
     context.session.folder,
     context.now,
@@ -801,13 +802,15 @@ function allowedHostsFor(context: { baseUrl: string; host: string; port: number 
   return [...hosts];
 }
 
-export function buildMcpServer(
+export async function buildMcpServer(
   session: Session,
   folder: string,
   now: Clock,
   kroger: KrogerApi | null = null,
   baseUrl?: string,
-): McpServer {
+): Promise<McpServer> {
+  const tree = renderTree(await snapshot(folder));
+
   const mcp = new McpServer(
     { name: 'kroger-mealplanner', version: '0.1.0' },
     {
@@ -818,6 +821,8 @@ export function buildMcpServer(
       // buying from, and can we change it" — and an agent that has to guess an
       // address gives an answer nobody can act on.
       instructions:
+        tree +
+        '\n\n' +
         'A meal plan is a folder of markdown documents. Read README.md in the folder first; ' +
         'it is the schema. Plan meals with ordinary shell commands.\n\n' +
         'KROGER. Which shop the shopping is matched against lives in ' +
