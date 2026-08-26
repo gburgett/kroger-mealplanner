@@ -285,6 +285,16 @@ The load-bearing consequence so far: the sandbox interface needs a **session**
 concept (`open(tenant)` / `run(command)` / `close()`), not just stateless
 commands. Free to design in now, a rewrite to retrofit.
 
+`docs/multi-tenant-isolation-trade-study.md` prices the second lens against named
+candidates and supersedes §11 of the older study. Its answer: **stay on this VM.**
+The session layer becomes microsandbox (installed, needs a fresh login for KVM) when
+tenancy becomes real, bubblewrap stays the command layer either way, and Fly Sprites
+is the offload target if the failure domain — not cost, and not capacity — forces one.
+Cloudflare Dynamic Workers run JavaScript, not a shell, so they are out permanently.
+Two numbers to carry: a mostly-idle tenant costs under a tenth of a dollar a month
+anywhere, and the concurrency defect in `sandbox-trade-study.md` §11.7 blocks quoting
+any of it with confidence.
+
 ## Out of scope for now
 
 **Checkout.** Kroger's public API adds to a cart and cannot place an order, so no

@@ -275,6 +275,16 @@ cheap to reverse.
 
 ## 11. Part II — what flips in multi-tenant SaaS
 
+**Superseded by [`multi-tenant-isolation-trade-study.md`](multi-tenant-isolation-trade-study.md)
+(2026-08-26).** That study asks the same question against a named candidate set —
+RivetOS/agentOS, E2B, microsandbox, Fly Sprites, Cloudflare Dynamic Workers — and puts
+prices and measured round trips on it. This section is still the reasoning that got
+there: the threat model in 11.1, the promotion of the `/proc/1/environ` finding in 11.3,
+the two-layer session/command model in 11.6, and the open concurrency defect in 11.7 all
+carry forward unchanged. What it does not have is 11.8's recommendation, which is now
+"stay on this VM, microsandbox at the session layer, Fly Sprites as the offload target".
+
+
 Everything above optimises for one household on one VM. If the same pattern has
 to carry a boundary between paying tenants, four of the inputs change and two of
 the conclusions with them.
