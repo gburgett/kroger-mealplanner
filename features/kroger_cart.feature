@@ -225,18 +225,21 @@ Feature: Sending the list to Kroger
     Then the meal planner refuses, and says to open "/kroger" in a browser
     And my Kroger cart was sent nothing
 
-  @future
-  Scenario: Kroger adds to the quantity rather than replacing it
-    NOT YET MEASURED, and ADR 0010 is accepted with this item open. Phase 0 of
-    plan 0003 settles it: send PUT /v1/cart/add twice with quantity 1 for one
-    UPC, then open the cart in the Kroger app. If the quantity reads 2, sending
-    the same list twice doubles the shopping, and the second send has to be
-    refused rather than reported. Until the number is known, every message says
-    what was sent and says the cart cannot be read.
+  @core
+  Scenario: The list is not sent twice, because Kroger adds to the quantity
+    MEASURED on 2026-08-26, against the live API with a real household account:
+    two adds of one UPC at quantity 1 read as 2 in the Kroger app. Kroger adds,
+    it does not replace. So a second send of the same list doubles the week's
+    shopping, and the housewife finds out at the store.
+
+    The whole send stops, and it stops even if only one product on the list was
+    sent before. Half a shop cannot be walked back — the cart has no read and no
+    delete — so the refusal names what was already sent and leaves the choice
+    with the household. Sending one named product is still allowed: that is the
+    scenario above, and it is a deliberate act, not a repeat.
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    And Kroger adds to the quantity on a repeated cart add
     And Kroger sells at my store:
       | search           | upc           | description                          | size | price |
       | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |

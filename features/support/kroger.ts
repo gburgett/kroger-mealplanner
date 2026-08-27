@@ -106,23 +106,16 @@ export class KrogerMock {
   cartStatus: number | null = null;
 
   /**
-   * Whether a repeated add of the same UPC stacks or replaces.
+   * What the cart holds. A REPEATED ADD OF ONE UPC ADDS TO THE QUANTITY.
    *
-   * THIS IS THE MEASUREMENT PHASE 0 OF PLAN 0003 HAS NOT MADE. It needs a real
-   * household account, a browser and a look at the cart in the Kroger app, so
-   * it cannot be made here. Both branches are modelled so the one we do not
-   * take is still exercised — see the @future scenario in
-   * features/kroger_cart.feature and ADR 0010's open item.
-   */
-  stacksOnRepeatedAdd = false;
-
-  /**
-   * What the cart would hold, under whichever branch is selected.
+   * Measured on 2026-08-26, against the live API with a real household account:
+   * two adds of `0000000004011` at quantity 1 read as 2 in the Kroger app. This
+   * closes the open item in ADR 0010 and Phase 0 of plan 0003. See ADR 0012.
    *
-   * IN PRODUCTION THIS CANNOT BE READ. It exists here only so that the branch
-   * Phase 0 has not settled is something a scenario can look at. No assertion
-   * outside the @future scenario may use it, because no assertion outside a
-   * test can: `PUT /v1/cart/add` is the whole public cart surface.
+   * IN PRODUCTION THIS CANNOT BE READ. It exists here only so that "we did not
+   * double the shopping" is something a scenario can look at. `PUT
+   * /v1/cart/add` is the whole public cart surface, so no assertion outside a
+   * test can do this.
    */
   readonly cartQuantities = new Map<string, number>();
 
@@ -399,10 +392,7 @@ export class KrogerMock {
     this.cartAdds.push({ items, token });
     for (const item of items) {
       const held = this.cartQuantities.get(item.upc) ?? 0;
-      this.cartQuantities.set(
-        item.upc,
-        this.stacksOnRepeatedAdd ? held + item.quantity : item.quantity,
-      );
+      this.cartQuantities.set(item.upc, held + item.quantity);
     }
     // 204 No Content, with no body. There is nothing to read back, here or in
     // production, which is the whole reason this log exists.

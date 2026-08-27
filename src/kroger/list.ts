@@ -36,6 +36,17 @@ const UPC = /^[0-9]{13}$/;
 
 const CANDIDATE = /^\s+-\s+(\S+)\s+`([^`]*)`\s*(.*)$/;
 
+/**
+ * A line under `## Sent`, as appendSent writes it:
+ *
+ *     - 2026-08-26T12:54:35Z — 2 `0001111050158` Kroger Sharp Cheddar
+ *
+ * Read back because Kroger ADDS to the quantity on a repeated add rather than
+ * replacing it — measured 2026-08-26, ADR 0012 — so this log is what stops the
+ * same list going twice and buying the week twice.
+ */
+const SENT_LINE = /^-\s+(\S+)\s+—\s+(\d+)\s+`([^`]*)`\s*(.*)$/;
+
 export type Candidate = {
   /**
    * How many of this product to buy.
@@ -63,9 +74,28 @@ export type ListItem = {
   candidates: Candidate[];
 };
 
+/** One line of the `## Sent` log: a product this list already asked Kroger for. */
+export type SentEntry = {
+  /** ISO 8601, as written. */
+  at: string;
+  quantity: number;
+  upc: string;
+  description: string;
+  /** One-based, for error messages. */
+  line: number;
+};
+
 export type ShoppingList = {
   front: Record<string, string>;
   items: ListItem[];
+  /**
+   * What this list has already sent to the cart, oldest first.
+   *
+   * NOT A CLAIM ABOUT WHAT THE CART HOLDS — the household may have emptied it
+   * in the Kroger app, and there is no read to check. It is a record of what
+   * this file asked for, which is the only thing that can be known.
+   */
+  sent: SentEntry[];
 };
 
 /** A document that does not read as a shopping list, named well enough to fix. */
@@ -91,6 +121,7 @@ export function parseList(file: string, text: string): ShoppingList {
   }
 
   const items: ListItem[] = [];
+  const sent: SentEntry[] = [];
   let section = '';
   let current: ListItem | null = null;
 
@@ -102,6 +133,24 @@ export function parseList(file: string, text: string): ShoppingList {
     if (heading) {
       section = heading[1].trim();
       current = null;
+      continue;
+    }
+
+    // A line of the sent log. Flush left like an item line, but under a heading
+    // that is a record ABOUT the list rather than part of it.
+    if (/^-\s+/.test(raw) && section === SENT_HEADING) {
+      const logged = SENT_LINE.exec(raw);
+      // Anything else under this heading is prose somebody wrote, and prose is
+      // theirs to write. It is a log, not a schema.
+      if (logged) {
+        sent.push({
+          at: logged[1],
+          quantity: Number(logged[2]),
+          upc: logged[3],
+          description: logged[4].trim(),
+          line: number,
+        });
+      }
       continue;
     }
 
@@ -129,7 +178,7 @@ export function parseList(file: string, text: string): ShoppingList {
     if (raw.trim() === '') current = null;
   }
 
-  return { front, items };
+  return { front, items, sent };
 }
 
 function parseCandidate(file: string, number: number, raw: string): Candidate {

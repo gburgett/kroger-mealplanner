@@ -80,10 +80,6 @@ Given(
   },
 );
 
-Given('Kroger adds to the quantity on a repeated cart add', function (this: MealPlanWorld) {
-  this.krogerMock().stacksOnRepeatedAdd = true;
-});
-
 Given('my Kroger access token has expired', async function (this: MealPlanWorld) {
   await this.server!.krogerStore.expireAccessToken();
 });
@@ -353,11 +349,13 @@ Then(
 );
 
 /**
- * The one assertion that reads a cart, and it is only reachable from @future.
+ * The one assertion that reads a cart, and the only one there will ever be.
  *
  * In production there is no such assertion, because `PUT /v1/cart/add` is the
- * whole public cart surface. This reads the mock's model of the branch Phase 0
- * of plan 0003 has not settled, and nothing outside that scenario may use it.
+ * whole public cart surface. This reads the mock's model of a cart, and it
+ * exists for one question: did a repeated send double the shopping? Kroger adds
+ * rather than replaces — measured 2026-08-26, ADR 0012 — so that question has
+ * teeth. Use it for nothing else.
  */
 Then(
   /^my Kroger cart holds (\d+) of "(.*)"$/,
@@ -428,7 +426,11 @@ Then(
 Then(
   'the meal planner refuses, and says the list has been sent already',
   function (this: MealPlanWorld) {
-    assert.match(refusal(this), /already been sent|sent already/i);
+    const said = refusal(this);
+    assert.match(said, /already been sent|sent already/i);
+    // "Error messages are the documentation": a refusal that does not name the
+    // product it is warning about leaves the household to guess.
+    assert.match(said, /0001111050158/, `the refusal does not name what was already sent:\n${said}`);
   },
 );
 

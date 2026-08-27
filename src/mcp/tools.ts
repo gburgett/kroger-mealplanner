@@ -513,6 +513,33 @@ export async function sendToCart(options: {
     return { path: requested, sent: [], skipped };
   }
 
+  // KROGER ADDS TO THE QUANTITY ON A REPEATED ADD. It does not replace —
+  // measured 2026-08-26, ADR 0012 — so sending this list again buys the week
+  // twice, and the housewife finds out at the store.
+  //
+  // Only a whole-list send is stopped. `only` is the household naming one
+  // product on purpose, which is how a thing deleted in the Kroger app gets put
+  // back, and it is not a repeat.
+  if (!only || only.length === 0) {
+    const alreadySent = new Map(list.sent.map((entry) => [entry.upc, entry]));
+    const repeats = sending.filter((item) => alreadySent.has(item.upc));
+    if (repeats.length > 0) {
+      const last = list.sent[list.sent.length - 1];
+      throw new Error(
+        `${requested} has already been sent to the cart, the last time at ${last.at}. ` +
+          'Kroger ADDS to the quantity rather than replacing it, so sending it again ' +
+          `would buy ${repeats.length === 1 ? 'this' : 'these'} twice:\n` +
+          repeats
+            .map((item) => `  ${item.quantity} \`${item.upc}\` ${item.description}`.trimEnd())
+            .join('\n') +
+          '\n\nNothing has been sent. Read the "## Sent" section of the file — it says ' +
+          'what went, and when. To put one product back that the household deleted in ' +
+          'the Kroger app, send that UPC on its own with "items". To shop another week, ' +
+          'write a new list with "mealplan shopping-list --from DATE --to DATE --out <path>".',
+      );
+    }
+  }
+
   await kroger.addToCart(
     sending.map((item) => ({ upc: item.upc, quantity: item.quantity })),
     config.modality,
