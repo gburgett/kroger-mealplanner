@@ -26,7 +26,18 @@ Given('the meal-plan folder is brand new', function (this: MealPlanWorld) {
 
 // "I run" and "I have run" are the same act; one is the subject of the
 // scenario and the other is setup for it.
-When(/^I (?:have )?run "(.*)"$/, async function (this: MealPlanWorld, command: string) {
+// The negative lookahead keeps this step from also matching a step that
+// carries a "with the message" clause, which it otherwise would: both patterns
+// are quote-to-end-of-line greedy, so a step ending in `" with the message
+// "..."` satisfies this pattern's shape too and Cucumber reports it ambiguous.
+// Ruling out that clause here leaves the more specific step below as the only
+// match, without narrowing what a command by itself is allowed to contain
+// (commands with literal, unescaped quotes — "find . -name \"*.md\"" from a
+// Scenario Outline substitution — still need to match).
+When(/^I (?:have )?run (?!.*" with the message ")"(.*)"$/, async function (
+  this: MealPlanWorld,
+  command: string,
+) {
   await this.run(unescape(command));
 });
 
