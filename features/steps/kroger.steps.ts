@@ -97,13 +97,19 @@ Given(
   'the shopping list for {string} to {string} has been matched against Kroger',
   async function (this: MealPlanWorld, from: string, to: string) {
     await writeList(this, from, to);
-    await this.callTool('kroger_find_products', { path: this.listPath });
+    await this.callTool('kroger_find_products', {
+      path: this.listPath,
+      message: `kroger_find_products ${this.listPath}`,
+    });
     assert.equal(this.lastToolError, null, `finding products failed:\n${this.lastToolText}`);
   },
 );
 
 Given('the shopping list has been sent to my Kroger cart', async function (this: MealPlanWorld) {
-  await this.callTool('kroger_send_to_cart', { path: this.listPath });
+  await this.callTool('kroger_send_to_cart', {
+    path: this.listPath,
+    message: `kroger_send_to_cart ${this.listPath}`,
+  });
   assert.equal(this.lastToolError, null, `sending failed:\n${this.lastToolText}`);
 });
 
@@ -126,14 +132,21 @@ async function listText(world: MealPlanWorld): Promise<string> {
 // --- finding products -------------------------------------------------------
 
 When('I ask Kroger for the products on the shopping list', async function (this: MealPlanWorld) {
-  await this.callTool('kroger_find_products', { path: listPathOf(this) });
+  const target = listPathOf(this);
+  await this.callTool('kroger_find_products', {
+    path: target,
+    message: `kroger_find_products ${target}`,
+  });
 });
 
 When(
   'I ask Kroger for the products on the list {string}',
   async function (this: MealPlanWorld, target: string) {
     this.listPath = target;
-    await this.callTool('kroger_find_products', { path: target });
+    await this.callTool('kroger_find_products', {
+      path: target,
+      message: `kroger_find_products ${target}`,
+    });
   },
 );
 
@@ -163,15 +176,21 @@ When(
 // --- sending ----------------------------------------------------------------
 
 When('I send the shopping list to my Kroger cart', async function (this: MealPlanWorld) {
-  await this.callTool('kroger_send_to_cart', { path: listPathOf(this) });
+  const target = listPathOf(this);
+  await this.callTool('kroger_send_to_cart', {
+    path: target,
+    message: `kroger_send_to_cart ${target}`,
+  });
 });
 
 When(
   'I send the product {string} from the shopping list to my Kroger cart',
   async function (this: MealPlanWorld, upc: string) {
+    const target = listPathOf(this);
     await this.callTool('kroger_send_to_cart', {
-      path: listPathOf(this),
+      path: target,
       items: [{ upc, quantity: 1 }],
+      message: `kroger_send_to_cart ${target} ${upc}`,
     });
   },
 );
