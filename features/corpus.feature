@@ -9,6 +9,10 @@ Feature: The meal plan is a folder of markdown documents
   guessable from a listing and stable enough to grep for. Because an agent writes
   these files freehand, a validator catches drift before it becomes corruption.
 
+  `preferences/` is the one exception, on purpose: it holds prose about how this
+  household chooses, it is read by the assistant and never by a command, and the
+  validator does not look at it. See `features/preferences.feature`.
+
   Scenario: The layout is discoverable
     Given a meal-plan folder mounted at "/workspace"
     When I run "ls"
@@ -18,6 +22,7 @@ Feature: The meal plan is a folder of markdown documents
       config
       dinners
       pantry
+      preferences
       recipes
       shopping-lists
       """

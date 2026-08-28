@@ -51,6 +51,9 @@ The folder is mounted at /workspace and every command starts there:
     dinners/     one document per night, filename is the ISO date
                  (dinners/2026-08-25.md)
     pantry/      staples.md: what the household always has in
+    preferences/ household.md: how this household chooses — brands, what it
+                 will not eat, cheap against good. Prose, with no schema.
+                 Read it before you choose anything on their behalf.
 
 An ingredient is one markdown list item, "- <quantity> [unit] <item>". No unit
 means a count: "- 2 eggs". A dinner links to its recipes with ordinary markdown
@@ -241,6 +244,22 @@ To choose, DELETE the candidate lines you do not want, with the bash or
 write_file tool, until one is left. Showing the household the candidates and
 letting them say which is the right move when it is a real judgement — a brand
 they care about, a size that is nearly double the price.
+
+READ preferences/household.md BEFORE YOU DELETE ANYTHING. That is where this
+household has written down how it chooses: brands, what it will not eat, the
+shop's own brand against the name brand, cheap against good. It is prose with
+no schema, so read it rather than parse it, and expect it to be in whatever
+shape they have given it.
+
+Then say which preference decided which line, so a wrong one can be corrected.
+
+WHEN IT DOES NOT DECIDE A LINE, ASK — do not pick. Two candidates at the same
+price and the same size, differing only in something nobody has an opinion on
+record about, is the case this matters for: salted against unsalted butter is
+not a judgement you can make for somebody else. Put the choice to the household,
+and then WRITE THEIR ANSWER INTO preferences/household.md so the same question
+is not asked again next week. That file is theirs to shape — add a heading,
+reword a line, restructure it however it reads best.
 
 EVERY COUNT IS WRITTEN AS 1, AND THAT IS OFTEN WRONG. Set it yourself by
 comparing what the line needs against the package size: a line that wants 24 oz

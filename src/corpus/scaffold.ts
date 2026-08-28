@@ -1,20 +1,27 @@
 // The folder the agent finds when it opens a brand new meal plan.
 //
 // The folder is the database and its layout is the schema, so this file and
-// features/corpus.feature have to agree exactly. A bare `ls` must print six
+// features/corpus.feature have to agree exactly. A bare `ls` must print seven
 // names and nothing else:
 //
 //     README.md
 //     config
 //     dinners
 //     pantry
+//     preferences
 //     recipes
 //     shopping-lists
 //
 // which is why the empty folders are held open by a dotfile rather than by
-// anything `ls` would show. config/ is the exception: it holds kroger.md from
-// the first moment, because `cat config/kroger.md` is how "is Kroger set up"
-// gets answered, and a question answered by `cat` needs no tool. See ADR 0010.
+// anything `ls` would show. Two directories are the exception, and they hold a
+// document from the first moment for two different reasons:
+//
+//   * config/kroger.md, because `cat config/kroger.md` is how "is Kroger set
+//     up" gets answered, and a question answered by `cat` needs no tool. It is
+//     REGENERATED until a shop is chosen. See ADR 0010.
+//   * preferences/household.md, because an empty file teaches an agent nothing
+//     and a worked example teaches it everything. It is WRITTEN ONCE AND NEVER
+//     TOUCHED AGAIN — the household owns its shape from the first edit.
 
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -29,9 +36,59 @@ export const CORPUS_DIRECTORIES = [
   'config',
   'dinners',
   'pantry',
+  'preferences',
   'recipes',
   'shopping-lists',
 ] as const;
+
+export const PREFERENCES_PATH = 'preferences/household.md';
+
+/**
+ * The example this household starts from, and is meant to throw away.
+ *
+ * An empty file teaches an agent nothing, so this one is worked rather than
+ * blank. Every heading in it is a suggestion: nothing parses this document,
+ * `mealplan validate` does not open it, and the notice at the top says so in
+ * as many words. The shape it ends up with is the household's business.
+ *
+ * The content is not invented. It is what the assistant already did unprompted
+ * on the shop of 2026-08-26 — the shop's own brand at the lowest price per
+ * unit, five lines out of six — written down so that the sixth line stops
+ * going the other way. The butter line is the case this document exists for:
+ * salted and unsalted, same brand, same size, same $3.49, no price to decide
+ * it and nobody asked. It is marked unconfirmed because it is.
+ */
+export const PREFERENCES_EXAMPLE = `# What this household buys
+
+How to choose between the Kroger products written under a shopping-list line.
+Read this before you delete any of them.
+
+**THIS IS AN EXAMPLE, NOT A FORM.** It is here to show what a preference can
+look like, and every line in it is a guess nobody has confirmed. Rewrite it:
+your own headings, your own wording, your own shape, whether that is a table, a
+paragraph or one long list. Delete what is not true of this household, and
+delete this notice once the document is theirs. Nothing parses this file and
+\`mealplan validate\` never opens it, so there is no format to get wrong.
+
+When nothing here decides the choice in front of you, ASK THE HOUSEHOLD, and
+write the answer down here. That is how this document gets good.
+
+## The usual
+
+- the shop's own brand, at the lowest price per UNIT rather than the lowest
+  price — 9 oz at $4.49 is dearer than 12 oz at $5.00
+
+## Except
+
+- butter: unsalted. NOT CONFIRMED — the last shop bought salted, at the same
+  price, because nothing here said which
+
+## Never
+
+Hard rules: an allergy, a food nobody in the house will eat, a package size
+that does not fit the freezer. Delete a candidate that breaks one of these and
+do not ask again. There are none yet.
+`;
 
 /**
  * The map, written for whichever agent opens the folder first. It has to
@@ -102,6 +159,21 @@ Without \`servings\` of its own, a dinner feeds what its recipes feed.
 \`pantry/staples.md\` is a plain markdown list of the things the household always
 has in. The shopping list leaves them out unless you pass
 \`--include-staples\`.
+
+## preferences/
+
+\`preferences/household.md\` says how this household chooses: which brands, what
+it will not eat, whether the cheap one or the good one. **Read it before you
+delete candidates from a shopping list**, because deleting them is choosing,
+and choosing is what this document is for.
+
+**It has no schema.** It is prose, \`mealplan validate\` never opens it, and the
+example the folder starts with is only an example — rewrite it into whatever
+shape fits, and add documents beside it if one file stops being enough.
+
+When it does not answer the question in front of you, **ask the household, then
+write the answer into it.** A preference that stays in the conversation is one
+that has to be asked for again next week.
 
 ## config/
 
@@ -196,6 +268,18 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<void> 
     if (!(await exists(keep))) {
       await writeFile(keep, '', 'utf8');
     }
+  }
+
+  // preferences/ is held open by a worked example. UNLIKE kroger.md below it is
+  // never regenerated: the household edits this file — that is the whole intent
+  // — so rewriting it on a restart would delete their own words.
+  //
+  // It IS restored when it is missing, which is how a folder that predates this
+  // feature gets the example at all. So deleting it is not how a household says
+  // "we have no preferences"; emptying it is, and that survives.
+  const preferences = path.join(folder, PREFERENCES_PATH);
+  if (!(await exists(preferences))) {
+    await writeFile(preferences, PREFERENCES_EXAMPLE, 'utf8');
   }
 
   // config/ is held open by a document rather than by a dotfile, because the

@@ -23,7 +23,7 @@ one of them:
 | The door | `auth.feature` · `kroger_link.feature` | Who gets in at all, who may approve them, and how a Kroger account is connected |
 | The sandbox | `sandbox.feature` | What commands can do, and what they must never do |
 | The corpus | `corpus.feature` · `history.feature` | Folder layout, document shape, validation, git history |
-| The work | `recipes` · `dinners` · `shopping_list` · `pantry` · `kroger_cart` | What the housewife actually gets out of it |
+| The work | `recipes` · `dinners` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` | What the housewife actually gets out of it |
 
 ## The folder
 
@@ -38,6 +38,8 @@ one of them:
 │   └── 2026-08-25.md
 ├── pantry/
 │   └── staples.md
+├── preferences/
+│   └── household.md   how this household chooses. Prose, no schema.
 └── shopping-lists/    one document per range of nights
     └── 2026-08-25--2026-08-31.md
 ```
@@ -65,6 +67,14 @@ filesystem rather than something we have to enforce.
 - **A dinner links to recipes with ordinary markdown links**, so the corpus is
   navigable in any editor and `grep -rl chicken-tacos.md dinners/` answers "when
   did we last make this".
+- **`preferences/household.md` has no schema, on purpose.** It is prose about how
+  the household chooses — brands, what it will not eat, cheap against good. The
+  assistant reads it before it deletes candidates from a shopping list; no
+  command ever opens it, and `mealplan validate` ignores it. The folder ships a
+  worked example that says, in the document itself, that it is an example and is
+  meant to be rewritten. Every other document here has a shape that can be got
+  wrong. This one deliberately does not, because a preference nobody can express
+  is a preference nobody records.
 - **`Given` steps may write files directly** — they are setup, and going the long
   way round adds nothing. **`When` steps must go through the real MCP server**:
   real transport, real sandbox, real command. The interface under test is never

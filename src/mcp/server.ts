@@ -828,6 +828,14 @@ export async function buildMcpServer(
         '\n\n' +
         'A meal plan is a folder of markdown documents. Read README.md in the folder first; ' +
         'it is the schema. Plan meals with ordinary shell commands.\n\n' +
+        'PREFERENCES. How this household chooses — brands, what it will not eat, cheap ' +
+        'against good — is written in preferences/household.md. Read it before you ' +
+        'choose anything on their behalf, which above all means before you delete ' +
+        'candidates from a shopping list. It is prose and has no schema; the folder ' +
+        'ships an example and the household is meant to rewrite it into whatever shape ' +
+        'suits them, so read it rather than parse it. When it does not settle the ' +
+        'question in front of you, ask them, then write the answer into it — a ' +
+        'preference left in the conversation has to be asked for again next week.\n\n' +
         'KROGER. Which shop the shopping is matched against lives in ' +
         'config/kroger.md, so "cat config/kroger.md" answers "is Kroger set up" ' +
         'and "which shop". There is no tool for that question and there should ' +

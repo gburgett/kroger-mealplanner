@@ -26,6 +26,7 @@ Given('the meal-plan folder is brand new', function (this: MealPlanWorld) {
 
 // "I run" and "I have run" are the same act; one is the subject of the
 // scenario and the other is setup for it.
+//
 // The negative lookahead keeps this step from also matching a step that
 // carries a "with the message" clause, which it otherwise would: both patterns
 // are quote-to-end-of-line greedy, so a step ending in `" with the message
@@ -102,7 +103,7 @@ Then(
     const tool = this.tools.find((candidate) => candidate.name === name);
     assert.ok(tool, `there is no "${name}" tool`);
     const description = tool.description ?? '';
-    for (const landmark of ['recipes/', 'dinners/', 'pantry/', '/workspace']) {
+    for (const landmark of ['recipes/', 'dinners/', 'pantry/', 'preferences/', '/workspace']) {
       assert.ok(
         description.includes(landmark),
         `the "${name}" description never mentions ${landmark}`,

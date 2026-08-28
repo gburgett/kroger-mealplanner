@@ -16,9 +16,12 @@ Consequences worth internalising before changing anything:
 - **The folder is the database.** Its layout and document conventions are the
   schema. They must stay guessable from a directory listing and stable enough to
   grep for. See `features/corpus.feature` — that file is the schema definition.
-  A bare `ls` prints six names: `README.md`, `config`, `dinners`, `pantry`,
-  `recipes`, `shopping-lists`. That listing is asserted in two places, and both
-  have to change together.
+  A bare `ls` prints seven names: `README.md`, `config`, `dinners`, `pantry`,
+  `preferences`, `recipes`, `shopping-lists`. That listing is asserted in
+  **three** places — `features/corpus.feature`, `features/auth.feature` and
+  `CORPUS_DIRECTORIES` in `src/corpus/scaffold.ts` — and all three have to
+  change together. This note said "two" until a seventh name was added and
+  `auth.feature` was the one that failed.
 - **The filename is the primary key.** `recipes/chicken-tacos.md`,
   `dinners/2026-08-25.md`. Uniqueness and ordering come free from the
   filesystem; do not add an index that can drift out of step.
@@ -258,6 +261,14 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   and stops. Choosing is deleting the lines you do not want, which is an
   ordinary edit to an ordinary file. "I was shown candidates and chose nothing"
   is an outcome, not a failure.
+- **How the household chooses is written down, in `preferences/household.md`.**
+  Read it before deleting candidates; when it does not settle the question, ask,
+  then write the answer into it. **It has no schema on purpose** — it is prose,
+  `mealplan validate` never opens it, and the example the folder ships is meant
+  to be rewritten into whatever shape the household likes. That is the one
+  document in the folder with no format to get wrong, and the exception is
+  deliberate: a preference nobody can express is a preference nobody records.
+  See `features/preferences.feature`.
 - **A cart add is at most once.** No idempotency key, no response body, no way
   to read the cart back. It is never retried, and an ambiguous line stops the
   whole send rather than half of it.

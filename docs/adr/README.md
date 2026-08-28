@@ -27,6 +27,7 @@ decision, write a new record. Give the old record the status
 | [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012 |
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
 | [0012](0012-refuse-a-second-send-of-a-shopping-list.md) | Refuse a second send of a shopping list, because Kroger adds to the quantity | accepted |
+| [0013](0013-record-household-preferences-as-prose-with-no-schema.md) | Record household preferences as prose with no schema | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and
