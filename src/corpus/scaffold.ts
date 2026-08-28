@@ -252,21 +252,35 @@ derived from the folder every time and never stored.
  * `baseUrl` is this server's own address, and it reaches `config/kroger.md` so
  * that the file can name the page a person actually opens. It is the configured
  * public URL and never a request header — see src/kroger/help.ts.
+ *
+ * RETURNS THE PATHS IT WROTE, so the caller can commit them under a message
+ * that says what they are. On a brand new folder that list is everything and
+ * the first commit already holds it; on a folder that predates a new corpus
+ * directory it is just the new names. Without it, scaffolding sat untracked
+ * until some later tool call swept it into a commit labelled something else —
+ * and the corpus grows as this product learns. See features/history.feature.
+ *
+ * `.gitkeep` is left out of the list. It is committed like anything else, but
+ * it is scaffolding for the scaffolding and naming it in a message is noise.
  */
-export async function scaffold(folder: string, baseUrl?: string): Promise<void> {
+export async function scaffold(folder: string, baseUrl?: string): Promise<string[]> {
+  const written: string[] = [];
   await mkdir(folder, { recursive: true });
 
   const readme = path.join(folder, 'README.md');
   if (!(await exists(readme))) {
     await writeFile(readme, README, 'utf8');
+    written.push('README.md');
   }
 
   for (const directory of CORPUS_DIRECTORIES) {
     const full = path.join(folder, directory);
+    const isNew = !(await exists(full));
     await mkdir(full, { recursive: true });
     const keep = path.join(full, '.gitkeep');
     if (!(await exists(keep))) {
       await writeFile(keep, '', 'utf8');
+      if (isNew) written.push(`${directory}/`);
     }
   }
 
@@ -280,6 +294,7 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<void> 
   const preferences = path.join(folder, PREFERENCES_PATH);
   if (!(await exists(preferences))) {
     await writeFile(preferences, PREFERENCES_EXAMPLE, 'utf8');
+    written.push(PREFERENCES_PATH);
   }
 
   // config/ is held open by a document rather than by a dotfile, because the
@@ -298,8 +313,20 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<void> 
   const { store } = await readKrogerConfig(folder);
   if (store === '') {
     const wanted = krogerConfigDocument(null, baseUrl);
-    if ((await read(kroger)) !== wanted) await writeFile(kroger, wanted, 'utf8');
+    if ((await read(kroger)) !== wanted) {
+      await writeFile(kroger, wanted, 'utf8');
+      written.push(KROGER_CONFIG_PATH);
+    }
   }
+
+  // A new directory that also got a document is named twice, and "scaffold
+  // preferences/, preferences/household.md" says one thing twice. Keep a bare
+  // directory only when nothing inside it is named.
+  return written.filter(
+    (entry) =>
+      !entry.endsWith('/') ||
+      !written.some((other) => other !== entry && other.startsWith(entry)),
+  );
 }
 
 /** The file's contents, or null when it is not there. */

@@ -30,6 +30,13 @@ Consequences worth internalising before changing anything:
   as the message. An agent writing files freehand has no undo otherwise, and
   `cat >` silently destroys a recipe collected over years. See
   `features/history.feature`.
+- **Scaffolding commits itself, so the corpus can grow.** `scaffold()` returns
+  the paths it wrote and the server commits them as `scaffold <paths>` on the
+  next start. Without that, a new corpus directory added to a folder that
+  already has history sat untracked until some later tool call swept it into a
+  commit labelled `write_file recipes/foo.md`. Adding a name is therefore three
+  edits and no migration: `CORPUS_DIRECTORIES`, `features/corpus.feature`,
+  `features/auth.feature`.
 - **Everything is markdown a human can open and edit.** If a change would make a
   document unreadable in a text editor, it is the wrong change.
 - **Prefer bash over new tools.** Before adding a command, ask whether `grep`

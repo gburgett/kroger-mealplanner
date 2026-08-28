@@ -225,8 +225,22 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // config/kroger.md names the page a person has to open and a relative
   // "/kroger" is no use to somebody reading it in a chat window. Nothing is
   // being served yet: the listener answers 503 until `app` is assigned.
-  await scaffold(session.folder, baseUrl);
+  const scaffolded = await scaffold(session.folder, baseUrl);
   await ensureRepository(session, now);
+
+  // Scaffolding an EXISTING folder has to commit itself. `ensureRepository`
+  // only makes the first commit, so on a folder that already has history a new
+  // corpus document would sit untracked until some later tool call swept it
+  // into a commit labelled "write_file recipes/foo.md". The corpus grows as
+  // this product learns, so that is not a one-off.
+  //
+  // Nothing happens on a brand new folder: the first commit already holds the
+  // scaffold, so there is no change left to find. Nothing happens on an
+  // ordinary restart either, because `scaffold` reports only what it wrote.
+  if (scaffolded.length > 0) {
+    await commitIfChanged(session, `scaffold ${scaffolded.join(', ')}`, now());
+  }
+
   // From here on, every mutating tool commits its own changes.
   // There is no per-command auto-commit — the agent provides the message.
 

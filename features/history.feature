@@ -42,6 +42,25 @@ Feature: The meal plan remembers what it used to say
     Then the output is empty
     And the last commit touched the file "recipes/chicken-tacos.md"
 
+  Scenario: Scaffolding added to an existing folder commits itself
+    Given I have recorded the recipe "Chicken Tacos" serving 4
+    And I have run "rm preferences/household.md"
+    When the server restarts
+    And I run "git status --porcelain"
+    Then the output is empty
+
+  Scenario: The scaffolding commit says what it put back
+    Given I have run "rm preferences/household.md" with the message "Tidy up"
+    When the server restarts
+    And I run "git log -1 --format=%s"
+    Then the output mentions "preferences/household.md"
+
+  Scenario: A restart that scaffolds nothing does not clutter the history
+    Given I have recorded the recipe "Chicken Tacos" serving 4
+    And the history has 2 commits
+    When the server restarts
+    Then the history has 2 commits
+
   Scenario: A command that changes nothing does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And the history has 2 commits
