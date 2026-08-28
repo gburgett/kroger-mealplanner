@@ -64,6 +64,45 @@ When('the server restarts', async function (this: MealPlanWorld) {
   await this.restart();
 });
 
+Given('I remember the current MCP session', function (this: MealPlanWorld) {
+  this.rememberedSessionId = this.transport?.sessionId ?? null;
+  assert.ok(this.rememberedSessionId, 'the client has no MCP session id yet');
+});
+
+When('that remembered session sends a tool call', async function (this: MealPlanWorld) {
+  assert.ok(this.rememberedSessionId, 'no session id was remembered');
+  await this.fetchRaw('/mcp', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${this.household.accessToken}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-session-id': this.rememberedSessionId,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'bash', arguments: { command: 'ls', message: 'look around' } },
+    }),
+  });
+});
+
+Then('the response status is {int}', function (this: MealPlanWorld, status: number) {
+  const response = this.response();
+  assert.equal(response.status, status, `expected ${status}, got ${response.status}: ${response.body}`);
+});
+
+Then('the response tells the client to reconnect', function (this: MealPlanWorld) {
+  const body = this.response().body;
+  assert.match(body, /reconnect/i, `the response never says to reconnect:\n${body}`);
+  assert.match(
+    body,
+    /initialize/i,
+    `the response does not say how to reconnect (a fresh "initialize"):\n${body}`,
+  );
+});
+
 When('I write the file {string}:', async function (this: MealPlanWorld, target: string, content: string) {
   await this.writeFile(target, `${content}\n`);
 });

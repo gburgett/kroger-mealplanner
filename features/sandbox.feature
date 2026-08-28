@@ -84,6 +84,19 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the output lists:
       | omelette.md |
 
+  Scenario: A tool call against a session the restart forgot is told to reconnect
+    Every MCP session lives only in this process's memory, so a restart — the
+    deploy step for every change to this server — silently ends every session
+    that was open. The client is left holding a session id the new process has
+    never heard of, and retrying that same call again cannot ever work, so the
+    refusal has to say what will: reconnect.
+
+    Given I remember the current MCP session
+    When the server restarts
+    And that remembered session sends a tool call
+    Then the response status is 404
+    And the response tells the client to reconnect
+
   Scenario: Each command starts fresh at the workspace root
     Given I have run "cd recipes"
     When I run "pwd"

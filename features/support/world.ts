@@ -116,6 +116,10 @@ export class MealPlanWorld extends World {
   lastResponse: RawResponse | null = null;
   /** A second registered client, for the scenarios that need one. */
   otherClient: HouseholdOAuthClient | null = null;
+  /** The household's current transport, so a scenario can read its MCP session id. */
+  transport: StreamableHTTPClientTransport | null = null;
+  /** An MCP session id captured before a restart, to replay against the new process. */
+  rememberedSessionId: string | null = null;
 
   constructor(options: IWorldOptions) {
     super(options);
@@ -168,6 +172,7 @@ export class MealPlanWorld extends World {
       const client = new Client({ name: provider.name, version: '0.1.0' });
       try {
         await client.connect(transport);
+        this.transport = transport;
         return client;
       } catch (error) {
         await transport.close().catch(() => undefined);

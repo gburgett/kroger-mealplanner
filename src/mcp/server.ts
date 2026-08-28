@@ -776,10 +776,18 @@ async function handleMcp(
   if (sessionId) {
     // A client holding a session id from before the last restart lands here
     // on every call, which looks from the client side like the same failure
-    // repeating with a fresh request id each time.
+    // repeating with a fresh request id each time. Sessions live only in this
+    // process's memory, so a restart — which is the deploy step for every
+    // change to this server — always ends every session that was open.
     console.error(`[mcp] unknown MCP session: ${sessionId}`);
     response.writeHead(404, { 'content-type': 'text/plain' });
-    response.end(`unknown MCP session: ${sessionId}\n`);
+    response.end(
+      `MCP session ${sessionId} no longer exists on this server, most likely because ` +
+        'it restarted. This is not a retryable failure: the same session id will keep ' +
+        'failing. Reconnect — send a fresh "initialize" request with no Mcp-Session-Id ' +
+        'header, or have the host application reconnect this MCP server — and then ' +
+        'retry the call.\n',
+    );
     return;
   }
 
