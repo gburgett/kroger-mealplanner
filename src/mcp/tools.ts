@@ -100,10 +100,20 @@ provide, so an overwrite can always be walked back with git restore.
 
 Missing directories on the way to the file are created.`;
 
+const BASH_COMMAND_REQUIRED = 'the "bash" tool needs a "command": the shell command to run.';
+const BASH_MESSAGE_REQUIRED =
+  'the "bash" tool needs a "message": a commit message describing what this command ' +
+  'changes. Every command that changes a file is committed with it.';
+
 export const bashInputSchema = {
-  command: z.string().describe('The shell command to run, as bash would read it.'),
+  command: z
+    .string({ error: BASH_COMMAND_REQUIRED })
+    .min(1, BASH_COMMAND_REQUIRED)
+    .describe('The shell command to run, as bash would read it.'),
   message: z
-    .string()
+    .string({ error: BASH_MESSAGE_REQUIRED })
+    .trim()
+    .min(1, BASH_MESSAGE_REQUIRED)
     .describe(
       'A commit message describing what this change does. Required — ' +
         'every command that changes a file is committed with this message.',
@@ -118,19 +128,39 @@ export const bashOutputSchema = {
   truncated: z.boolean().describe('True when output was dropped. The notice says how much.'),
 };
 
+const READ_FILE_PATH_REQUIRED = 'the "read_file" tool needs a "path": relative to the meal-plan folder root.';
+
 export const readFileInputSchema = {
-  path: z.string().describe('Path relative to the meal-plan folder root.'),
+  path: z
+    .string({ error: READ_FILE_PATH_REQUIRED })
+    .min(1, READ_FILE_PATH_REQUIRED)
+    .describe('Path relative to the meal-plan folder root.'),
 };
 
 export const readFileOutputSchema = {
   content: z.string().describe('The whole file.'),
 };
 
+const WRITE_FILE_PATH_REQUIRED = 'the "write_file" tool needs a "path": relative to the meal-plan folder root.';
+const WRITE_FILE_CONTENT_REQUIRED =
+  'the "write_file" tool needs "content": the whole new contents of the file. ' +
+  'Leave it empty ("") to write an empty file on purpose.';
+const WRITE_FILE_MESSAGE_REQUIRED =
+  'the "write_file" tool needs a "message": a commit message describing what this ' +
+  'change does. The change is committed with it.';
+
 export const writeFileInputSchema = {
-  path: z.string().describe('Path relative to the meal-plan folder root.'),
-  content: z.string().describe('The whole new contents of the file.'),
+  path: z
+    .string({ error: WRITE_FILE_PATH_REQUIRED })
+    .min(1, WRITE_FILE_PATH_REQUIRED)
+    .describe('Path relative to the meal-plan folder root.'),
+  content: z
+    .string({ error: WRITE_FILE_CONTENT_REQUIRED })
+    .describe('The whole new contents of the file.'),
   message: z
-    .string()
+    .string({ error: WRITE_FILE_MESSAGE_REQUIRED })
+    .trim()
+    .min(1, WRITE_FILE_MESSAGE_REQUIRED)
     .describe(
       'A commit message describing what this change does. Required — ' +
         'the change is committed with this message.',
@@ -300,15 +330,25 @@ was asked for. That is not a claim about what the cart holds either.
 It needs a connected Kroger account. "cat config/kroger.md" says whether there
 is one.`;
 
+const FIND_PRODUCTS_PATH_REQUIRED =
+  'the "kroger_find_products" tool needs a "path": the shopping list to search from, ' +
+  'relative to the folder root.';
+const FIND_PRODUCTS_MESSAGE_REQUIRED =
+  'the "kroger_find_products" tool needs a "message": a commit message describing ' +
+  'what this search is for. The candidates written to the list are committed with it.';
+
 export const findProductsInputSchema = {
   path: z
-    .string()
+    .string({ error: FIND_PRODUCTS_PATH_REQUIRED })
+    .min(1, FIND_PRODUCTS_PATH_REQUIRED)
     .describe(
       'The shopping list, relative to the folder root, for example ' +
         '"shopping-lists/2026-08-25--2026-08-31.md".',
     ),
   message: z
-    .string()
+    .string({ error: FIND_PRODUCTS_MESSAGE_REQUIRED })
+    .trim()
+    .min(1, FIND_PRODUCTS_MESSAGE_REQUIRED)
     .describe(
       'A commit message describing what this search is for. Required — ' +
         'candidates written to the list are committed with this message.',
@@ -322,12 +362,25 @@ export const findProductsOutputSchema = {
   searched: z.number().int().describe('How many searches were made. One per line, never per product.'),
 };
 
+const SEND_TO_CART_PATH_REQUIRED =
+  'the "kroger_send_to_cart" tool needs a "path": the shopping list to send from, ' +
+  'relative to the folder root.';
+const SEND_TO_CART_MESSAGE_REQUIRED =
+  'the "kroger_send_to_cart" tool needs a "message": a commit message describing ' +
+  'what is being sent. The sent status written to the list is committed with it.';
+const SEND_TO_CART_UPC_REQUIRED =
+  'an entry in "items" for "kroger_send_to_cart" needs a "upc": a UPC already ' +
+  'written on the list.';
+
 export const sendToCartInputSchema = {
   path: z
-    .string()
+    .string({ error: SEND_TO_CART_PATH_REQUIRED })
+    .min(1, SEND_TO_CART_PATH_REQUIRED)
     .describe('The shopping list, relative to the folder root.'),
   message: z
-    .string()
+    .string({ error: SEND_TO_CART_MESSAGE_REQUIRED })
+    .trim()
+    .min(1, SEND_TO_CART_MESSAGE_REQUIRED)
     .describe(
       'A commit message describing what is being sent. Required — ' +
         'the sent status written to the list is committed with this message.',
@@ -335,8 +388,15 @@ export const sendToCartInputSchema = {
   items: z
     .array(
       z.object({
-        upc: z.string().describe('A 13-character UPC already written in that list.'),
-        quantity: z.number().int().min(1).describe('How many packages. Defaults to the count on the line.'),
+        upc: z
+          .string({ error: SEND_TO_CART_UPC_REQUIRED })
+          .min(1, SEND_TO_CART_UPC_REQUIRED)
+          .describe('A 13-character UPC already written in that list.'),
+        quantity: z
+          .number()
+          .int()
+          .min(1, 'an entry in "items" for "kroger_send_to_cart" needs "quantity" to be at least 1.')
+          .describe('How many packages. Defaults to the count on the line.'),
       }),
     )
     .optional()

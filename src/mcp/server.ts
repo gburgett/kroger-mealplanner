@@ -388,8 +388,13 @@ function buildApp(context: AppContext): Express {
     );
   });
 
-  app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+  app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
     const message = error instanceof Error ? error.message : String(error);
+    // The only record of a request that never made it to a tool result: an
+    // MCP client sees "Error occurred during tool execution" and nothing
+    // else, so this line is what makes that failure investigable at all.
+    console.error(`[mcp] ${request.method} ${request.path} failed: ${message}`);
+    if (error instanceof Error && error.stack) console.error(error.stack);
     if (!response.headersSent) response.status(500).type('text/plain');
     response.end(`${message}\n`);
   });
@@ -769,6 +774,10 @@ async function handleMcp(
   }
 
   if (sessionId) {
+    // A client holding a session id from before the last restart lands here
+    // on every call, which looks from the client side like the same failure
+    // repeating with a fresh request id each time.
+    console.error(`[mcp] unknown MCP session: ${sessionId}`);
     response.writeHead(404, { 'content-type': 'text/plain' });
     response.end(`unknown MCP session: ${sessionId}\n`);
     return;
@@ -814,6 +823,53 @@ function allowedHostsFor(context: { baseUrl: string; host: string; port: number 
   hosts.delete('0.0.0.0');
   hosts.delete(`0.0.0.0:${context.port}`);
   return [...hosts];
+}
+
+/** The first line of a tool result's text, for a log line rather than a transcript. */
+function firstLine(content: unknown): string {
+  const entry = Array.isArray(content)
+    ? (content.find((part) => (part as { type?: string })?.type === 'text') as
+        | { text?: string }
+        | undefined)
+    : undefined;
+  const text = entry?.text ?? '';
+  return text.split('\n')[0].slice(0, 200);
+}
+
+/**
+ * Every tool call, in or out, on stderr. Nothing else in this server logs a
+ * tool call at all — the MCP SDK turns a thrown error or a failed schema
+ * check into a tool result the agent sees, but the server itself keeps no
+ * record, so a client-side failure with no further detail (a generic "Error
+ * occurred during tool execution") is otherwise not investigable after the
+ * fact. Arguments are not logged: a recipe or a shopping list can be
+ * arbitrarily large, and none of it is needed to tell whether the call
+ * succeeded.
+ */
+function loggedTool<Args extends Record<string, unknown> | undefined, Result extends { content: unknown; isError?: boolean }>(
+  name: string,
+  handler: (args: Args) => Promise<Result>,
+): (args: Args) => Promise<Result> {
+  return async (args) => {
+    const started = Date.now();
+    const keys = args ? Object.keys(args).join(', ') : '';
+    try {
+      const result = await handler(args);
+      const ms = Date.now() - started;
+      if (result.isError) {
+        console.error(`[mcp] ${name}(${keys}) refused in ${ms}ms: ${firstLine(result.content)}`);
+      } else {
+        console.error(`[mcp] ${name}(${keys}) ok in ${ms}ms`);
+      }
+      return result;
+    } catch (error) {
+      const ms = Date.now() - started;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[mcp] ${name}(${keys}) threw in ${ms}ms: ${message}`);
+      if (error instanceof Error && error.stack) console.error(error.stack);
+      throw error;
+    }
+  };
 }
 
 export async function buildMcpServer(
@@ -866,7 +922,7 @@ export async function buildMcpServer(
       inputSchema: bashInputSchema,
       outputSchema: bashOutputSchema,
     },
-    async ({ command, message }) => {
+    loggedTool('bash', async ({ command, message }) => {
       const result = await runBash(session, command);
       // Commit if the command changed anything. No commit when nothing changed.
       await commitIfChanged(session, message, now());
@@ -875,7 +931,7 @@ export async function buildMcpServer(
         structuredContent: result,
         isError: result.exitCode !== 0,
       };
-    },
+    }),
   );
 
   mcp.registerTool(
@@ -886,13 +942,13 @@ export async function buildMcpServer(
       inputSchema: readFileInputSchema,
       outputSchema: readFileOutputSchema,
     },
-    async ({ path: requested }) => {
+    loggedTool('read_file', async ({ path: requested }) => {
       const content = await readCorpusFile(folder, requested);
       return {
         content: [{ type: 'text', text: content }],
         structuredContent: { content },
       };
-    },
+    }),
   );
 
   mcp.registerTool(
@@ -903,7 +959,7 @@ export async function buildMcpServer(
       inputSchema: writeFileInputSchema,
       outputSchema: writeFileOutputSchema,
     },
-    async ({ path: requested, content, message }) => {
+    loggedTool('write_file', async ({ path: requested, content, message }) => {
       // Written and committed under one turn of the session, so a bash command
       // arriving in between cannot be committed under this message.
       const bytes = await session.enqueue(async () => {
@@ -915,7 +971,7 @@ export async function buildMcpServer(
         content: [{ type: 'text', text: `wrote ${bytes} bytes to ${requested}` }],
         structuredContent: { path: requested, bytes },
       };
-    },
+    }),
   );
 
   // --- the two that are the network ---------------------------------------
@@ -932,13 +988,13 @@ export async function buildMcpServer(
       inputSchema: findProductsInputSchema,
       outputSchema: findProductsOutputSchema,
     },
-    async ({ path: requested, message }) => {
+    loggedTool('kroger_find_products', async ({ path: requested, message }) => {
       const result = await findProducts({ session, folder, now, kroger, requested, message, baseUrl });
       return {
         content: [{ type: 'text', text: renderFindProducts(result) }],
         structuredContent: result,
       };
-    },
+    }),
   );
 
   mcp.registerTool(
@@ -949,7 +1005,7 @@ export async function buildMcpServer(
       inputSchema: sendToCartInputSchema,
       outputSchema: sendToCartOutputSchema,
     },
-    async ({ path: requested, items, message }) => {
+    loggedTool('kroger_send_to_cart', async ({ path: requested, items, message }) => {
       const result = await sendToCart({
         session,
         folder,
@@ -964,7 +1020,7 @@ export async function buildMcpServer(
         content: [{ type: 'text', text: renderSendToCart(result) }],
         structuredContent: result,
       };
-    },
+    }),
   );
 
   return mcp;

@@ -119,6 +119,43 @@ Then('reading {string} returns that content', async function (this: MealPlanWorl
   assert.equal(read.content, this.lastWritten.content);
 });
 
+// A full, valid set of arguments per tool, so "without a <field>" and "with a
+// blank <field>" only ever vary the one argument the scenario is about.
+const VALID_ARGS: Record<string, Record<string, unknown>> = {
+  bash: { command: 'ls', message: 'look around' },
+  read_file: { path: 'README.md' },
+  write_file: { path: 'recipes/example.md', content: '- 1 egg\n', message: 'write it' },
+  kroger_find_products: { path: 'shopping-lists/example.md', message: 'search' },
+  kroger_send_to_cart: { path: 'shopping-lists/example.md', message: 'send' },
+};
+
+When(
+  'I call the {string} tool without a {string}',
+  async function (this: MealPlanWorld, tool: string, field: string) {
+    const args = { ...VALID_ARGS[tool] };
+    delete args[field];
+    await this.callTool(tool, args);
+  },
+);
+
+When(
+  'I call the {string} tool with a blank {string}',
+  async function (this: MealPlanWorld, tool: string, field: string) {
+    await this.callTool(tool, { ...VALID_ARGS[tool], [field]: '   ' });
+  },
+);
+
+Then('the meal planner refuses, and names the argument {string}', function (this: MealPlanWorld, argument: string) {
+  assert.ok(
+    this.lastToolError !== null,
+    `the meal planner did not refuse. It said:\n${this.lastToolText}`,
+  );
+  assert.ok(
+    this.lastToolError.includes(argument),
+    `the refusal does not name the argument "${argument}":\n${this.lastToolError}`,
+  );
+});
+
 Then('the meal planner still answers the next command', async function (this: MealPlanWorld) {
   const result = await this.run('echo still here');
   assert.equal(result.exitCode, 0, `the sandbox stopped answering: ${result.stderr}`);

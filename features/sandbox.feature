@@ -100,6 +100,42 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     And the exit status is not zero
     And the error output mentions "No such file"
 
+  Scenario Outline: A tool call missing a required argument is refused, not a crash
+    Every mutating tool commits with the message the agent provides, so leaving
+    it out is not "no message" but "no idea what changed". The refusal has to
+    name the tool and the argument, because "invalid input" gives an agent
+    nothing to act on.
+
+    When I call the "<tool>" tool without a "<argument>"
+    Then the meal planner refuses, and names the argument "<argument>"
+
+    Examples:
+      | tool                 | argument |
+      | bash                 | command  |
+      | bash                 | message  |
+      | write_file           | path     |
+      | write_file           | content  |
+      | write_file           | message  |
+      | read_file            | path     |
+      | kroger_find_products | path     |
+      | kroger_find_products | message  |
+      | kroger_send_to_cart  | path     |
+      | kroger_send_to_cart  | message  |
+
+  Scenario Outline: A blank commit message is refused like a missing one
+    "   " says as little about what changed as leaving the argument out
+    entirely, so it gets the same refusal.
+
+    When I call the "<tool>" tool with a blank "message"
+    Then the meal planner refuses, and names the argument "message"
+
+    Examples:
+      | tool                 |
+      | bash                 |
+      | write_file           |
+      | kroger_find_products |
+      | kroger_send_to_cart  |
+
   Scenario Outline: Ordinary file and text commands are available
     When I run "<command>"
     Then the command succeeds
