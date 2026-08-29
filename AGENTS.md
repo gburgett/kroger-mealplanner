@@ -215,10 +215,12 @@ Working rhythm:
 Every scenario is a full integration test. Nothing in the stack is stubbed:
 a `When` step acts by sending a loopback web request to our own API, and a
 `Then` step asserts against the files that ended up on disk. The only thing
-ever mocked is a third-party HTTP API — Kroger, and nothing else. It lives in
-one file, `features/support/kroger.ts`, which is what makes that rule something
-a person can check. Our sandbox, our transport, our commands and our git history
-all run for real.
+ever mocked is a third-party HTTP API — Kroger, Walmart and the exe.dev LLM
+gateway, and nothing else. Each lives in one file
+(`features/support/kroger.ts`, `features/support/walmart.ts`,
+`features/support/llm.ts`), which is what makes that rule something a person
+can check. Our sandbox, our transport, our commands and our git history all
+run for real.
 
 Rules of thumb:
 

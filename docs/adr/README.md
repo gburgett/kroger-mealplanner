@@ -32,6 +32,7 @@ decision, write a new record. Give the old record the status
 | [0015](0015-mark-a-consumable-bought-from-the-kroger-send.md) | Mark a consumable bought from the Kroger cart send | accepted |
 | [0016](0016-mark-and-gate-a-consumable-that-needs-a-recheck.md) | Mark and gate a consumable that needs a recheck | accepted |
 | [0017](0017-shop-at-walmart-through-the-affiliate-api-with-a-link-for-the-cart.md) | Shop at Walmart through the affiliate API, with a link for the cart | accepted |
+| [0018](0018-run-a-weekly-llm-job-to-recheck-consumables.md) | Run a weekly LLM job to recheck consumables | proposed |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and

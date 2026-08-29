@@ -93,17 +93,21 @@ filesystem rather than something we have to enforce.
   names the file, the line, or the argument at fault. An agent can recover from
   "line 7 of recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`"; it
   cannot recover from "invalid".
-- **There are two mocks, one per third party, each in one file.**
-  `features/support/kroger.ts` stands in for the Kroger API and
-  `features/support/walmart.ts` for the Walmart affiliate API — the two third
-  parties this product talks to. Each is a real HTTP listener on a real port,
-  so the server makes a real request with a real `fetch`; `KROGER_API_BASE`
-  and `WALMART_API_BASE`/`WALMART_CART_BASE` are the seams. Keeping each mock
+- **There are three mocks, one per third party, each in one file.**
+  `features/support/kroger.ts` stands in for the Kroger API,
+  `features/support/walmart.ts` for the Walmart affiliate API, and
+  `features/support/llm.ts` for the exe.dev LLM gateway the weekly recheck
+  job calls (ADR 0018) — the three third parties this product talks to. Each
+  is a real HTTP listener on a real port, so the caller makes a real request
+  with a real `fetch`; `KROGER_API_BASE`, `WALMART_API_BASE`/
+  `WALMART_CART_BASE` and `MEALPLAN_LLM_BASE` are the seams. Keeping each mock
   in one file is what makes "only a third-party API is ever mocked" a rule
   somebody can check. The Kroger mock records every cart add, because Kroger's
   cart cannot be read back; the Walmart mock verifies the RSA signature on
   every request and records every add the opened cart links cause, because
-  whether the household clicked cannot be known in production either.
+  whether the household clicked cannot be known in production either; the LLM
+  mock records every request it received and answers with the turns a
+  scenario scripted in advance, never a real model.
 
 ## Why there is a `mealplan` command in the sandbox
 

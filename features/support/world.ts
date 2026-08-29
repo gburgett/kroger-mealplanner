@@ -24,7 +24,9 @@ import type { RunResult, Session } from '../../src/sandbox/session.ts';
 import type { BashResult } from '../../src/mcp/tools.ts';
 import { CLIENT_ID, CLIENT_SECRET, KrogerMock } from './kroger.ts';
 import { CONSUMER_ID as WALMART_CONSUMER_ID, WalmartMock, walmartTestKeys } from './walmart.ts';
+import { LlmMock } from './llm.ts';
 import { HouseholdOAuthClient } from './oauth.ts';
+import { runRecheckJob, type RecheckResult } from '../../src/jobs/recheck.ts';
 
 /**
  * A frozen clock. Scenarios use fixed dates, so the git history a scenario
@@ -71,7 +73,7 @@ export class MealPlanWorld extends World {
   port = 0;
 
   /**
-   * Kroger, stood in for. One of the two mocks in the suite — see
+   * Kroger, stood in for. One of the three mocks in the suite — see
    * features/support/kroger.ts.
    */
   kroger: KrogerMock | null = null;
@@ -83,10 +85,28 @@ export class MealPlanWorld extends World {
   walmart: WalmartMock | null = null;
 
   /**
+   * The exe.dev LLM gateway, stood in for. The third mock, in the one shape
+   * the rule permits — features/support/llm.ts. Only the weekly recheck job
+   * (ADR 0018) ever calls it; the household's own assistant never does.
+   */
+  llm: LlmMock | null = null;
+
+  /**
    * Where the Walmart signing key is written, OUTSIDE the meal-plan folder,
    * so the containment scenario has a real path to try to read.
    */
   walmartKeyPath = '';
+
+  /**
+   * "Today", for the weekly recheck job alone. Set by a `Given today is`
+   * step; the job's own staleness gate and commit timestamps read this
+   * instead of `this.clock` so a scenario can pick a fixed date without
+   * disturbing the ticking clock every other scenario in the suite relies on.
+   */
+  recheckToday: Date | null = null;
+
+  /** What the last `runRecheckJob` call returned. */
+  recheckResult: RecheckResult | null = null;
 
   /** Which browser session the raw-request steps are speaking as. */
   signedInAs: string | undefined;
@@ -143,12 +163,13 @@ export class MealPlanWorld extends World {
     this.statePath = path.join(await mkdtemp(path.join(tmpdir(), 'mealplan-state-')), 'auth.json');
     this.kroger = await KrogerMock.start();
     this.walmart = await WalmartMock.start();
+    this.llm = await LlmMock.start();
     // The signing key lives outside the folder, as it would in production. It
     // is passed to the server as an option rather than through process.env —
     // the scenarios share one process, and a mutation would leak.
     this.walmartKeyPath = path.join(path.dirname(this.statePath), 'walmart-key.pem');
     await writeFile(this.walmartKeyPath, walmartTestKeys().privateKey, { mode: 0o600 });
-    // The port is asked for only after the two mocks have bound theirs.
+    // The port is asked for only after the three mocks have bound theirs.
     // freePort() learns a free port and gives it straight back, which leaves a
     // gap before startServer binds it. Each mock's listen(0) would be glad to
     // take that just-released port, and then startServer would fail with
@@ -251,6 +272,8 @@ export class MealPlanWorld extends World {
     this.kroger = null;
     await this.walmart?.stop().catch(() => undefined);
     this.walmart = null;
+    await this.llm?.stop().catch(() => undefined);
+    this.llm = null;
     if (this.folder) await rm(this.folder, { recursive: true, force: true });
     if (this.statePath) {
       await rm(path.dirname(this.statePath), { recursive: true, force: true });
@@ -265,6 +288,27 @@ export class MealPlanWorld extends World {
   walmartMock(): WalmartMock {
     if (!this.walmart) throw new Error('no Walmart mock: the scenario has none running');
     return this.walmart;
+  }
+
+  llmMock(): LlmMock {
+    if (!this.llm) throw new Error('no LLM mock: the scenario has none running');
+    return this.llm;
+  }
+
+  /**
+   * Run the weekly recheck job for real: its own sandbox session, opened and
+   * closed fresh, exactly as production does. Not the household's assistant
+   * and not the MCP server under test elsewhere in this suite — this is the
+   * second, unattended caller ADR 0018 adds.
+   */
+  async runRecheck(): Promise<RecheckResult> {
+    this.recheckResult = await runRecheckJob({
+      folder: this.folder,
+      tenant: 'weekly-recheck-scenario',
+      now: () => this.recheckToday ?? this.clock.now(),
+      llmBase: this.llmMock().base,
+    });
+    return this.recheckResult;
   }
 
   /** The headers exe.dev would add for whoever is signed in, and none when nobody is. */
