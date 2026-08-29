@@ -23,7 +23,7 @@ one of them:
 | The door | `auth.feature` · `kroger_link.feature` | Who gets in at all, who may approve them, and how a Kroger account is connected |
 | The sandbox | `sandbox.feature` | What commands can do, and what they must never do |
 | The corpus | `corpus.feature` · `history.feature` | Folder layout, document shape, validation, git history |
-| The work | `recipes` · `dinners` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` | What the housewife actually gets out of it |
+| The work | `recipes` · `dinners` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
 
 ## The folder
 
@@ -31,7 +31,8 @@ one of them:
 /workspace
 ├── README.md          the map, written for whichever agent opens it first
 ├── config/
-│   └── kroger.md      which Kroger store, and whether it is picked up
+│   ├── kroger.md      which Kroger store, and whether it is picked up
+│   └── walmart.md     which Walmart store cart links are built for
 ├── recipes/           one document per recipe, filename = slugged name
 │   └── chicken-tacos.md
 ├── dinners/           one document per night, filename = ISO date
@@ -46,7 +47,10 @@ one of them:
 
 The Kroger **credential** is not in this folder and cannot be reached from it.
 The **store** is, because `cat config/kroger.md` has to answer "is Kroger set
-up" without a tool existing for the question. See ADR 0010.
+up" without a tool existing for the question. See ADR 0010. Walmart has no
+household credential at all — the affiliate API is signed with the server's own
+key, and the cart is a link the household opens — so `config/walmart.md` is the
+whole of Walmart in the folder. See ADR 0017.
 
 The folder is also a git repository. The server commits after every command
 that changes a file, so an agent that overwrites a recipe it should not have can
@@ -89,14 +93,17 @@ filesystem rather than something we have to enforce.
   names the file, the line, or the argument at fault. An agent can recover from
   "line 7 of recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`"; it
   cannot recover from "invalid".
-- **There is one mock, and it lives in one file.** `features/support/kroger.ts`
-  stands in for the Kroger API — the one third party this product talks to. It
-  is a real HTTP listener on a real port, so the server makes a real request
-  with a real `fetch`; `KROGER_API_BASE` is the seam. Keeping it in one file is
-  what makes "only a third-party API is ever mocked" a rule somebody can check:
-  a second mock would have to go somewhere, and there is nowhere for it to go.
-  It records every cart add, because Kroger's cart cannot be read back and that
-  log is the only record of a send there can be.
+- **There are two mocks, one per third party, each in one file.**
+  `features/support/kroger.ts` stands in for the Kroger API and
+  `features/support/walmart.ts` for the Walmart affiliate API — the two third
+  parties this product talks to. Each is a real HTTP listener on a real port,
+  so the server makes a real request with a real `fetch`; `KROGER_API_BASE`
+  and `WALMART_API_BASE`/`WALMART_CART_BASE` are the seams. Keeping each mock
+  in one file is what makes "only a third-party API is ever mocked" a rule
+  somebody can check. The Kroger mock records every cart add, because Kroger's
+  cart cannot be read back; the Walmart mock verifies the RSA signature on
+  every request and records every add the opened cart links cause, because
+  whether the household clicked cannot be known in production either.
 
 ## Why there is a `mealplan` command in the sandbox
 

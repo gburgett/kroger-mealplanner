@@ -56,6 +56,15 @@ process.stderr.write(
     : 'kroger: not configured. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET to ' +
         'enable the cart.\n',
 );
+// Walmart is optional too, and simpler: the credential is the server's own
+// signing key, so there is nothing to link — either the server can sign or the
+// three Walmart tools refuse and say what is missing. See ADR 0017.
+process.stderr.write(
+  running.walmart
+    ? `walmart: configured, consumer ${running.walmart.consumerId}\n`
+    : 'walmart: not configured. Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY_PATH to ' +
+        'enable the cart links.\n',
+);
 process.stderr.write(
   running.session.useUserScope
     ? 'resource limits: cgroup v2 scope, plus rlimits\n'

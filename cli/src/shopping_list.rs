@@ -1,4 +1,5 @@
-//! `mealplan shopping-list --from DATE --to DATE [--include-staples] [--out PATH] [--json]`
+//! `mealplan shopping-list --from DATE --to DATE [--include-staples]
+//! [--include-consumables] [--out PATH] [--json]`
 //!
 //! Derived from the folder every time and never stored. Read the dinners in the
 //! range, follow the links, scale each recipe by that night's servings over the
@@ -18,7 +19,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use crate::corpus::{field, front_matter, load, Corpus, Dinner};
+use crate::corpus::{field, front_matter, load, Consumable, ConsumableStatus, Corpus, Dinner};
 use crate::json;
 use crate::quantity::{Measure, Number};
 use crate::sections::{section_for, ORDER};
@@ -34,6 +35,7 @@ pub struct Request<'a> {
     pub from: &'a str,
     pub to: &'a str,
     pub include_staples: bool,
+    pub include_consumables: bool,
     pub out: Option<&'a str>,
     pub json: bool,
 }
@@ -43,6 +45,40 @@ struct Line {
     item: String,
     measure: Measure,
     nights: BTreeSet<String>,
+    /// True when pantry/consumables.md still calls this item "needs recheck".
+    /// Marked "(check)" on the rendered line rather than left out — see
+    /// ADR 0016 — because nobody has confirmed the household is actually out.
+    check: bool,
+}
+
+/// Why an ingredient did not reach the list.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+enum LeftOutReason {
+    Staple,
+    Consumable,
+}
+
+impl LeftOutReason {
+    fn noun(self) -> &'static str {
+        match self {
+            LeftOutReason::Staple => "staple",
+            LeftOutReason::Consumable => "consumable",
+        }
+    }
+
+    fn document(self) -> &'static str {
+        match self {
+            LeftOutReason::Staple => "pantry/staples.md",
+            LeftOutReason::Consumable => "pantry/consumables.md",
+        }
+    }
+
+    fn flag(self) -> &'static str {
+        match self {
+            LeftOutReason::Staple => "--include-staples",
+            LeftOutReason::Consumable => "--include-consumables",
+        }
+    }
 }
 
 /// Which store the list was matched against, and how it is collected.
@@ -96,7 +132,7 @@ pub fn run(root: &Path, request: Request) -> i32 {
     let (lines, dropped) = if dinners.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        gather(&corpus, &dinners, request.include_staples)
+        gather(&corpus, &dinners, request.include_staples, request.include_consumables)
     };
     let store = read_store(root);
 
@@ -138,7 +174,7 @@ fn render_markdown(
     request: &Request,
     dinners: &[&Dinner],
     lines: &[Line],
-    dropped: &[String],
+    dropped: &[(String, LeftOutReason)],
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -173,18 +209,59 @@ fn render_markdown(
         }
     }
 
+    let checked: Vec<&str> = lines
+        .iter()
+        .filter(|line| line.check)
+        .map(|line| line.item.as_str())
+        .collect();
+    if !checked.is_empty() {
+        let plural = checked.len() > 1;
+        let (be, subject, need, object) =
+            if plural { ("are", "they", "need", "them") } else { ("is", "it", "needs", "it") };
+        out.push_str("\n## Check before buying\n\n");
+        out.push_str(&format!(
+            "{} {be} marked \"(check)\" above: pantry/consumables.md still says {subject} \
+             {need} a recheck. Ask the household whether they already have {object} before \
+             buying {object}. kroger_send_to_cart refuses to send this list while a \"(check)\" \
+             line is on it — delete the line if they still have it, or remove \"(check)\" from \
+             the line if they need it.\n",
+            checked.join(", "),
+        ));
+    }
+
     if !dropped.is_empty() {
         out.push_str("\n## Left out\n\n");
-        out.push_str(&format!(
-            "{} — {} kept in the pantry, from pantry/staples.md. Pass --include-staples to buy {} anyway.\n",
-            dropped.join(", "),
-            if dropped.len() == 1 { "a staple" } else { "staples" },
-            if dropped.len() == 1 { "it" } else { "them" },
-        ));
+        for reason in [LeftOutReason::Staple, LeftOutReason::Consumable] {
+            let items: Vec<&str> = dropped
+                .iter()
+                .filter(|(_, item_reason)| *item_reason == reason)
+                .map(|(item, _)| item.as_str())
+                .collect();
+            if items.is_empty() {
+                continue;
+            }
+            let plural = items.len() > 1;
+            let noun = if plural {
+                format!("{}s", reason.noun())
+            } else {
+                format!("a {}", reason.noun())
+            };
+            out.push_str(&format!(
+                "{} — {noun}, kept in the pantry from {}. Pass {} to buy {} anyway.\n",
+                items.join(", "),
+                reason.document(),
+                reason.flag(),
+                if plural { "them" } else { "it" },
+            ));
+        }
     }
 
     out
 }
+
+/// The literal suffix a "(check)" line ends with. `kroger_send_to_cart`
+/// refuses to send while any line still carries it — see ADR 0016.
+const CHECK_MARK: &str = " (check)";
 
 /// One item line, without its `- `.
 ///
@@ -194,7 +271,8 @@ fn render_markdown(
 /// `shopping-list --json` carries the same string so the two cannot drift.
 fn render_line(line: &Line) -> String {
     let nights: Vec<&str> = line.nights.iter().map(String::as_str).collect();
-    format!("{} {} — {}", line.measure.render(), line.item, nights.join(", "))
+    let mark = if line.check { CHECK_MARK } else { "" };
+    format!("{} {} — {}{mark}", line.measure.render(), line.item, nights.join(", "))
 }
 
 // --- the structure ---------------------------------------------------------
@@ -204,7 +282,12 @@ fn render_line(line: &Line) -> String {
 /// Built with the writer in json.rs. No serialiser crate and no JSON PARSER:
 /// nothing in this program ever reads JSON, which is what keeps the dependency
 /// count at zero. See ADR 0003 and ADR 0010.
-fn render_json(request: &Request, store: &Store, lines: &[Line], dropped: &[String]) -> String {
+fn render_json(
+    request: &Request,
+    store: &Store,
+    lines: &[Line],
+    dropped: &[(String, LeftOutReason)],
+) -> String {
     let sections: Vec<String> = ORDER
         .iter()
         .filter_map(|section| {
@@ -254,7 +337,17 @@ fn render_json(request: &Request, store: &Store, lines: &[Line], dropped: &[Stri
         json::field("sections", json::array(sections)),
         json::field(
             "leftOut",
-            json::array(dropped.iter().map(|item| json::string(item)).collect()),
+            json::array(
+                dropped
+                    .iter()
+                    .map(|(item, reason)| {
+                        json::object(vec![
+                            json::field("item", json::string(item)),
+                            json::field("reason", json::string(reason.noun())),
+                        ])
+                    })
+                    .collect(),
+            ),
         ),
     ])
 }
@@ -327,9 +420,10 @@ fn gather(
     corpus: &Corpus,
     dinners: &[&Dinner],
     include_staples: bool,
-) -> (Vec<Line>, Vec<String>) {
+    include_consumables: bool,
+) -> (Vec<Line>, Vec<(String, LeftOutReason)>) {
     let mut lines: Vec<Line> = Vec::new();
-    let mut dropped: BTreeSet<String> = BTreeSet::new();
+    let mut dropped: BTreeSet<(String, LeftOutReason)> = BTreeSet::new();
 
     for dinner in dinners {
         let servings = servings_for(corpus, dinner);
@@ -338,11 +432,16 @@ fn gather(
             let factor = servings / recipe.servings;
             for ingredient in &recipe.ingredients {
                 if !include_staples && is_staple(&corpus.staples, &ingredient.item) {
-                    dropped.insert(ingredient.item.clone());
+                    dropped.insert((ingredient.item.clone(), LeftOutReason::Staple));
                     continue;
                 }
+                if !include_consumables && is_stocked(&corpus.consumables, &ingredient.item) {
+                    dropped.insert((ingredient.item.clone(), LeftOutReason::Consumable));
+                    continue;
+                }
+                let check = needs_recheck(&corpus.consumables, &ingredient.item);
                 let measure = Measure::of(ingredient.quantity, ingredient.unit).scaled(factor);
-                add(&mut lines, &ingredient.item, measure, &dinner.date);
+                add(&mut lines, &ingredient.item, measure, &dinner.date, check);
             }
         }
     }
@@ -371,37 +470,68 @@ fn servings_for(corpus: &Corpus, dinner: &Dinner) -> Number {
 /// stay on separate lines rather than being guessed at": 28 oz of tomatoes and
 /// 4 tomatoes are two lines, because nothing in the folder says what a tomato
 /// weighs.
-fn add(lines: &mut Vec<Line>, item: &str, measure: Measure, night: &str) {
+fn add(lines: &mut Vec<Line>, item: &str, measure: Measure, night: &str, check: bool) {
     let key = item.to_ascii_lowercase();
     for line in lines.iter_mut() {
         if line.item.to_ascii_lowercase() == key {
             if let Some(combined) = line.measure.add(measure) {
                 line.measure = combined;
                 line.nights.insert(night.to_string());
+                line.check = line.check || check;
                 return;
             }
         }
     }
     let mut nights = BTreeSet::new();
     nights.insert(night.to_string());
-    lines.push(Line { item: item.to_string(), measure, nights });
+    lines.push(Line { item: item.to_string(), measure, nights, check });
 }
 
 /// Whether the household always has this in.
+fn is_staple(staples: &[String], item: &str) -> bool {
+    matches_any(staples.iter(), item)
+}
+
+/// Whether the household still has plenty of this, per pantry/consumables.md.
 ///
+/// A consumable with no matching line, or one marked "needs recheck" rather
+/// than "stocked", is not left out — it is bought like any other ingredient.
+fn is_stocked(consumables: &[Consumable], item: &str) -> bool {
+    matches_any(
+        consumables
+            .iter()
+            .filter(|consumable| consumable.status == ConsumableStatus::Stocked)
+            .map(|consumable| &consumable.item),
+        item,
+    )
+}
+
+/// Whether pantry/consumables.md still calls this item "needs recheck" —
+/// nobody has confirmed the household is actually out, so it is bought, but
+/// marked "(check)" rather than bought silently. See ADR 0016.
+fn needs_recheck(consumables: &[Consumable], item: &str) -> bool {
+    matches_any(
+        consumables
+            .iter()
+            .filter(|consumable| consumable.status == ConsumableStatus::NeedsRecheck)
+            .map(|consumable| &consumable.item),
+        item,
+    )
+}
+
 /// Matched on whole words, so "flour" leaves out "flour" and "plain flour" but
 /// not "flourless chocolate cake".
-fn is_staple(staples: &[String], item: &str) -> bool {
+fn matches_any<'a>(names: impl Iterator<Item = &'a String>, item: &str) -> bool {
     let lowered = item.to_ascii_lowercase();
     let words: Vec<&str> = lowered
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
         .collect();
-    staples.iter().any(|staple| {
-        let staple_words: Vec<&str> = staple
+    names.into_iter().any(|name| {
+        let name_words: Vec<&str> = name
             .split(|character: char| !character.is_ascii_alphanumeric())
             .filter(|word| !word.is_empty())
             .collect();
-        !staple_words.is_empty() && words.windows(staple_words.len()).any(|window| window == staple_words)
+        !name_words.is_empty() && words.windows(name_words.len()).any(|window| window == name_words)
     })
 }

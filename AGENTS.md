@@ -44,10 +44,15 @@ Consequences worth internalising before changing anything:
   (`mealplan shopping-list`) and schema validation (`mealplan validate`).
 - **A tool exists only when the sandbox cannot do the job by construction.**
   There is exactly one such job — the network, which the sandbox does not have
-  and must never get — so there are exactly two such tools,
-  `kroger_find_products` and `kroger_send_to_cart`. "Is Kroger set up" is not
-  one: `cat config/kroger.md` answers it, which is why the store is a document.
-  See ADR 0010, and `src/mcp/tools.ts`, where the test is written down.
+  and must never get — so four of the five non-sandbox tools are network calls:
+  `kroger_find_products`, `kroger_send_to_cart`, `walmart_find_stores` and
+  `walmart_find_products`. "Is Kroger set up" is not one: `cat config/kroger.md`
+  answers it, which is why the store is a document. The fifth,
+  `walmart_cart_link`, makes no network call: it is the choke point where
+  "nothing unchosen reaches the household's cart" is enforced, and bash cannot
+  be trusted to keep that property from memory. That exception is recorded in
+  ADR 0017, and it is the only one. See ADR 0010, and `src/mcp/tools.ts`, where
+  the test is written down.
 - **Error messages are the documentation.** An agent recovers from "line 7 of
   recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`". It cannot recover
   from "invalid input". Name the file, the line, or the argument.
@@ -77,6 +82,7 @@ sandbox.
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, built-in `fetch`, no package | ADR 0010 |
+| Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `node:crypto` RSA, no package | ADR 0017 |
 
 **The server is on the public internet, so there are two boundaries, not one.**
 The sandbox decides what an agent may do once it is inside; OAuth decides whether
@@ -323,7 +329,10 @@ implies otherwise.
 public cart — adding is the whole of it. The meal planner can say what it SENT
 and never what the cart HOLDS. Partner access would give the rest, and it needs
 a contractual agreement with Kroger Digital, so it is not available to this
-product.
+product. The Walmart side has the same wall from the other direction: the cart
+is a link the household opens on walmart.com, so whether they opened it — and
+what the cart holds — cannot be known either. Messages say what a link WOULD
+add.
 
 **Multi-tenancy**, still. `kroger.json` is not keyed by tenant and the
 `open(tenant)` seam is untouched. See ADR 0008.

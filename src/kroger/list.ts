@@ -1,8 +1,9 @@
 // The candidate grammar, defined here and nowhere else.
 //
 // THIS IS THE ONE PLACE THE SERVER READS PART OF A DOCUMENT, and ADR 0010 says
-// so out loud rather than letting it happen quietly. The boundary that keeps it
-// honest:
+// so out loud rather than letting it happen quietly. Since ADR 0017 the file
+// is misnamed — the grammar is shared by Kroger and Walmart — but the boundary
+// that keeps it honest is unchanged:
 //
 //   * The ingredient grammar stays in the CLI. Nothing here parses
 //     `- <quantity> [unit] <item>`; the structure comes from
@@ -16,9 +17,17 @@
 // The shape is fixed so that a bare `grep` answers "which products are in
 // play":
 //
-//     - <count> `<upc>` <description> — <size> — <price>
+//     - <count> `<product id>` <description> — <size> — <price>
 //
-//     grep -o '`[0-9]\{13\}`' shopping-lists/2026-08-25--2026-08-31.md
+//     grep -o '`[0-9]\{13\}`'      shopping-lists/2026-08-25--2026-08-31.md
+//     grep -o '`walmart:[0-9]*`'    shopping-lists/2026-08-25--2026-08-31.md
+//
+// THE PRODUCT ID SAYS WHICH SHOP IT CAME FROM. A Kroger candidate carries a
+// 13-digit UPC; a Walmart candidate carries the Walmart item id with a
+// "walmart:" prefix. The prefix is what lets one list hold both shops'
+// products without either cart tool mistaking the other's — a Walmart item id
+// is just digits, and a bare one would be indistinguishable from a short UPC.
+// See ADR 0017.
 //
 // BLOCKS ARE ANCHORED BY THE EXACT TEXT OF THE ITEM LINE, never by a line
 // number. The agent edits this file freehand between the two tool calls — that
@@ -28,11 +37,27 @@
 /** Headings whose list items are not shopping items. */
 const NOT_FOUND_HEADING = 'Not found at this store';
 const SENT_HEADING = 'Sent';
+const CART_LINK_HEADING = 'Cart link';
 const LEFT_OUT_HEADING = 'Left out';
-const PROSE_SECTIONS = new Set([LEFT_OUT_HEADING, SENT_HEADING]);
+const PROSE_SECTIONS = new Set([LEFT_OUT_HEADING, SENT_HEADING, CART_LINK_HEADING]);
 
 /** A 13-character zero-padded string, and it must stay a string. */
-const UPC = /^[0-9]{13}$/;
+const KROGER_UPC = /^[0-9]{13}$/;
+/** A Walmart item id, prefixed so it can never be mistaken for a UPC. */
+const WALMART_ITEM = /^walmart:[0-9]{1,20}$/;
+
+export function isKrogerUpc(productId: string): boolean {
+  return KROGER_UPC.test(productId);
+}
+
+export function isWalmartItemId(productId: string): boolean {
+  return WALMART_ITEM.test(productId);
+}
+
+/** The bare Walmart item id, for the add-to-cart link. */
+export function walmartItemId(productId: string): string {
+  return productId.replace(/^walmart:/, '');
+}
 
 const CANDIDATE = /^\s+-\s+(\S+)\s+`([^`]*)`\s*(.*)$/;
 
@@ -56,7 +81,11 @@ export type Candidate = {
    * is a judgement about the household's week, not an arithmetic fact.
    */
   count: number;
-  upc: string;
+  /**
+   * Which product, and which shop: a 13-digit Kroger UPC, or a Walmart item
+   * id as "walmart:<id>". Named productId rather than upc since ADR 0017.
+   */
+  productId: string;
   description: string;
   size: string;
   /** As written, so a re-read never re-formats somebody's number. */
@@ -197,21 +226,23 @@ function parseCandidate(file: string, number: number, raw: string): Candidate {
   const found = CANDIDATE.exec(raw);
   if (!found) complaint(`cannot read this candidate: ${raw.trim()}.`);
 
-  const [, rawCount, upc, rest] = found as RegExpExecArray;
+  const [, rawCount, productId, rest] = found as RegExpExecArray;
   const count = Number(rawCount);
   if (!Number.isInteger(count) || count < 1) {
     complaint(`the count "${rawCount}" is not a whole number of one or more.`);
   }
-  if (!UPC.test(upc)) {
+  if (!KROGER_UPC.test(productId) && !WALMART_ITEM.test(productId)) {
     complaint(
-      `"${upc}" is not a Kroger UPC. A UPC is 13 digits, zero-padded, and keeps its leading zeros.`,
+      `"${productId}" is not a product id this meal planner writes. A Kroger candidate ` +
+        'carries a 13-digit UPC, zero-padded, keeping its leading zeros; a Walmart one ' +
+        'carries the item id as "walmart:<id>", for example "walmart:945193065".',
     );
   }
 
   const parts = rest.split(' — ');
   return {
     count,
-    upc,
+    productId,
     description: (parts[0] ?? '').trim(),
     size: (parts[1] ?? '').trim(),
     price: (parts[2] ?? '').trim(),
@@ -219,16 +250,18 @@ function parseCandidate(file: string, number: number, raw: string): Candidate {
   };
 }
 
-/** The item lines that are still waiting to be matched against Kroger. */
+/** The item lines that are still waiting to be matched against a shop. */
 export function unmatched(list: ShoppingList): ListItem[] {
   return list.items.filter(
     (item) => item.candidates.length === 0 && item.section !== NOT_FOUND_HEADING,
   );
 }
 
-/** Every UPC written anywhere in the document. The allow list for a cart send. */
-export function upcsIn(list: ShoppingList): Set<string> {
-  return new Set(list.items.flatMap((item) => item.candidates.map((candidate) => candidate.upc)));
+/** Every product id written anywhere in the document. The allow list for a cart send or link. */
+export function productIdsIn(list: ShoppingList): Set<string> {
+  return new Set(
+    list.items.flatMap((item) => item.candidates.map((candidate) => candidate.productId)),
+  );
 }
 
 // --- writing ---------------------------------------------------------------
@@ -259,7 +292,7 @@ export function attachCandidates(text: string, found: Map<string, Candidate[]>):
 
 export function renderCandidate(candidate: Candidate): string {
   return (
-    `  - ${candidate.count} \`${candidate.upc}\` ${clean(candidate.description)}` +
+    `  - ${candidate.count} \`${candidate.productId}\` ${clean(candidate.description)}` +
     ` — ${clean(candidate.size) || 'size unknown'} — ${clean(candidate.price) || 'no price'}`
   );
 }
@@ -291,14 +324,14 @@ export function moveToNotFound(text: string, anchors: string[]): string {
     dropEmptySections(kept),
     NOT_FOUND_HEADING,
     [
-      'Kroger returned nothing for these at this store. They are still on the list:',
+      'The shop returned nothing for these. They are still on the list:',
       'search for them by hand, or write the product in yourself.',
       '',
       ...moved,
     ],
-    // Before the two sections that are records ABOUT the list rather than part
-    // of it. This one is still shopping.
-    [`## ${LEFT_OUT_HEADING}`, `## ${SENT_HEADING}`],
+    // Before the sections that are records ABOUT the list rather than part of
+    // it. This one is still shopping.
+    [`## ${LEFT_OUT_HEADING}`, `## ${SENT_HEADING}`, `## ${CART_LINK_HEADING}`],
   );
 }
 
@@ -329,6 +362,32 @@ export function appendSent(
     ],
     // At the very end. It is a log, and a log belongs under everything it is
     // a log of.
+    [],
+  );
+}
+
+/**
+ * Append the Walmart cart link that was built, and when.
+ *
+ * ITS OWN TEXT SAYS BUILDING IT ADDED NOTHING, because the add is the
+ * household opening the link — which walmart.com sees and this product never
+ * can. An agent that reads this section later must not conclude the items
+ * reached a cart. See ADR 0017.
+ */
+export function appendCartLink(text: string, url: string, at: Date): string {
+  const stamp = at.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return insertSection(
+    text.split('\n'),
+    CART_LINK_HEADING,
+    [
+      'The Walmart cart links built from this list, and when. Each is a link that',
+      'WOULD fill the household\'s Walmart cart: opening it is what adds, and',
+      'building it added nothing. Whether the household ever opened it is not',
+      'something this file can know.',
+      '',
+      `- ${stamp} — <${url}>`,
+    ],
+    // At the very end, with the other log.
     [],
   );
 }
@@ -417,10 +476,10 @@ function dropEmptySections(lines: string[]): string[] {
 /**
  * Third-party text, made safe for one line of a markdown document.
  *
- * A product description comes from Kroger and goes into a file the agent reads
- * back. A newline in it would end the candidate; an em dash would split the
- * fields; a backtick would break the UPC out of its quoting. None of those are
- * likely and all of them are cheap to make impossible.
+ * A product description comes from Kroger or Walmart and goes into a file the
+ * agent reads back. A newline in it would end the candidate; an em dash would
+ * split the fields; a backtick would break the id out of its quoting. None of
+ * those are likely and all of them are cheap to make impossible.
  */
 function clean(text: string): string {
   return text

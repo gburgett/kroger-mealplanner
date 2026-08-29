@@ -19,6 +19,8 @@
 //   * config/kroger.md, because `cat config/kroger.md` is how "is Kroger set
 //     up" gets answered, and a question answered by `cat` needs no tool. It is
 //     REGENERATED until a shop is chosen. See ADR 0010.
+//   * config/walmart.md, the same answer for Walmart — which store cart links
+//     are built for. Also REGENERATED until a store is chosen. See ADR 0017.
 //   * preferences/household.md, because an empty file teaches an agent nothing
 //     and a worked example teaches it everything. It is WRITTEN ONCE AND NEVER
 //     TOUCHED AGAIN — the household owns its shape from the first edit.
@@ -31,6 +33,11 @@ import {
   krogerConfigDocument,
   readKrogerConfig,
 } from '../kroger/config.ts';
+import {
+  WALMART_CONFIG_PATH,
+  readWalmartConfig,
+  walmartConfigDocument,
+} from '../walmart/config.ts';
 
 export const CORPUS_DIRECTORIES = [
   'config',
@@ -156,9 +163,26 @@ Without \`servings\` of its own, a dinner feeds what its recipes feed.
 
 ## pantry/
 
-\`pantry/staples.md\` is a plain markdown list of the things the household always
-has in. The shopping list leaves them out unless you pass
-\`--include-staples\`.
+Two plain markdown lists, for two different things:
+
+\`pantry/staples.md\` is what the household never buys — salt, flour, oil. The
+shopping list leaves these out unless you pass \`--include-staples\`.
+
+\`pantry/consumables.md\` is what the household keeps SOME of, but which runs
+out — ketchup, eggs, olive oil. Each line carries a status:
+
+    - <item>: stocked
+    - <item>: needs recheck
+
+\`stocked\` is left off the list, the same as a staple, unless you pass
+\`--include-consumables\`. \`needs recheck\` is not left off — it is bought like
+any ordinary ingredient, but its line on the shopping list is marked
+\`(check)\`, because nobody has confirmed the household is actually out.
+\`kroger_send_to_cart\` refuses to send a list while any line is still marked
+that way — ask the household, then either delete the line if they still have
+it, or remove \`(check)\` from the line if they need it. Sending it, once
+resolved, also flips the status back to \`stocked\` for you. Flip the status
+to \`needs recheck\` by hand when you notice the household is running low.
 
 ## preferences/
 
@@ -188,6 +212,13 @@ The credential lives outside the folder, where nothing in here can read it.
 Connecting one needs a person at a browser, on one of exactly two screens this
 product has.
 
+\`config/walmart.md\` says which Walmart store cart links are built for. Walmart
+is simpler: there is no account to connect and no browser flow — the
+\`walmart_find_stores\` tool finds the stores near a postcode, the household
+picks one, and you write the file. \`cat config/walmart.md\` answers "which
+Walmart". The cart is a LINK the household opens, built by
+\`walmart_cart_link\` — building it adds nothing.
+
 ## shopping-lists/
 
 One document per range of nights, named for the range:
@@ -212,9 +243,13 @@ modality: pickup
 \`\`\`
 
 An indented list item under a line is a **candidate product**, and the shape is
-fixed so that \`grep -o '\\\`[0-9]\\{13\\}\\\`'\` lists every UPC in play:
+fixed so that \`grep -o '\\\`[0-9]\\{13\\}\\\`'\` lists every Kroger UPC in play:
 
-    - <count> \`<upc>\` <description> — <size> — <price>
+    - <count> \`<product id>\` <description> — <size> — <price>
+
+The id says which shop the product came from: a Kroger candidate carries a
+13-digit UPC, a Walmart one carries the item id as \`walmart:<id>\` —
+\`grep -o '\\\`walmart:[0-9]*\\\`'\` lists every Walmart product in play.
 
 Nothing is ever chosen for you. Choose by deleting the candidates you do not
 want, until one is left. Set \`<count>\` yourself, by comparing what the line
@@ -316,6 +351,19 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<string
     if ((await read(kroger)) !== wanted) {
       await writeFile(kroger, wanted, 'utf8');
       written.push(KROGER_CONFIG_PATH);
+    }
+  }
+
+  // config/walmart.md follows the same rule: boilerplate that is REGENERATED
+  // while no store is set, and a choice that is never touched here once one
+  // is. The household or the agent writes the choice with write_file.
+  const walmart = path.join(folder, WALMART_CONFIG_PATH);
+  const { store: walmartStore } = await readWalmartConfig(folder);
+  if (walmartStore === '') {
+    const wanted = walmartConfigDocument(null);
+    if ((await read(walmart)) !== wanted) {
+      await writeFile(walmart, wanted, 'utf8');
+      written.push(WALMART_CONFIG_PATH);
     }
   }
 

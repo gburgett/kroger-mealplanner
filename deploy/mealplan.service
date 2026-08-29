@@ -21,8 +21,8 @@
 # does not have. On another machine, change WorkingDirectory, ExecStart,
 # MEALPLAN_PUBLIC_URL, MEALPLAN_OWNER, MEALPLAN_FOLDER, MEALPLAN_STATE and
 # EnvironmentFile. Nothing here is a secret: the owner's address and the public
-# URL are both in AGENTS.md already, and the two Kroger credentials are the one
-# thing that is NOT in this file.
+# URL are both in AGENTS.md already, and the Kroger and Walmart credentials
+# are the one thing that is NOT in this file.
 #
 # Deployment procedure, and the warning about going public:
 #   docs/deploying-behind-exe-dev.md
@@ -60,10 +60,14 @@ Environment=PATH=/usr/bin:/bin
 # household's own Kroger credential is a third file, which the server writes
 # itself, beside auth.json and equally outside the meal-plan folder.
 #
+# Walmart's credential travels the same path (ADR 0017): WALMART_CONSUMER_ID
+# and WALMART_PRIVATE_KEY_PATH in .env, pointing at a 0600 PEM. It is the
+# server's own signing key — there is no household Walmart credential at all.
+#
 # The leading "-" makes the file optional. Without it the server starts and
 # works exactly as before — the consent page drops the Kroger checkbox and the
-# two Kroger tools refuse and say what is missing. Losing the whole meal planner
-# over an optional feature would be the worse failure.
+# Kroger and Walmart tools refuse and say what is missing. Losing the whole
+# meal planner over an optional feature would be the worse failure.
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env
 
 # The server exits 0 on SIGTERM, so a deliberate stop stays stopped.

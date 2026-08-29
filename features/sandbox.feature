@@ -16,21 +16,28 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Given a meal-plan folder mounted at "/workspace"
 
   Scenario: Discovering the interface
-    Five tools, and the split between them is the design. Three ARE the sandbox.
-    Two are the network the sandbox does not have, and they exist for that
-    reason alone: a tool exists only when the sandbox cannot do the job by
-    construction. "Is Kroger set up" is not such a job — `cat config/kroger.md`
-    answers it — which is why there is no tool for it. See ADR 0010.
+    Eight tools, and the split between them is the design. Three ARE the
+    sandbox. Four are the network the sandbox does not have, and they exist
+    for that reason alone: a tool exists only when the sandbox cannot do the
+    job by construction. "Is Kroger set up" is not such a job —
+    `cat config/kroger.md` answers it — which is why there is no tool for it.
+    See ADR 0010. The eighth, walmart_cart_link, makes no network call: it is
+    the choke point where "nothing unchosen reaches the household's cart" is
+    enforced, and ADR 0017 records why that is a tool rather than a shell
+    command.
 
     When a client connects to the meal planner over MCP
     Then the handshake succeeds
     And the server reports the tools:
-      | tool                 | purpose                                       |
-      | bash                 | run a shell command in the sandbox            |
-      | read_file            | read a file from the meal-plan folder         |
-      | write_file           | create or overwrite a file in the folder      |
-      | kroger_find_products | find Kroger products for a shopping list      |
-      | kroger_send_to_cart  | add the chosen products to the Kroger cart    |
+      | tool                  | purpose                                          |
+      | bash                  | run a shell command in the sandbox               |
+      | read_file             | read a file from the meal-plan folder            |
+      | write_file            | create or overwrite a file in the folder         |
+      | kroger_find_products  | find Kroger products for a shopping list         |
+      | kroger_send_to_cart   | add the chosen products to the Kroger cart       |
+      | walmart_find_stores   | find the Walmart stores near a postcode          |
+      | walmart_find_products | find Walmart products for a shopping list        |
+      | walmart_cart_link     | build the link that fills the Walmart cart       |
     And every tool has a description and a JSON schema for its input
     And the "bash" tool description explains the folder layout
 
@@ -123,17 +130,22 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the meal planner refuses, and names the argument "<argument>"
 
     Examples:
-      | tool                 | argument |
-      | bash                 | command  |
-      | bash                 | message  |
-      | write_file           | path     |
-      | write_file           | content  |
-      | write_file           | message  |
-      | read_file            | path     |
-      | kroger_find_products | path     |
-      | kroger_find_products | message  |
-      | kroger_send_to_cart  | path     |
-      | kroger_send_to_cart  | message  |
+      | tool                  | argument |
+      | bash                  | command  |
+      | bash                  | message  |
+      | write_file            | path     |
+      | write_file            | content  |
+      | write_file            | message  |
+      | read_file             | path     |
+      | kroger_find_products  | path     |
+      | kroger_find_products  | message  |
+      | kroger_send_to_cart   | path     |
+      | kroger_send_to_cart   | message  |
+      | walmart_find_stores   | zip      |
+      | walmart_find_products | path     |
+      | walmart_find_products | message  |
+      | walmart_cart_link     | path     |
+      | walmart_cart_link     | message  |
 
   Scenario Outline: A blank commit message is refused like a missing one
     "   " says as little about what changed as leaving the argument out
@@ -143,11 +155,13 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the meal planner refuses, and names the argument "message"
 
     Examples:
-      | tool                 |
-      | bash                 |
-      | write_file           |
-      | kroger_find_products |
-      | kroger_send_to_cart  |
+      | tool                  |
+      | bash                  |
+      | write_file            |
+      | kroger_find_products  |
+      | kroger_send_to_cart   |
+      | walmart_find_products |
+      | walmart_cart_link     |
 
   Scenario Outline: Ordinary file and text commands are available
     When I run "<command>"

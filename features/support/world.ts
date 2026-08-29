@@ -9,7 +9,7 @@
 // the code. See features/support/oauth.ts for why it is done the long way.
 
 import { setWorldConstructor, World, type IWorldOptions } from '@cucumber/cucumber';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,7 @@ import { DEFAULT_OWNER, startServer, type RunningServer } from '../../src/mcp/se
 import type { RunResult, Session } from '../../src/sandbox/session.ts';
 import type { BashResult } from '../../src/mcp/tools.ts';
 import { CLIENT_ID, CLIENT_SECRET, KrogerMock } from './kroger.ts';
+import { CONSUMER_ID as WALMART_CONSUMER_ID, WalmartMock, walmartTestKeys } from './walmart.ts';
 import { HouseholdOAuthClient } from './oauth.ts';
 
 /**
@@ -70,10 +71,22 @@ export class MealPlanWorld extends World {
   port = 0;
 
   /**
-   * Kroger, stood in for. The only mock in the suite — see
+   * Kroger, stood in for. One of the two mocks in the suite — see
    * features/support/kroger.ts.
    */
   kroger: KrogerMock | null = null;
+
+  /**
+   * Walmart, stood in for. The second mock, in the one shape the rule
+   * permits: a third-party HTTP API, one file. features/support/walmart.ts.
+   */
+  walmart: WalmartMock | null = null;
+
+  /**
+   * Where the Walmart signing key is written, OUTSIDE the meal-plan folder,
+   * so the containment scenario has a real path to try to read.
+   */
+  walmartKeyPath = '';
 
   /** Which browser session the raw-request steps are speaking as. */
   signedInAs: string | undefined;
@@ -130,6 +143,12 @@ export class MealPlanWorld extends World {
     this.statePath = path.join(await mkdtemp(path.join(tmpdir(), 'mealplan-state-')), 'auth.json');
     this.port = await freePort();
     this.kroger = await KrogerMock.start();
+    this.walmart = await WalmartMock.start();
+    // The signing key lives outside the folder, as it would in production. It
+    // is passed to the server as an option rather than through process.env —
+    // the scenarios share one process, and a mutation would leak.
+    this.walmartKeyPath = path.join(path.dirname(this.statePath), 'walmart-key.pem');
+    await writeFile(this.walmartKeyPath, walmartTestKeys().privateKey, { mode: 0o600 });
     await this.launch();
     this.commitsAtStart = await this.commitCount();
   }
@@ -150,6 +169,12 @@ export class MealPlanWorld extends World {
       krogerApiBase: this.kroger?.base,
       krogerClientId: CLIENT_ID,
       krogerClientSecret: CLIENT_SECRET,
+      walmartApiBase: this.walmart?.base,
+      // The cart link host is a second seam because it is a second host in
+      // production — www.walmart.com against developer.api.walmart.com.
+      walmartCartBase: this.walmart?.base,
+      walmartConsumerId: WALMART_CONSUMER_ID,
+      walmartPrivateKey: walmartTestKeys().privateKey,
     });
     this.client = await this.connect(this.household);
     this.tools = (await this.client.listTools()).tools;
@@ -217,6 +242,8 @@ export class MealPlanWorld extends World {
     await this.stopServer();
     await this.kroger?.stop().catch(() => undefined);
     this.kroger = null;
+    await this.walmart?.stop().catch(() => undefined);
+    this.walmart = null;
     if (this.folder) await rm(this.folder, { recursive: true, force: true });
     if (this.statePath) {
       await rm(path.dirname(this.statePath), { recursive: true, force: true });
@@ -226,6 +253,11 @@ export class MealPlanWorld extends World {
   krogerMock(): KrogerMock {
     if (!this.kroger) throw new Error('no Kroger mock: the scenario has none running');
     return this.kroger;
+  }
+
+  walmartMock(): WalmartMock {
+    if (!this.walmart) throw new Error('no Walmart mock: the scenario has none running');
+    return this.walmart;
   }
 
   /** The headers exe.dev would add for whoever is signed in, and none when nobody is. */

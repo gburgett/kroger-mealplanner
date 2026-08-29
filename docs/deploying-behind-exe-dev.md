@@ -159,7 +159,14 @@ code to the attacker's token endpoint.
 | `KROGER_CLIENT_ID` | — | the Kroger developer client id. Without it there is no cart |
 | `KROGER_CLIENT_SECRET` | — | the matching secret. Never reaches the sandbox |
 | `MEALPLAN_KROGER_STATE` | beside `MEALPLAN_STATE`, as `kroger.json` | the household's Kroger credential. Also refused if inside the meal-plan folder |
-| `KROGER_API_BASE` | `https://api.kroger.com` | the only mock seam. Leave it alone in production |
+| `KROGER_API_BASE` | `https://api.kroger.com` | the Kroger mock seam. Leave it alone in production |
+| `WALMART_CONSUMER_ID` | — | the consumer id walmart.io issued for this server. Without it there are no cart links |
+| `WALMART_PRIVATE_KEY_PATH` | — | PEM file of the RSA private key whose public half was uploaded. 0600, outside the meal-plan folder. Never reaches the sandbox |
+| `WALMART_PRIVATE_KEY` | — | the same PEM, inline. The path form is easier in a systemd EnvironmentFile |
+| `WALMART_KEY_VERSION` | `1` | the key version walmart.io shows for the uploaded key |
+| `WALMART_PUBLISHER_ID` | — | the Impact Radius publisher id, when the household has one. Optional |
+| `WALMART_API_BASE` | `https://developer.api.walmart.com` | the Walmart mock seam, for the API host. Leave it alone in production |
+| `WALMART_CART_BASE` | `https://www.walmart.com` | the second Walmart seam, for the add-to-cart link host. Leave it alone in production |
 
 ## Registering with Kroger
 
@@ -187,6 +194,44 @@ browser as the owner, sign in to Kroger and choose the shop you walk into. The
 shop is written into `config/kroger.md` in the meal-plan folder and committed.
 The credential is written outside it, mode 0600, where the sandbox cannot reach
 it.
+
+## Registering with Walmart
+
+Walmart is simpler: the credential is the server's own, and there is nothing
+for the household to sign in to. See ADR 0017.
+
+1. Generate an RSA key pair, 2048 bits, and keep the private half in a file the
+   service can read and nobody else can:
+
+   ```bash
+   openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out ~/.config/mealplan/walmart-key.pem
+   chmod 600 ~/.config/mealplan/walmart-key.pem
+   openssl rsa -in ~/.config/mealplan/walmart-key.pem -pubout -out ~/.config/mealplan/walmart-key.pub.pem
+   ```
+
+2. At <https://www.walmart.io>, sign in, create an application, and upload the
+   PUBLIC key (the `.pub.pem`). walmart.io then shows a consumer id and a key
+   version.
+3. Put the consumer id and the key path in `.env`, which is 0600 and
+   gitignored like the Kroger secrets:
+
+   ```
+   WALMART_CONSUMER_ID=...
+   WALMART_PRIVATE_KEY_PATH=/home/exedev/.config/mealplan/walmart-key.pem
+   WALMART_KEY_VERSION=1
+   ```
+
+With no `WALMART_CONSUMER_ID` the server starts and works normally, and the
+three Walmart tools refuse and say what is missing. A key file that does not
+parse fails AT START-UP, while somebody is reading the journal, not on the
+first search.
+
+The start-up lines say which side is live: `walmart: configured, consumer ...`
+or `walmart: not configured`.
+
+Once it is running, the household asks the assistant to shop at Walmart. The
+assistant searches stores with `walmart_find_stores`, the household picks one,
+and the assistant writes `config/walmart.md`. There is no browser step.
 
 ## Connecting an assistant
 

@@ -25,6 +25,7 @@
 // path has to decide for itself. docs/adr/0009 works through why.
 
 import { randomUUID } from 'node:crypto';
+import { readFile as readFileFromDisk } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -63,16 +64,29 @@ import {
 } from '../kroger/pages.ts';
 import { KrogerStore } from '../kroger/store.ts';
 import { open, type Session, type SessionOptions } from '../sandbox/session.ts';
+import { DEFAULT_WALMART_API_BASE, DEFAULT_WALMART_CART_BASE, WalmartApi } from '../walmart/api.ts';
+import { walmartHowTo } from '../walmart/help.ts';
 import {
   BASH_DESCRIPTION,
   READ_FILE_DESCRIPTION,
   WRITE_FILE_DESCRIPTION,
   bashInputSchema,
   bashOutputSchema,
+  buildCartLink,
+  cartLinkInputSchema,
+  cartLinkOutputSchema,
+  CART_LINK_DESCRIPTION,
   findProducts,
   findProductsDescription,
   findProductsInputSchema,
   findProductsOutputSchema,
+  findStores,
+  findStoresInputSchema,
+  findStoresOutputSchema,
+  FIND_STORES_DESCRIPTION,
+  findWalmartProducts,
+  findWalmartProductsInputSchema,
+  FIND_WALMART_PRODUCTS_DESCRIPTION,
   readCorpusFile,
   readFileInputSchema,
   readFileOutputSchema,
@@ -129,6 +143,24 @@ export type ServerOptions = Omit<SessionOptions, 'tenant'> & {
   krogerClientSecret?: string;
   /** The Kroger token store. Must also be outside the meal-plan folder. */
   krogerStatePath?: string;
+  /**
+   * Where the Walmart affiliate API lives, and where the cart link points.
+   * The two mock seams for Walmart, one for each production host
+   * (developer.api.walmart.com and www.walmart.com) — the same reasoning as
+   * krogerApiBase, and likewise passed by the scenarios rather than through
+   * process.env.
+   */
+  walmartApiBase?: string;
+  walmartCartBase?: string;
+  /**
+   * The server's own Walmart credential: the consumer id walmart.io issued,
+   * and the PEM of the RSA private key whose public half was uploaded there.
+   * There is NO household Walmart credential — see ADR 0017.
+   */
+  walmartConsumerId?: string;
+  walmartPrivateKey?: string;
+  walmartKeyVersion?: string;
+  walmartPublisherId?: string;
 };
 
 export type RunningServer = {
@@ -142,6 +174,8 @@ export type RunningServer = {
   provider: MealPlanOAuthProvider;
   /** The household's Kroger credential, or an empty store when none is linked. */
   krogerStore: KrogerStore;
+  /** The Walmart affiliate API with the server's own key, or null when not configured. */
+  walmart: WalmartApi | null;
   close(): Promise<void>;
 };
 
@@ -260,6 +294,44 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           store: krogerStore,
         });
 
+  // Walmart's credential is the server's own RSA key pair, not a household's.
+  // The key comes as an option, inline from the environment, or from a file —
+  // a PEM does not fit comfortably in a systemd EnvironmentFile line, so
+  // WALMART_PRIVATE_KEY_PATH is how production carries it. Either missing half
+  // means not configured: the tools refuse by name and everything else works,
+  // the same failure shape as Kroger with no client id. A key that is present
+  // but does not parse fails HERE, at start-up, while somebody is reading the
+  // journal — not on the first search.
+  const walmartConsumerId = options.walmartConsumerId ?? process.env.WALMART_CONSUMER_ID ?? '';
+  // A key path INSIDE the meal-plan folder would be the agent holding the
+  // signing key, so it is refused by the same check that keeps the token
+  // stores outside — discovered at start-up, not on the first search.
+  if (process.env.WALMART_PRIVATE_KEY_PATH && !options.walmartPrivateKey) {
+    assertOutsideFolder(process.env.WALMART_PRIVATE_KEY_PATH, session.folder);
+  }
+  const walmartPrivateKey =
+    options.walmartPrivateKey ??
+    process.env.WALMART_PRIVATE_KEY ??
+    (process.env.WALMART_PRIVATE_KEY_PATH
+      ? await readFileFromDisk(process.env.WALMART_PRIVATE_KEY_PATH, 'utf8').catch((error: unknown) => {
+          throw new Error(
+            `WALMART_PRIVATE_KEY_PATH is ${process.env.WALMART_PRIVATE_KEY_PATH} but it could not ` +
+              `be read: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        })
+      : '');
+  const walmart =
+    walmartConsumerId === '' || walmartPrivateKey === ''
+      ? null
+      : new WalmartApi({
+          base: options.walmartApiBase ?? process.env.WALMART_API_BASE ?? DEFAULT_WALMART_API_BASE,
+          cartBase: options.walmartCartBase ?? process.env.WALMART_CART_BASE ?? DEFAULT_WALMART_CART_BASE,
+          consumerId: walmartConsumerId,
+          privateKey: walmartPrivateKey,
+          keyVersion: options.walmartKeyVersion ?? process.env.WALMART_KEY_VERSION ?? '1',
+          publisherId: options.walmartPublisherId ?? process.env.WALMART_PUBLISHER_ID,
+        });
+
   app = buildApp({
     baseUrl,
     host,
@@ -270,6 +342,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     now,
     transports,
     kroger,
+    walmart,
     linkDesk: new LinkDesk(),
   });
 
@@ -281,6 +354,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     store,
     provider,
     krogerStore,
+    walmart,
     async close() {
       for (const transport of transports.values()) {
         await transport.close().catch(() => undefined);
@@ -304,6 +378,8 @@ type AppContext = {
   transports: Map<string, StreamableHTTPServerTransport>;
   /** Null when the server has no Kroger credentials. Then there is no cart. */
   kroger: KrogerApi | null;
+  /** Null when the server has no Walmart credential. Then there are no links. */
+  walmart: WalmartApi | null;
   linkDesk: LinkDesk;
 };
 
@@ -762,6 +838,7 @@ async function handleMcp(
     port: number;
     now: Clock;
     transports: Map<string, StreamableHTTPServerTransport>;
+    walmart: WalmartApi | null;
   },
 ): Promise<void> {
   const { transports } = context;
@@ -813,6 +890,7 @@ async function handleMcp(
     context.now,
     context.kroger,
     context.baseUrl,
+    context.walmart,
   );
   await mcp.connect(transport);
   await transport.handleRequest(request, response);
@@ -886,6 +964,7 @@ export async function buildMcpServer(
   now: Clock,
   kroger: KrogerApi | null = null,
   baseUrl?: string,
+  walmart: WalmartApi | null = null,
 ): Promise<McpServer> {
   const tree = renderTree(await snapshot(folder));
   const history = await recentHistory(session);
@@ -918,7 +997,14 @@ export async function buildMcpServer(
         'config/kroger.md, so "cat config/kroger.md" answers "is Kroger set up" ' +
         'and "which shop". There is no tool for that question and there should ' +
         'not be one.\n\n' +
-        krogerHowTo(baseUrl),
+        krogerHowTo(baseUrl) +
+        '\n\n' +
+        'WALMART. Which Walmart store cart links are built for lives in ' +
+        'config/walmart.md, so "cat config/walmart.md" answers "is a Walmart ' +
+        'store set". There is no sign-in and no browser flow: the affiliate API ' +
+        'is the server\'s own, so finding a store and writing that file is work ' +
+        'YOU do — walmart_find_stores, then write_file.\n\n' +
+        walmartHowTo(),
     },
   );
 
@@ -1031,6 +1117,73 @@ export async function buildMcpServer(
     }),
   );
 
+  // --- and three for Walmart ----------------------------------------------
+  //
+  // Registered whether or not Walmart is configured, for the same reason as
+  // the Kroger ones: a tool that refuses says what to do about it. Two are the
+  // network the sandbox does not have; walmart_cart_link is the exception ADR
+  // 0017 records — the choke point where "nothing unchosen reaches the cart
+  // link" is enforced, which bash cannot be trusted to do from memory.
+
+  mcp.registerTool(
+    'walmart_find_stores',
+    {
+      title: 'Find the Walmart stores near a postcode',
+      description: FIND_STORES_DESCRIPTION,
+      inputSchema: findStoresInputSchema,
+      outputSchema: findStoresOutputSchema,
+    },
+    loggedTool('walmart_find_stores', async ({ zip }) => {
+      const result = await findStores({ walmart, zip });
+      return {
+        content: [{ type: 'text', text: renderFindStores(result, zip) }],
+        structuredContent: result,
+      };
+    }),
+  );
+
+  mcp.registerTool(
+    'walmart_find_products',
+    {
+      title: 'Find Walmart products for the lines on a shopping list',
+      description: FIND_WALMART_PRODUCTS_DESCRIPTION,
+      inputSchema: findWalmartProductsInputSchema,
+      outputSchema: findProductsOutputSchema,
+    },
+    loggedTool('walmart_find_products', async ({ path: requested, message }) => {
+      const result = await findWalmartProducts({ session, folder, now, walmart, requested, message });
+      return {
+        content: [{ type: 'text', text: renderWalmartFindProducts(result) }],
+        structuredContent: result,
+      };
+    }),
+  );
+
+  mcp.registerTool(
+    'walmart_cart_link',
+    {
+      title: 'Build the link that fills the household Walmart cart',
+      description: CART_LINK_DESCRIPTION,
+      inputSchema: cartLinkInputSchema,
+      outputSchema: cartLinkOutputSchema,
+    },
+    loggedTool('walmart_cart_link', async ({ path: requested, items, message }) => {
+      const result = await buildCartLink({
+        session,
+        folder,
+        now,
+        walmart,
+        requested,
+        message,
+        only: items,
+      });
+      return {
+        content: [{ type: 'text', text: renderCartLink(result) }],
+        structuredContent: result,
+      };
+    }),
+  );
+
   return mcp;
 }
 
@@ -1087,4 +1240,87 @@ function renderSendToCart(result: {
 async function closeIdle(http: Server): Promise<void> {
   http.closeIdleConnections?.();
   http.closeAllConnections?.();
+}
+
+function renderFindStores(
+  result: {
+    stores: Array<{ storeId: string; accessPointId: string; name: string; address: string; distance?: number }>;
+  },
+  zip: string,
+): string {
+  if (result.stores.length === 0) {
+    return `Walmart found no stores near ${zip}. Try another postcode.`;
+  }
+  return [
+    `${result.stores.length} Walmart store${result.stores.length === 1 ? '' : 's'} near ${zip}:`,
+    '',
+    ...result.stores.map(
+      (store) =>
+        `  ${store.name} — ${store.address}${store.distance === undefined ? '' : ` (${store.distance} mi)`}\n` +
+        `    store: ${store.storeId || 'none given'}${store.accessPointId ? `, access point: ${store.accessPointId}` : ''}`,
+    ),
+    '',
+    'Read these out to the household and let THEM pick. Then write the pick into',
+    'config/walmart.md with write_file: "store:" and "access_point:" in the front',
+    'matter, the name and address in the prose.',
+  ].join('\n');
+}
+
+function renderWalmartFindProducts(result: {
+  path: string;
+  matched: number;
+  notFound: string[];
+  searched: number;
+}): string {
+  const lines = [
+    `${result.matched} line${result.matched === 1 ? '' : 's'} of ${result.path} now have ` +
+      `candidate products, from ${result.searched} search${result.searched === 1 ? '' : 'es'}.`,
+    'Nothing has been chosen and no link has been built. Read the file, delete the',
+    'candidates that are wrong, and set each count from the package size.',
+  ];
+  if (result.notFound.length > 0) {
+    lines.push(
+      '',
+      `Walmart had nothing for: ${result.notFound.join(', ')}. ` +
+        'They are under "## Not found at this store".',
+    );
+  }
+  return lines.join('\n');
+}
+
+function renderCartLink(result: {
+  path: string;
+  url: string;
+  items: Array<{ id: string; quantity: number; description: string }>;
+  skipped: string[];
+}): string {
+  if (result.items.length === 0) {
+    return (
+      `Nothing on ${result.path} had a Walmart product chosen, so no link was built. ` +
+      'Run walmart_find_products, then delete the candidates you do not want.'
+    );
+  }
+  const lines = [
+    `This link would add ${result.items.length} product${result.items.length === 1 ? '' : 's'} to the household's Walmart cart:`,
+    '',
+    result.url,
+    '',
+    ...result.items.map((item) => `  ${item.quantity} × ${item.id} ${item.description}`),
+    '',
+    'BUILDING IT ADDED NOTHING. The products go into the cart when the household',
+    'opens the link, in their own browser, and they review the cart at walmart.com',
+    'before any money moves. Hand the link to the household — do not say anything',
+    'was sent.',
+    '',
+    'You cannot know whether they clicked, so this is what the link WOULD add,',
+    'never what the cart holds. It is recorded on the list under "## Cart link".',
+    '',
+    'Unlike kroger_send_to_cart this did NOT mark any pantry consumable stocked —',
+    'nobody has bought anything yet. When the household says the cart has them,',
+    'flip the lines in pantry/consumables.md yourself.',
+  ];
+  if (result.skipped.length > 0) {
+    lines.push('', `No Walmart product was chosen for: ${result.skipped.join('; ')}.`);
+  }
+  return lines.join('\n');
 }

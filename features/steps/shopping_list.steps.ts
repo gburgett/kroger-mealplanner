@@ -49,6 +49,23 @@ Then('the shopping list does not include {string}', function (this: MealPlanWorl
   );
 });
 
+Then('the shopping list marks {string} for a check', function (this: MealPlanWorld, item: string) {
+  const lines = itemLines(this);
+  assert.ok(
+    lines.some((line) => line.includes(item) && line.endsWith('(check)')),
+    `no line for "${item}" is marked (check):\n${lines.join('\n')}`,
+  );
+});
+
+Then(
+  'the shopping list does not mark {string} for a check',
+  function (this: MealPlanWorld, item: string) {
+    const line = itemLines(this).find((candidate) => candidate.includes(item));
+    assert.ok(line, `no line for "${item}" on the list`);
+    assert.ok(!line.endsWith('(check)'), `"${item}" is marked (check):\n${line}`);
+  },
+);
+
 Then(
   'the line {string} is in the {string} section',
   function (this: MealPlanWorld, item: string, section: string) {

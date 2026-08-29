@@ -59,11 +59,28 @@ pub struct Dinner {
     pub recipes: Vec<RecipeLink>,
 }
 
+/// Whether a consumable is left off the shopping list right now.
+///
+/// The household (or, later, a background job — see ADR 0014) flips this by
+/// hand. "Stocked" behaves like a staple; "NeedsRecheck" behaves like an
+/// ordinary ingredient, which is what puts it back on the list.
+#[derive(PartialEq, Eq)]
+pub enum ConsumableStatus {
+    Stocked,
+    NeedsRecheck,
+}
+
+pub struct Consumable {
+    pub item: String,
+    pub status: ConsumableStatus,
+}
+
 pub struct Corpus {
     pub root: PathBuf,
     pub recipes: Vec<Recipe>,
     pub dinners: Vec<Dinner>,
     pub staples: Vec<String>,
+    pub consumables: Vec<Consumable>,
     pub problems: Vec<Problem>,
 }
 
@@ -80,6 +97,7 @@ pub fn load(root: &Path, only: Option<&str>) -> Corpus {
         recipes: Vec::new(),
         dinners: Vec::new(),
         staples: Vec::new(),
+        consumables: Vec::new(),
         problems: Vec::new(),
     };
 
@@ -99,10 +117,11 @@ pub fn load(root: &Path, only: Option<&str>) -> Corpus {
     }
 
     corpus.staples = read_staples(root);
+    corpus.consumables = read_consumables(root);
 
     if let Some(only) = wanted {
         // A path outside recipes/ and dinners/ has no schema to check. README.md
-        // and pantry/staples.md are ordinary markdown on purpose.
+        // and the pantry documents are ordinary markdown on purpose.
         let known = corpus.recipes.iter().any(|recipe| recipe.path == only)
             || corpus.dinners.iter().any(|dinner| dinner.path == only);
         if !known && !root.join(&only).exists() {
@@ -282,6 +301,33 @@ fn read_staples(root: &Path) -> Vec<String> {
         .filter_map(|line| line.trim().strip_prefix("- "))
         .map(|item| item.trim().to_ascii_lowercase())
         .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// `- <item>: stocked` or `- <item>: needs recheck`.
+///
+/// A missing file, or a line with no status this program recognises, is fine:
+/// the item is simply not tracked, and an untracked item is bought like any
+/// ordinary ingredient. Buying something the household already has is a wasted
+/// trip; buying nothing of something they ran out of is worse, so an
+/// unreadable line defaults to "on the list" rather than "left out".
+fn read_consumables(root: &Path) -> Vec<Consumable> {
+    let Ok(text) = fs::read_to_string(root.join("pantry/consumables.md")) else { return Vec::new() };
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("- "))
+        .filter_map(|line| {
+            let (item, status) = line.split_once(':')?;
+            let status = match status.trim().to_ascii_lowercase().as_str() {
+                "stocked" => ConsumableStatus::Stocked,
+                "needs recheck" => ConsumableStatus::NeedsRecheck,
+                _ => return None,
+            };
+            let item = item.trim().to_ascii_lowercase();
+            if item.is_empty() {
+                return None;
+            }
+            Some(Consumable { item, status })
+        })
         .collect()
 }
 

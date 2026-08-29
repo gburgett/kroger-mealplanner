@@ -28,6 +28,10 @@ decision, write a new record. Give the old record the status
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
 | [0012](0012-refuse-a-second-send-of-a-shopping-list.md) | Refuse a second send of a shopping list, because Kroger adds to the quantity | accepted |
 | [0013](0013-record-household-preferences-as-prose-with-no-schema.md) | Record household preferences as prose with no schema | accepted |
+| [0014](0014-split-the-pantry-into-staples-and-rechecked-consumables.md) | Split the pantry into staples and rechecked consumables | accepted |
+| [0015](0015-mark-a-consumable-bought-from-the-kroger-send.md) | Mark a consumable bought from the Kroger cart send | accepted |
+| [0016](0016-mark-and-gate-a-consumable-that-needs-a-recheck.md) | Mark and gate a consumable that needs a recheck | accepted |
+| [0017](0017-shop-at-walmart-through-the-affiliate-api-with-a-link-for-the-cart.md) | Shop at Walmart through the affiliate API, with a link for the cart | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and

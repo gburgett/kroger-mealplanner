@@ -175,6 +175,25 @@ function staplesDocument(items: string[]): string {
   return ['# Pantry staples', '', 'Things we always have. The shopping list leaves these out.', '', ...items.map((item) => `- ${item}`), ''].join('\n');
 }
 
+Given(
+  'the pantry consumable {string} is {string}',
+  async function (this: MealPlanWorld, item: string, status: string) {
+    await this.writeFile('pantry/consumables.md', consumablesDocument([[item, status]]));
+  },
+);
+
+function consumablesDocument(items: [string, string][]): string {
+  return [
+    '# Pantry consumables',
+    '',
+    'Things we keep some of, but which run out. "stocked" leaves an item off ' +
+      'the shopping list; "needs recheck" puts it back on.',
+    '',
+    ...items.map(([item, status]) => `- ${item}: ${status}`),
+    '',
+  ].join('\n');
+}
+
 // --- writing documents directly -------------------------------------------
 
 Given('the file {string} contains:', async function (this: MealPlanWorld, target: string, content: string) {

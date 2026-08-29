@@ -113,6 +113,81 @@ Feature: Sending the list to Kroger
     And the shopping list records what was sent
 
   @core
+  Scenario: Sending a resolved consumable to the cart marks it bought
+    A consumable marked "needs recheck" is gated by "(check)" (ADR 0016) until
+    somebody confirms the household needs it. Once that is resolved and the
+    line is sent, nothing more should have to be edited by hand — see ADR 0015.
+
+    Given the pantry consumable "shredded cheddar" is "needs recheck"
+    And my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    And Kroger sells at my store:
+      | search           | upc           | description                          | size | price |
+      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    When I run:
+      """
+      sed -i 's/ (check)$//' shopping-lists/2026-08-25--2026-08-31.md
+      """
+    And I send the shopping list to my Kroger cart
+    Then the file "pantry/consumables.md" contains the line "- shredded cheddar: stocked (last bought: 2026-08-23)"
+
+  @core
+  Scenario: Sending an untracked item to the cart does not start tracking it
+    Nothing is chosen for the household. Deciding that an item is worth
+    watching as a consumable is a household decision, not one a cart send
+    makes on its own.
+
+    Given my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    And Kroger sells at my store:
+      | search           | upc           | description                          | size | price |
+      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    When I send the shopping list to my Kroger cart
+    Then the file "pantry/consumables.md" does not exist in the meal-plan folder
+
+  @core
+  Scenario: A list with an unresolved check item refuses to send
+    A "(check)" line means nobody has confirmed the household is actually out.
+    Sending it anyway is exactly the silent guess this product refuses to
+    make, so the whole send stops until a person resolves the line — see
+    ADR 0016.
+
+    Given the pantry consumable "shredded cheddar" is "needs recheck"
+    And my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    And Kroger sells at my store:
+      | search           | upc           | description                          | size | price |
+      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    When I send the shopping list to my Kroger cart
+    Then the meal planner refuses, and names the line "8 oz shredded cheddar"
+    And my Kroger cart was sent nothing
+
+  @core
+  Scenario: Resolving a check line by hand lets the list send
+    Confirming the household needs it after all is an ordinary edit: remove
+    "(check)" from the line, the same way choosing a product is deleting the
+    candidates nobody wants.
+
+    Given the pantry consumable "shredded cheddar" is "needs recheck"
+    And my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    And Kroger sells at my store:
+      | search           | upc           | description                          | size | price |
+      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    When I run:
+      """
+      sed -i 's/ (check)$//' shopping-lists/2026-08-25--2026-08-31.md
+      """
+    And I send the shopping list to my Kroger cart
+    Then my Kroger cart was sent:
+      | upc           | quantity |
+      | 0001111050158 | 1        |
+
+  @core
   Scenario: A line with two candidates left stops the send and names the line
     A partial send cannot be walked back, because the cart cannot be read. So
     an ambiguous line stops the whole send rather than half of it.

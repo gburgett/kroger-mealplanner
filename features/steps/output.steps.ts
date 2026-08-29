@@ -169,3 +169,21 @@ Then(
     assert.match(output, /stapl/i);
   },
 );
+
+Then(
+  'the output says {string} was left out as a pantry consumable',
+  function (this: MealPlanWorld, item: string) {
+    const output = this.output();
+    assert.ok(output.includes(item), `the message never names ${item}:\n${output}`);
+    assert.match(output, /consumable/i);
+  },
+);
+
+Then(
+  'the output says to check with the household about {string}',
+  function (this: MealPlanWorld, item: string) {
+    const output = this.output();
+    assert.ok(output.includes(item), `the message never names ${item}:\n${output}`);
+    assert.match(output, /check/i);
+  },
+);
