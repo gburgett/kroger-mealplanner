@@ -153,6 +153,14 @@ export class MealPlanWorld extends World {
   transport: StreamableHTTPClientTransport | null = null;
   /** An MCP session id captured before a restart, to replay against the new process. */
   rememberedSessionId: string | null = null;
+  /**
+   * Seed the (fresh) folder before the server first opens it over it.
+   *
+   * Set by a tagged Before hook for scenarios that need the corpus to start in
+   * a shape that predates a migration, so the migration runs at session open —
+   * which is the moment under test.
+   */
+  seedBeforeOpen: (() => Promise<void>) | null = null;
 
   constructor(options: IWorldOptions) {
     super(options);
@@ -164,11 +172,17 @@ export class MealPlanWorld extends World {
     this.kroger = await KrogerMock.start();
     this.walmart = await WalmartMock.start();
     this.llm = await LlmMock.start();
-    // The signing key lives outside the folder, as it would in production. It
-    // is passed to the server as an option rather than through process.env —
-    // the scenarios share one process, and a mutation would leak.
+    // The signing key lives outside the folder, as it would in production.
+    // The key is passed to the server as an option rather than through
+    // process.env — the scenarios share one process, and a mutation would leak.
     this.walmartKeyPath = path.join(path.dirname(this.statePath), 'walmart-key.pem');
     await writeFile(this.walmartKeyPath, walmartTestKeys().privateKey, { mode: 0o600 });
+    // The seed runs before the server's first open over this folder, so a
+    // scenario can begin in an old shape and watch the migration run at open.
+    if (this.seedBeforeOpen) {
+      await this.seedBeforeOpen();
+      this.seedBeforeOpen = null;
+    }
     // The port is asked for only after the three mocks have bound theirs.
     // freePort() learns a free port and gives it straight back, which leaves a
     // gap before startServer binds it. Each mock's listen(0) would be glad to

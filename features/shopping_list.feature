@@ -2,11 +2,11 @@
 Feature: Building the shopping list
   As a busy housewife
   I want one ingredient list for a range of dates
-  So that I make a single trip and buy exactly what the week's dinners need
+  So that I make a single trip and buy exactly what the week's meals need
 
   This is the one job that is not exploration, and the one job an agent should
   not do in its head: it is unit-aware arithmetic over every ingredient of every
-  recipe of every night in the range. So it lives in a command inside the
+  recipe of every day in the range. So it lives in a command inside the
   sandbox, "mealplan shopping-list", and the agent runs it rather than adding
   the numbers up itself.
 
@@ -32,7 +32,7 @@ Feature: Building the shopping list
       | 1        | lb   | green beans   |
       | 3        |      | garlic cloves |
 
-  Scenario: A list for a single night
+  Scenario: A list for a single day
     Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the command succeeds
@@ -40,8 +40,8 @@ Feature: Building the shopping list
     And the shopping list includes "1.5 lb boneless chicken thighs"
     And the shopping list includes "12 corn tortillas"
 
-  Scenario: Ingredients shared across nights are combined
-    Given I have planned the dinners:
+  Scenario: Ingredients shared across days are combined
+    Given I have planned the days:
       | date       | recipes         |
       | 2026-08-25 | Chicken Tacos   |
       | 2026-08-26 | Chicken Pot Pie |
@@ -50,8 +50,8 @@ Feature: Building the shopping list
     And the shopping list includes "2 yellow onion"
     And the shopping list has 5 items
 
-  Scenario: Making the same dinner twice in one week doubles it
-    Given I have planned the dinners:
+  Scenario: Making the same meal twice in one week doubles it
+    Given I have planned the days:
       | date       | recipes       |
       | 2026-08-25 | Chicken Tacos |
       | 2026-08-28 | Chicken Tacos |
@@ -59,7 +59,7 @@ Feature: Building the shopping list
     Then the shopping list includes "3 lb boneless chicken thighs"
     And the shopping list includes "24 corn tortillas"
 
-  Scenario: A night cooked for more people scales its recipes
+  Scenario: A meal cooked for more people scales its recipes
     Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos" for 8 people
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the shopping list includes "3 lb boneless chicken thighs"
@@ -72,6 +72,31 @@ Feature: Building the shopping list
     Then the shopping list includes "2 yellow onion"
     And the shopping list includes "2.25 lb boneless chicken thighs"
 
+  Scenario: Meals on the same day add together
+    Given I have recorded the recipe "Morning Oats" serving 1 with the ingredients:
+      | quantity | unit | item       |
+      | 1        | cup  | rolled oats |
+    And I have recorded the recipe "Evening Crumble" serving 4 with the ingredients:
+      | quantity | unit | item       |
+      | 2        | cup  | rolled oats |
+    And I have planned the day "2026-08-25" with the meals:
+      | name      | recipes         | servings |
+      | Breakfast | Morning Oats    | 1        |
+      | Dinner    | Evening Crumble | 4        |
+    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    Then the command succeeds
+    And the shopping list includes "3 cup rolled oats"
+
+  Scenario: Each meal scales to its own number of people
+    Given I have recorded the recipe "Breakfast Burrito" serving 1 with the ingredients:
+      | quantity | unit | item |
+      | 2        |      | eggs |
+    And I have planned the day "2026-08-25" with the meals:
+      | name      | recipes           | servings |
+      | Breakfast | Breakfast Burrito | 3        |
+    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    Then the shopping list includes "6 eggs"
+
   Scenario: Compatible units are converted before adding up
     Given I have recorded the recipe "Buttered Noodles" serving 4 with the ingredients:
       | quantity | unit | item   |
@@ -79,7 +104,7 @@ Feature: Building the shopping list
     And I have recorded the recipe "Cornbread" serving 8 with the ingredients:
       | quantity | unit | item   |
       | 0.5      | cup  | butter |
-    And I have planned the dinners:
+    And I have planned the days:
       | date       | recipes          |
       | 2026-08-25 | Buttered Noodles |
       | 2026-08-26 | Cornbread        |
@@ -93,7 +118,7 @@ Feature: Building the shopping list
     And I have recorded the recipe "Bruschetta" serving 4 with the ingredients:
       | quantity | unit | item     |
       | 4        |      | tomatoes |
-    And I have planned the dinners:
+    And I have planned the days:
       | date       | recipes    |
       | 2026-08-25 | Marinara   |
       | 2026-08-26 | Bruschetta |
@@ -101,8 +126,8 @@ Feature: Building the shopping list
     Then the shopping list includes "1.75 lb tomatoes"
     And the shopping list includes "4 tomatoes"
 
-  Scenario: Each line says which nights it is for
-    Given I have planned the dinners:
+  Scenario: Each line says which days it is for
+    Given I have planned the days:
       | date       | recipes         |
       | 2026-08-25 | Chicken Tacos   |
       | 2026-08-26 | Chicken Pot Pie |
@@ -139,8 +164,8 @@ Feature: Building the shopping list
     Then the shopping list includes "1 tin of mystery soup"
     And the line "tin of mystery soup" is in the "Other" section
 
-  Scenario: Nights outside the range are not shopped for
-    Given I have planned the dinners:
+  Scenario: Days outside the range are not shopped for
+    Given I have planned the days:
       | date       | recipes         |
       | 2026-08-24 | Chicken Tacos   |
       | 2026-08-31 | Chicken Pot Pie |
@@ -148,14 +173,14 @@ Feature: Building the shopping list
     Then the shopping list is empty
 
   Scenario: The range includes both end dates
-    Given I have planned the dinners:
+    Given I have planned the days:
       | date       | recipes         |
       | 2026-08-25 | Chicken Tacos   |
       | 2026-08-30 | Chicken Pot Pie |
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-30"
     Then the shopping list includes "3.5 lb boneless chicken thighs"
 
-  Scenario: Nights with no recipes contribute nothing
+  Scenario: Days with no recipes contribute nothing
     Given I have planned dinner on "2026-08-25" with no recipes and the note "Leftovers night"
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the command succeeds
@@ -164,7 +189,7 @@ Feature: Building the shopping list
   Scenario: A range with nothing planned says so plainly
     When I run "mealplan shopping-list --from 2026-09-01 --to 2026-09-07"
     Then the command succeeds
-    And the output says no dinners are planned in that range
+    And the output says no meals are planned in that range
 
   Scenario: A broken recipe stops the list rather than quietly under-buying
     Given the file "recipes/chicken-tacos.md" contains:

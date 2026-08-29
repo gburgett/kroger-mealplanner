@@ -16,14 +16,14 @@ Consequences worth internalising before changing anything:
 - **The folder is the database.** Its layout and document conventions are the
   schema. They must stay guessable from a directory listing and stable enough to
   grep for. See `features/corpus.feature` — that file is the schema definition.
-  A bare `ls` prints seven names: `README.md`, `config`, `dinners`, `pantry`,
+  A bare `ls` prints seven names: `README.md`, `config`, `meals`, `pantry`,
   `preferences`, `recipes`, `shopping-lists`. That listing is asserted in
   **three** places — `features/corpus.feature`, `features/auth.feature` and
   `CORPUS_DIRECTORIES` in `src/corpus/scaffold.ts` — and all three have to
   change together. This note said "two" until a seventh name was added and
   `auth.feature` was the one that failed.
 - **The filename is the primary key.** `recipes/chicken-tacos.md`,
-  `dinners/2026-08-25.md`. Uniqueness and ordering come free from the
+  `meals/2026-08-25.md`. Uniqueness and ordering come free from the
   filesystem; do not add an index that can drift out of step.
 - **The folder is a git repository, and the server commits for the agent.** Every
   command that changes a file is committed automatically, with the command line
@@ -37,6 +37,12 @@ Consequences worth internalising before changing anything:
   commit labelled `write_file recipes/foo.md`. Adding a name is therefore three
   edits and no migration: `CORPUS_DIRECTORIES`, `features/corpus.feature`,
   `features/auth.feature`.
+- **Forward migrations are dated shell scripts in `migrations/`, run inside the
+  sandbox at session open.** Each script that has not run changes the corpus the
+  way the agent would (bash inside the sandbox) and is committed as
+  `migration <id>`. What has run is recorded in the hidden root dotfile
+  `.mealplan-migrations.json`, written and committed with the migration. See
+  `features/migrations.feature` and `src/migrations/run.ts`.
 - **Everything is markdown a human can open and edit.** If a change would make a
   document unreadable in a text editor, it is the wrong change.
 - **Prefer bash over new tools.** Before adding a command, ask whether `grep`
@@ -259,13 +265,17 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
 
 ## Domain rules worth not rediscovering
 
-- One dinner per night — enforced by the date being the filename. A dinner links
-  to zero or more recipes plus optional notes ("leftovers night").
+- One day per file, any number of meals — enforced by the date being the
+  filename (`meals/2026-08-25.md`). A day holds one `## <meal>` section per
+  meal; each meal links to zero or more recipes, may carry a `servings:` line
+  and may carry notes. A day with no cooking is just the front matter and a
+  note with no meals at all. Which meals a household plans, and what it calls
+  them, is prose in `preferences/household.md` — read it before writing a day.
 - An ingredient is one markdown list item: `- <quantity> [unit] <item>`. No unit
   means a count (`- 2 eggs`).
 - The shopping list is **derived from the folder every time, never stored**: read
-  the dinners in range, follow the links to recipes, scale to that night's
-  servings, aggregate.
+  the days in range, follow every meal's links to recipes, scale to that
+  meal's servings, aggregate.
 - Unit math is conservative. Combine quantities only when the units convert
   (tbsp→cup, oz→lb); otherwise keep separate lines rather than guessing.
 - Countable items round up. You cannot buy 1.5 onions.

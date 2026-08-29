@@ -22,8 +22,8 @@ one of them:
 | --- | --- | --- |
 | The door | `auth.feature` · `kroger_link.feature` | Who gets in at all, who may approve them, and how a Kroger account is connected |
 | The sandbox | `sandbox.feature` | What commands can do, and what they must never do |
-| The corpus | `corpus.feature` · `history.feature` | Folder layout, document shape, validation, git history |
-| The work | `recipes` · `dinners` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
+| The corpus | `corpus.feature` · `history.feature` · `migrations.feature` | Folder layout, document shape, validation, git history, forward migrations |
+| The work | `recipes` · `meals` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
 
 ## The folder
 
@@ -35,7 +35,8 @@ one of them:
 │   └── walmart.md     which Walmart store cart links are built for
 ├── recipes/           one document per recipe, filename = slugged name
 │   └── chicken-tacos.md
-├── dinners/           one document per night, filename = ISO date
+├── meals/           one document per day, filename = ISO date.
+│   │                  A day holds any number of `## <meal>` sections
 │   └── 2026-08-25.md
 ├── pantry/
 │   └── staples.md
@@ -54,10 +55,13 @@ whole of Walmart in the folder. See ADR 0017.
 
 The folder is also a git repository. The server commits after every command
 that changes a file, so an agent that overwrites a recipe it should not have can
-always be walked back — see `history.feature`.
+always be walked back — see `history.feature`. A hidden
+`.mealplan-migrations.json` at the root records which dated migrations under
+`migrations/` have been applied; the server writes and commits it when a
+migration runs, and `ls` never shows it — see `migrations.feature`.
 
 The filename *is* the primary key. That is what makes `ls recipes/` the recipe
-list, `ls dinners/` the calendar in order, and uniqueness a property of the
+list, `ls meals/` the calendar in order, and uniqueness a property of the
 filesystem rather than something we have to enforce.
 
 ## Conventions
@@ -68,13 +72,16 @@ filesystem rather than something we have to enforce.
   a count (`- 2 eggs`). This is the format `grep` has to be able to find and the
   format `mealplan` has to be able to parse, so it is specified in
   `corpus.feature` and nowhere else.
-- **A dinner links to recipes with ordinary markdown links**, so the corpus is
-  navigable in any editor and `grep -rl chicken-tacos.md dinners/` answers "when
-  did we last make this".
+- **A day holds one `## <meal>` section per meal.** Each meal links to its
+  recipes with ordinary markdown links, so the corpus is navigable in any
+  editor and `grep -rl chicken-tacos.md meals/` answers "when did we last
+  make this". A meal may carry a `servings:` line for how many people it feeds;
+  without one it feeds what its recipes feed.
 - **`preferences/household.md` has no schema, on purpose.** It is prose about how
-  the household chooses — brands, what it will not eat, cheap against good. The
-  assistant reads it before it deletes candidates from a shopping list; no
-  command ever opens it, and `mealplan validate` ignores it. The folder ships a
+  the household chooses — brands, what it will not eat, cheap against good — and
+  how many meals it plans each day. The assistant reads it before it deletes
+  candidates from a shopping list and before it writes a day; no command ever
+  opens it, and `mealplan validate` ignores it. The folder ships a
   worked example that says, in the document itself, that it is an example and is
   meant to be rewritten. Every other document here has a shape that can be got
   wrong. This one deliberately does not, because a preference nobody can express

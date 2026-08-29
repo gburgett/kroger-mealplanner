@@ -62,6 +62,20 @@ Feature: Choosing the way this household would choose
       """
     Then "mealplan validate" reports no problems
 
+  Scenario: How many meals a day is a preference, and prose can hold it
+    When I write the file "preferences/household.md":
+      """
+      We plan five small meals a day — breakfast, morning snack, lunch,
+      afternoon snack and dinner. The snacks are just fruit and a biscuit.
+      """
+    Then "mealplan validate" reports no problems
+
+  Scenario: The example a new folder ships mentions meals per day
+    Given the meal-plan folder is brand new
+    When I run "cat preferences/household.md"
+    Then the command succeeds
+    And the output contains the line "- breakfast, lunch and dinner — NOT CONFIRMED"
+
   Scenario: The validator has no opinion about this document at all
     Given the file "preferences/household.md" contains "- a good handful of cheese"
     When I run "mealplan validate"

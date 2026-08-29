@@ -1,4 +1,4 @@
-// Recording recipes and planning dinners, and reading the folder back.
+// Recording recipes and planning days, and reading the folder back.
 //
 // A step that records a recipe writes the document through the real write_file
 // tool rather than straight to disk. That is what an agent does, and it is what
@@ -9,11 +9,13 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 
 import {
+  dayDocument,
   dinnerDocument,
-  dinnerPath,
+  dayPath,
   frontMatter,
   ingredientsOf,
   linkedRecipes,
+  mealServings,
   recipeDocument,
   recipePath,
   slug,
@@ -60,13 +62,24 @@ async function planDinner(
   recipes: string[],
   options: { servings?: number; note?: string } = {},
 ): Promise<void> {
+  if (recipes.length === 0) {
+    // A day with no cooking is a note and no meals at all.
+    await world.writeFile(
+      dayPath(date),
+      dayDocument({ date, note: options.note }),
+    );
+    return;
+  }
   const servings =
     options.servings ??
     Math.max(
       DEFAULT_SERVINGS,
       ...(await Promise.all(recipes.map((name) => servingsOf(world, name)))),
     );
-  await world.writeFile(dinnerPath(date), dinnerDocument({ date, servings, recipes, note: options.note }));
+  await world.writeFile(
+    dayPath(date),
+    dinnerDocument({ date, servings, recipes, note: options.note }),
+  );
 }
 
 function splitRecipes(list: string): string[] {
@@ -118,7 +131,7 @@ Given(
   },
 );
 
-// --- planning dinners ------------------------------------------------------
+// --- planning days ------------------------------------------------------
 
 When(
   /^I (?:have )?plan(?:ned)? dinner on "([^"]*)" with the recipe "([^"]*)"$/,
@@ -149,13 +162,50 @@ When(
 );
 
 When(
-  /^I (?:have )?plan(?:ned)? the dinners:$/,
+  /^I (?:have )?plan(?:ned)? the days:$/,
   async function (this: MealPlanWorld, table: DataTable) {
     for (const row of table.hashes()) {
       await planDinner(this, row.date, splitRecipes(row.recipes ?? ''));
     }
   },
 );
+
+When(
+  /^I (?:have )?plan(?:ned)? the day "([^"]*)" with the meals:$/,
+  async function (this: MealPlanWorld, date: string, table: DataTable) {
+    const meals = table.hashes().map((row) => {
+      const servings = row.servings?.trim();
+      return {
+        name: row.name ?? '',
+        servings: servings ? Number(servings) : undefined,
+        recipes: splitRecipes(row.recipes ?? ''),
+        note: row.note?.trim() || undefined,
+      };
+    });
+    await this.writeFile(dayPath(date), dayDocument({ date, meals }));
+  },
+);
+
+/** The `## <name>` sections a day document holds, in order. */
+async function mealsOf(world: MealPlanWorld, date: string): Promise<Array<{ name: string; recipes: string[] }>> {
+  const document = await readFile(world.path(dayPath(date)), 'utf8');
+  const meals: Array<{ name: string; recipes: string[] }> = [];
+  let current: { name: string; recipes: string[] } | null = null;
+  for (const raw of document.split('\n')) {
+    const line = raw.trim();
+    const heading = /^##\s+(.*)$/.exec(line);
+    if (heading) {
+      current = { name: heading[1].trim(), recipes: [] };
+      meals.push(current);
+      continue;
+    }
+    const link = /^-\s*\[([^\]]+)\]\(([^)]+)\)\s*$/.exec(line);
+    if (link && current) {
+      current.recipes.push(link[2]);
+    }
+  }
+  return meals;
+}
 
 Given(
   'the pantry staples are {string}',
@@ -260,7 +310,7 @@ Then(
 Then(
   /^the dinner on "([^"]*)" uses (\d+) recipes?$/,
   async function (this: MealPlanWorld, date: string, count: string) {
-    const document = await readFile(this.path(dinnerPath(date)), 'utf8');
+    const document = await readFile(this.path(dayPath(date)), 'utf8');
     assert.equal(linkedRecipes(document).length, Number(count));
   },
 );
@@ -268,7 +318,7 @@ Then(
 Then(
   'the dinner on {string} uses the recipe {string}',
   async function (this: MealPlanWorld, date: string, name: string) {
-    const document = await readFile(this.path(dinnerPath(date)), 'utf8');
+    const document = await readFile(this.path(dayPath(date)), 'utf8');
     const targets = linkedRecipes(document).map((link) => link.target);
     assert.ok(
       targets.some((target) => target.endsWith(`${slug(name)}.md`)),
@@ -280,13 +330,13 @@ Then(
 Then(
   'the dinner on {string} serves {int}',
   async function (this: MealPlanWorld, date: string, servings: number) {
-    const document = await readFile(this.path(dinnerPath(date)), 'utf8');
-    const declared = Number(frontMatter(document).servings);
-    if (Number.isFinite(declared) && declared > 0) {
+    const document = await readFile(this.path(dayPath(date)), 'utf8');
+    const declared = mealServings(document);
+    if (declared !== null) {
       assert.equal(declared, servings);
       return;
     }
-    // "A dinner with no servings of its own feeds what its recipes feed."
+    // "A meal with no servings of its own feeds what its recipes feed."
     const linked = linkedRecipes(document);
     const each = await Promise.all(
       linked.map(async (link) => {
@@ -299,11 +349,34 @@ Then(
 );
 
 Then(
-  /^the meal-plan folder has (\d+) dinner documents?$/,
+  /^the meal-plan folder has (\d+) day documents?$/,
   async function (this: MealPlanWorld, count: string) {
-    const entries = await readdir(this.path('dinners'));
+    const entries = await readdir(this.path('meals'));
     const documents = entries.filter((entry) => entry.endsWith('.md'));
     assert.equal(documents.length, Number(count));
+  },
+);
+
+Then(
+  /^the meal "([^"]*)" on "([^"]*)" uses (\d+) recipes?$/,
+  async function (this: MealPlanWorld, meal: string, date: string, count: string) {
+    const meals = await mealsOf(this, date);
+    const found = meals.find((candidate) => candidate.name === meal);
+    assert.ok(found, `${date} has no meal "${meal}": ${meals.map((m) => m.name).join(', ')}`);
+    assert.equal(found.recipes.length, Number(count));
+  },
+);
+
+Then(
+  /^the meal "([^"]*)" on "([^"]*)" uses the recipe "([^"]*)"$/,
+  async function (this: MealPlanWorld, meal: string, date: string, name: string) {
+    const meals = await mealsOf(this, date);
+    const found = meals.find((candidate) => candidate.name === meal);
+    assert.ok(found, `${date} has no meal "${meal}"`);
+    assert.ok(
+      found.recipes.some((target) => target.endsWith(`${slug(name)}.md`)),
+      `the meal "${meal}" links to ${found.recipes.join(', ') || 'nothing'}, not to ${name}`,
+    );
   },
 );
 

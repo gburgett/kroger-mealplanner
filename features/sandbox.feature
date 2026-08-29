@@ -175,7 +175,7 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | head -n 5 README.md              |
       | wc -l README.md                  |
       | sort README.md                   |
-      | mkdir -p dinners                 |
+      | mkdir -p meals                   |
       | cp README.md copy.md && mv copy.md moved.md && rm moved.md |
       | sed -n '1,3p' README.md          |
 
@@ -327,5 +327,5 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
   Scenario: The folder is small enough to explore but the agent is told where to start
     When I run "cat README.md"
     Then the output describes the "recipes/" folder
-    And the output describes the "dinners/" folder
+    And the output describes the "meals/" folder
     And the output describes the ingredient line format

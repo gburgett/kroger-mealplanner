@@ -57,18 +57,22 @@ The folder is mounted at /workspace and every command starts there:
     README.md    the map — read it first
     recipes/     one document per recipe, filename is the name slugged
                  (recipes/chicken-tacos.md)
-    dinners/     one document per night, filename is the ISO date
-                 (dinners/2026-08-25.md)
+    meals/     one document per day, filename is the ISO date
+                 (meals/2026-08-25.md). A day holds one "## <meal>"
+                 section per meal — breakfast, lunch, dinner, whatever
+                 this household calls them — and each meal links to its
+                 recipes and may carry a "servings:" line.
     pantry/      staples.md: what the household never buys. consumables.md:
                  what it keeps some of but runs out — "stocked" leaves it off
                  the shopping list, "needs recheck" puts it back on
     preferences/ household.md: how this household chooses — brands, what it
-                 will not eat, cheap against good. Prose, with no schema.
-                 Read it before you choose anything on their behalf.
+                 will not eat, cheap against good, and how many meals it
+                 plans each day. Prose, with no schema. Read it before you
+                 choose anything on their behalf, and before you write a day.
 
 An ingredient is one markdown list item, "- <quantity> [unit] <item>". No unit
-means a count: "- 2 eggs". A dinner links to its recipes with ordinary markdown
-links, so "grep -rl chicken-tacos.md dinners/" answers "when did we last make
+means a count: "- 2 eggs". A meal links to its recipes with ordinary markdown
+links, so "grep -rl chicken-tacos.md meals/" answers "when did we last make
 this".
 
 The folder is a git repository and every command that changes a file is

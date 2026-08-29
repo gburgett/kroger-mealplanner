@@ -2,7 +2,7 @@
 // open so it knows what is in the folder without running `ls` or `find` first.
 //
 // The output resembles `tree` but shows only the last 5 files per directory
-// (lexicographically ordered), because dinners and shopping-lists have date
+// (lexicographically ordered), because meals and shopping-lists have date
 // prefixes and an agent planning the next week wants the most recent ones.
 //
 // Counts inside each directory are always shown so the agent knows the full
@@ -37,7 +37,7 @@ export interface TreeSnapshot {
 /**
  * Walk the meal-plan folder and return a snapshot of what a bare `ls` shows.
  *
- * Directories are listed in corpus order (config, dinners, pantry, recipes,
+ * Directories are listed in corpus order (config, meals, pantry, recipes,
  * shopping-lists). Files inside each directory are sorted lexicographically
  * and capped at the last MAX_PER_DIR entries.
  */
@@ -46,7 +46,9 @@ export async function snapshot(folder: string): Promise<TreeSnapshot> {
   try {
     const entries = await readdir(folder);
     for (const entry of entries.sort()) {
-      if (IGNORED.has(entry)) continue;
+      // Dotfiles are bookkeeping (`.git`, `.mealplan-migrations.json`), not
+      // part of the folder a person or an agent plans over.
+      if (entry.startsWith('.') || IGNORED.has(entry)) continue;
       const full = path.join(folder, entry);
       try {
         const s = await stat(full);
@@ -88,7 +90,7 @@ export async function snapshot(folder: string): Promise<TreeSnapshot> {
  *     .
  *     ├── config (1 file)
  *     │   └── kroger.md
- *     ├── dinners (15 files, showing last 5)
+ *     ├── meals (15 files, showing last 5)
  *     │   ├── 2026-08-25.md
  *     │   ├── 2026-08-26.md
  *     │   ├── 2026-08-27.md

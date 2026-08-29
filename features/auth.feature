@@ -52,7 +52,7 @@ Feature: Only the household reaches the meal plan
     And the output lists:
       | README.md      |
       | config         |
-      | dinners        |
+      | meals          |
       | pantry         |
       | preferences    |
       | recipes        |

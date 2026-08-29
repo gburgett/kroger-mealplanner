@@ -47,6 +47,7 @@ import { scaffold } from '../corpus/scaffold.ts';
 import { snapshot, renderTree } from '../corpus/tree.ts';
 import { commitIfChanged } from '../git/commit.ts';
 import { ensureRepository, recentHistory, type Clock } from '../git/repository.ts';
+import { runMigrations } from '../migrations/run.ts';
 import { DEFAULT_KROGER_API_BASE, KrogerApi } from '../kroger/api.ts';
 import {
   isModality,
@@ -274,6 +275,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   if (scaffolded.length > 0) {
     await commitIfChanged(session, `scaffold ${scaffolded.join(', ')}`, now());
   }
+
+  // Migrations, oldest first, each committed under its own name. The applied
+  // ledger is the dotfile `.mealplan-migrations.json` in the folder itself —
+  // see src/migrations/run.ts. On a brand new folder every migration is a
+  // no-op, and the ledger records that they have run.
+  await runMigrations({ session, now });
 
   // From here on, every mutating tool commits its own changes.
   // There is no per-command auto-commit — the agent provides the message.

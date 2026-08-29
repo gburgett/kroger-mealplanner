@@ -62,7 +62,7 @@ Feature: A weekly job rechecks consumables nobody has updated by hand
     Then the output is "weekly recheck: bump eggs"
 
   Scenario: The job asks with the week's activity in view
-    Given the file "dinners/2026-08-25.md" contains:
+    Given the file "meals/2026-08-25.md" contains:
       """
       ---
       date: 2026-08-25
@@ -74,7 +74,7 @@ Feature: A weekly job rechecks consumables nobody has updated by hand
     And the last commit to the meal-plan folder was made on "2026-08-27"
     When the weekly recheck job runs
     Then the LLM gateway's request mentions "pantry/consumables.md"
-    And the LLM gateway's request mentions "dinners/2026-08-25.md"
+    And the LLM gateway's request mentions "meals/2026-08-25.md"
 
   Scenario: The job gives up after too many turns rather than hang
     Given the last commit to the meal-plan folder was made on "2026-08-27"

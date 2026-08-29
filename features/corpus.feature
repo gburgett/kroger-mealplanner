@@ -20,7 +20,7 @@ Feature: The meal plan is a folder of markdown documents
       """
       README.md
       config
-      dinners
+      meals
       pantry
       preferences
       recipes
@@ -31,10 +31,42 @@ Feature: The meal plan is a folder of markdown documents
     When I record the recipe "Sunday Pot Roast" serving 6
     Then the file "recipes/sunday-pot-roast.md" exists in the meal-plan folder
 
-  Scenario: One dinner is one file, named after its date
+  Scenario: One day is one file, named after its date
     Given I have recorded the recipe "Chicken Tacos" serving 4
     When I plan dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    Then the file "dinners/2026-08-25.md" exists in the meal-plan folder
+    Then the file "meals/2026-08-25.md" exists in the meal-plan folder
+
+  Scenario: A day documents any number of meals
+    Given I have recorded the recipe "Pancakes" serving 4
+    And I have recorded the recipe "Chicken Tacos" serving 4
+    And I have recorded the recipe "Sunday Pot Roast" serving 6
+    When I write the file "meals/2026-08-25.md":
+      """
+      ---
+      date: 2026-08-25
+      ---
+
+      # Meals for Tuesday, August 25, 2026
+
+      ## Breakfast
+
+      - [Pancakes](../recipes/pancakes.md)
+
+      ## Lunch
+
+      - [Chicken Tacos](../recipes/chicken-tacos.md)
+
+      ## Dinner
+
+      servings: 6
+
+      - [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
+      """
+    When I run "mealplan validate"
+    Then the command succeeds
+    And the meal "Breakfast" on "2026-08-25" uses 1 recipe
+    And the meal "Lunch" on "2026-08-25" uses 1 recipe
+    And the meal "Dinner" on "2026-08-25" uses 1 recipe
 
   Scenario: Recipe documents have front matter and an ingredients section
     When I record the recipe "Chicken Tacos" serving 4 with the ingredients:
@@ -59,27 +91,26 @@ Feature: The meal plan is a folder of markdown documents
       ## Instructions
       """
 
-  Scenario: Dinner documents link to their recipes as markdown links
+  Scenario: Day documents hold each meal as a markdown section
     Given I have recorded the recipes:
       | name               | servings |
       | Sunday Pot Roast   | 6        |
       | Garlic Green Beans | 4        |
     When I plan dinner on "2026-08-25" with the recipes "Sunday Pot Roast" and "Garlic Green Beans"
-    Then the file "dinners/2026-08-25.md" reads:
+    Then the file "meals/2026-08-25.md" reads:
       """
       ---
       date: 2026-08-25
-      servings: 6
       ---
 
-      # Dinner for Tuesday, August 25, 2026
+      # Meals for Tuesday, August 25, 2026
 
-      ## Recipes
+      ## Dinner
+
+      servings: 6
 
       - [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
       - [Garlic Green Beans](../recipes/garlic-green-beans.md)
-
-      ## Notes
       """
 
   Scenario: An ingredient is one list item, quantity then unit then item
@@ -135,14 +166,14 @@ Feature: The meal plan is a folder of markdown documents
     And the output names the line "- a good handful of cheese"
     And the output suggests the expected format
 
-  Scenario: The validator catches a dinner pointing at a recipe that is not there
-    Given the file "dinners/2026-08-25.md" contains:
+  Scenario: The validator catches a day pointing at a recipe that is not there
+    Given the file "meals/2026-08-25.md" contains:
       """
       ---
       date: 2026-08-25
       ---
 
-      ## Recipes
+      ## Dinner
 
       - [Beef Wellington](../recipes/beef-wellington.md)
       """
@@ -150,8 +181,54 @@ Feature: The meal plan is a folder of markdown documents
     Then the command fails
     And the output says "recipes/beef-wellington.md" is missing
 
-  Scenario: The validator catches a dinner whose filename and date disagree
-    Given the file "dinners/2026-08-25.md" contains:
+  Scenario: The validator catches a meal's servings it cannot read
+    Given the file "meals/2026-08-25.md" contains:
+      """
+      ---
+      date: 2026-08-25
+      ---
+
+      ## Dinner
+
+      servings: six
+      """
+    When I run "mealplan validate"
+    Then the command fails
+    And the output names the file "meals/2026-08-25.md"
+    And the output names the line "servings: six"
+    And the output suggests the expected servings format
+
+  Scenario: The validator catches servings left at the day level
+    Given the file "meals/2026-08-25.md" contains:
+      """
+      ---
+      date: 2026-08-25
+      servings: 6
+      ---
+
+      ## Dinner
+      """
+    When I run "mealplan validate"
+    Then the command fails
+    And the output names the file "meals/2026-08-25.md"
+    And the output mentions "belongs to a meal"
+
+  Scenario: A day with no meals is a note and is valid
+    Given the file "meals/2026-08-27.md" contains:
+      """
+      ---
+      date: 2026-08-27
+      ---
+
+      # Meals for Thursday, August 27, 2026
+
+      Leftovers night.
+      """
+    When I run "mealplan validate"
+    Then the command succeeds
+
+  Scenario: The validator catches a day whose filename and date disagree
+    Given the file "meals/2026-08-25.md" contains:
       """
       ---
       date: 2026-08-26

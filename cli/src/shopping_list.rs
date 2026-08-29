@@ -1,9 +1,9 @@
 //! `mealplan shopping-list --from DATE --to DATE [--include-staples]
 //! [--include-consumables] [--out PATH] [--json]`
 //!
-//! Derived from the folder every time and never stored. Read the dinners in the
-//! range, follow the links, scale each recipe by that night's servings over the
-//! recipe's own, and add the quantities up with their units.
+//! Derived from the folder every time and never stored. Read the days in the
+//! range, follow every meal's links, scale each recipe by that meal's servings
+//! over the recipe's own, and add the quantities up with their units.
 //!
 //! A broken document stops the whole list. Quietly under-buying is the worst
 //! outcome there is, because it is found at the store.
@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use crate::corpus::{field, front_matter, load, Consumable, ConsumableStatus, Corpus, Dinner};
+use crate::corpus::{field, front_matter, load, Consumable, ConsumableStatus, Corpus, Day, Meal};
 use crate::json;
 use crate::quantity::{Measure, Number};
 use crate::sections::{section_for, ORDER};
@@ -97,20 +97,22 @@ pub fn run(root: &Path, request: Request) -> i32 {
 
     let corpus = load(root, None);
 
-    let dinners: Vec<&Dinner> = corpus
-        .dinners
+    let days: Vec<&Day> = corpus
+        .days
         .iter()
-        .filter(|dinner| !dinner.date.is_empty())
-        .filter(|dinner| dinner.date.as_str() >= request.from && dinner.date.as_str() <= request.to)
+        .filter(|day| !day.date.is_empty())
+        .filter(|day| day.date.as_str() >= request.from && day.date.as_str() <= request.to)
         .collect();
 
     // Only the documents this list is built from. A broken recipe nobody is
     // cooking this week is a problem for `mealplan validate`, not a reason to
     // refuse the shopping.
-    let mut involved: Vec<&str> = dinners.iter().map(|dinner| dinner.path.as_str()).collect();
-    for dinner in &dinners {
-        for link in &dinner.recipes {
-            involved.push(link.target.as_str());
+    let mut involved: Vec<&str> = days.iter().map(|day| day.path.as_str()).collect();
+    for day in &days {
+        for meal in &day.meals {
+            for link in &meal.recipes {
+                involved.push(link.target.as_str());
+            }
         }
     }
     let blocking: Vec<&crate::corpus::Problem> = corpus
@@ -129,14 +131,14 @@ pub fn run(root: &Path, request: Request) -> i32 {
         return 1;
     }
 
-    let (lines, dropped) = if dinners.is_empty() {
+    let (lines, dropped) = if days.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        gather(&corpus, &dinners, request.include_staples, request.include_consumables)
+        gather(&corpus, &days, request.include_staples, request.include_consumables)
     };
     let store = read_store(root);
 
-    let markdown = render_markdown(&request, &dinners, &lines, &dropped);
+    let markdown = render_markdown(&request, &days, &lines, &dropped);
 
     if let Some(out) = request.out {
         let document = format!("{}{markdown}", front_matter_for(&request, &store));
@@ -172,7 +174,7 @@ fn front_matter_for(request: &Request, store: &Store) -> String {
 
 fn render_markdown(
     request: &Request,
-    dinners: &[&Dinner],
+    days: &[&Day],
     lines: &[Line],
     dropped: &[(String, LeftOutReason)],
 ) -> String {
@@ -182,16 +184,16 @@ fn render_markdown(
         request.from, request.to
     ));
 
-    if dinners.is_empty() {
+    if days.is_empty() {
         out.push_str(&format!(
-            "\nNo dinners are planned between {} and {}.\n",
+            "\nNo meals are planned between {} and {}.\n",
             request.from, request.to
         ));
         return out;
     }
 
     if lines.is_empty() && dropped.is_empty() {
-        out.push_str("\nNothing to buy: the dinners in this range link to no recipes.\n");
+        out.push_str("\nNothing to buy: the days in this range link to no recipes.\n");
         return out;
     }
 
@@ -418,30 +420,32 @@ fn read_store(root: &Path) -> Store {
 
 fn gather(
     corpus: &Corpus,
-    dinners: &[&Dinner],
+    days: &[&Day],
     include_staples: bool,
     include_consumables: bool,
 ) -> (Vec<Line>, Vec<(String, LeftOutReason)>) {
     let mut lines: Vec<Line> = Vec::new();
     let mut dropped: BTreeSet<(String, LeftOutReason)> = BTreeSet::new();
 
-    for dinner in dinners {
-        let servings = servings_for(corpus, dinner);
-        for link in &dinner.recipes {
-            let Some(recipe) = corpus.recipe(&link.target) else { continue };
-            let factor = servings / recipe.servings;
-            for ingredient in &recipe.ingredients {
-                if !include_staples && is_staple(&corpus.staples, &ingredient.item) {
-                    dropped.insert((ingredient.item.clone(), LeftOutReason::Staple));
-                    continue;
+    for day in days {
+        for meal in &day.meals {
+            let servings = servings_for(corpus, meal);
+            for link in &meal.recipes {
+                let Some(recipe) = corpus.recipe(&link.target) else { continue };
+                let factor = servings / recipe.servings;
+                for ingredient in &recipe.ingredients {
+                    if !include_staples && is_staple(&corpus.staples, &ingredient.item) {
+                        dropped.insert((ingredient.item.clone(), LeftOutReason::Staple));
+                        continue;
+                    }
+                    if !include_consumables && is_stocked(&corpus.consumables, &ingredient.item) {
+                        dropped.insert((ingredient.item.clone(), LeftOutReason::Consumable));
+                        continue;
+                    }
+                    let check = needs_recheck(&corpus.consumables, &ingredient.item);
+                    let measure = Measure::of(ingredient.quantity, ingredient.unit).scaled(factor);
+                    add(&mut lines, &ingredient.item, measure, &day.date, check);
                 }
-                if !include_consumables && is_stocked(&corpus.consumables, &ingredient.item) {
-                    dropped.insert((ingredient.item.clone(), LeftOutReason::Consumable));
-                    continue;
-                }
-                let check = needs_recheck(&corpus.consumables, &ingredient.item);
-                let measure = Measure::of(ingredient.quantity, ingredient.unit).scaled(factor);
-                add(&mut lines, &ingredient.item, measure, &dinner.date, check);
             }
         }
     }
@@ -449,14 +453,13 @@ fn gather(
     (lines, dropped.into_iter().collect())
 }
 
-/// What a night feeds. A dinner with no servings of its own feeds what its
+/// What a meal feeds. A meal with no servings of its own feeds what its
 /// recipes feed.
-fn servings_for(corpus: &Corpus, dinner: &Dinner) -> Number {
-    if let Some(servings) = dinner.servings {
+fn servings_for(corpus: &Corpus, meal: &Meal) -> Number {
+    if let Some(servings) = meal.servings {
         return servings;
     }
-    dinner
-        .recipes
+    meal.recipes
         .iter()
         .filter_map(|link| corpus.recipe(&link.target))
         .map(|recipe| recipe.servings)

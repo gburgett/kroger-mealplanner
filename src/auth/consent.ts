@@ -120,7 +120,7 @@ you open the Kroger app yourself.</p>`
 <h1>Let <strong>${escape(name)}</strong> into the meal plan?</h1>
 
 <p class="warn">Approving gives this program a shell over your meal-plan folder:
-it can read, change and delete every recipe and every dinner. Everything it does
+it can read, change and delete every recipe and every meal. Everything it does
 is committed, so it can be undone — but only if you notice.</p>
 
 <dl>

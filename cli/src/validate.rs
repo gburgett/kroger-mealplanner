@@ -20,11 +20,15 @@ pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
     if corpus.problems.is_empty() {
         match only {
             Some(path) => println!("{path} is valid."),
-            None => println!(
-                "The meal plan folder is valid: {} recipes, {} dinners.",
-                corpus.recipes.len(),
-                corpus.dinners.len()
-            ),
+            None => {
+                let meals: usize = corpus.days.iter().map(|day| day.meals.len()).sum();
+                println!(
+                    "The meal plan folder is valid: {} recipes, {} days, {} meals.",
+                    corpus.recipes.len(),
+                    corpus.days.len(),
+                    meals
+                );
+            }
         }
         return 0;
     }
@@ -79,30 +83,42 @@ fn describe(corpus: &Corpus) -> String {
         })
         .collect();
 
-    let dinners = corpus
-        .dinners
+    let days = corpus
+        .days
         .iter()
-        .map(|dinner| {
+        .map(|day| {
             json::object(vec![
-                json::field("path", json::string(&dinner.path)),
-                json::field("date", json::string(&dinner.date)),
+                json::field("path", json::string(&day.path)),
+                json::field("date", json::string(&day.date)),
                 json::field(
-                    "servings",
-                    match dinner.servings {
-                        Some(servings) => json::string(&to_display_number(servings)),
-                        None => json::null(),
-                    },
-                ),
-                json::field(
-                    "recipes",
+                    "meals",
                     json::array(
-                        dinner
-                            .recipes
+                        day.meals
                             .iter()
-                            .map(|link| {
+                            .map(|meal| {
                                 json::object(vec![
-                                    json::field("name", json::string(&link.name)),
-                                    json::field("target", json::string(&link.target)),
+                                    json::field("name", json::string(&meal.name)),
+                                    json::field(
+                                        "servings",
+                                        match meal.servings {
+                                            Some(servings) => json::string(&to_display_number(servings)),
+                                            None => json::null(),
+                                        },
+                                    ),
+                                    json::field(
+                                        "recipes",
+                                        json::array(
+                                            meal.recipes
+                                                .iter()
+                                                .map(|link| {
+                                                    json::object(vec![
+                                                        json::field("name", json::string(&link.name)),
+                                                        json::field("target", json::string(&link.target)),
+                                                    ])
+                                                })
+                                                .collect(),
+                                        ),
+                                    ),
                                 ])
                             })
                             .collect(),
@@ -133,7 +149,7 @@ fn describe(corpus: &Corpus) -> String {
     json::object(vec![
         json::field("valid", json::boolean(corpus.problems.is_empty())),
         json::field("recipes", json::array(recipes)),
-        json::field("dinners", json::array(dinners)),
+        json::field("days", json::array(days)),
         json::field(
             "staples",
             json::array(corpus.staples.iter().map(|item| json::string(item)).collect()),

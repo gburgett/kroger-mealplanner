@@ -6,6 +6,15 @@
 
 export type Ingredient = { quantity: string; unit: string; item: string };
 
+export type MealDraft = {
+  /** "Dinner", "Breakfast", "Lunch" — whatever this household calls the meal. */
+  name: string;
+  /** How many people the meal feeds. Absent: it feeds what its recipes feed. */
+  servings?: number;
+  recipes: string[];
+  note?: string;
+};
+
 export function slug(name: string): string {
   return name
     .toLowerCase()
@@ -17,8 +26,8 @@ export function recipePath(name: string): string {
   return `recipes/${slug(name)}.md`;
 }
 
-export function dinnerPath(date: string): string {
-  return `dinners/${date}.md`;
+export function dayPath(date: string): string {
+  return `meals/${date}.md`;
 }
 
 export function ingredientLine(ingredient: Ingredient): string {
@@ -51,28 +60,65 @@ export function recipeDocument(options: {
   ].join('\n');
 }
 
+/**
+ * One day, documented in one file.
+ *
+ * A day holds any number of meals, each its own `## <name>` section. A meal
+ * carries an optional `servings:` line and links to its recipes directly
+ * beneath it. Prose around the links is notes and is left alone.
+ */
+export function dayDocument(options: {
+  date: string;
+  meals?: MealDraft[];
+  note?: string;
+}): string {
+  const parts = [
+    '---',
+    `date: ${options.date}`,
+    '---',
+    '',
+    `# Meals for ${longDate(options.date)}`,
+  ];
+
+  for (const meal of options.meals ?? []) {
+    parts.push('', `## ${meal.name}`, '');
+    if (meal.servings !== undefined) {
+      parts.push(`servings: ${meal.servings}`, '');
+    }
+    for (const name of meal.recipes) {
+      parts.push(`- [${name}](../${recipePath(name)})`);
+    }
+    if (meal.recipes.length > 0 || meal.servings !== undefined) {
+      parts.push('');
+    }
+    if (meal.note) {
+      parts.push(meal.note, '');
+    }
+  }
+
+  if (options.note) {
+    parts.push('', options.note, '');
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * A single-meal day, the common case. The meal is named "Dinner" so the
+ * step wording "plan dinner" still writes what it says.
+ */
 export function dinnerDocument(options: {
   date: string;
   servings: number;
   recipes: string[];
   note?: string;
 }): string {
-  const links = options.recipes.map((name) => `- [${name}](../${recipePath(name)})`);
-  return [
-    '---',
-    `date: ${options.date}`,
-    `servings: ${options.servings}`,
-    '---',
-    '',
-    `# Dinner for ${longDate(options.date)}`,
-    '',
-    '## Recipes',
-    '',
-    ...(links.length ? [...links, ''] : []),
-    '## Notes',
-    ...(options.note ? ['', options.note] : []),
-    '',
-  ].join('\n');
+  return dayDocument({
+    date: options.date,
+    meals: [
+      { name: 'Dinner', servings: options.servings, recipes: options.recipes, note: options.note },
+    ],
+  });
 }
 
 /** "2026-08-25" -> "Tuesday, August 25, 2026". UTC, so it is deterministic. */
@@ -95,7 +141,39 @@ export function frontMatter(document: string): Record<string, string> {
   return fields;
 }
 
-/** The recipes a dinner links to, as markdown link targets. */
+/**
+ * The `servings:` line inside a `## <meal>` section, if there is exactly one.
+ *
+ * A single-meal day is the case the "serves N" step asserts; a day with
+ * several meals is read meal by meal instead.
+ */
+export function mealServings(document: string): number | null {
+  const found: string[] = [];
+  let insideMeal = false;
+  for (const raw of document.split('\n')) {
+    const line = raw.trim();
+    if (/^##\s+/.test(line)) {
+      insideMeal = true;
+      continue;
+    }
+    if (/^#\s+/.test(line)) {
+      insideMeal = false;
+      continue;
+    }
+    const servings = /^servings:\s*(\d+(?:\.\d+)?)$/.exec(line);
+    if (insideMeal && servings) found.push(servings[1]);
+  }
+  if (found.length !== 1) return null;
+  const value = Number(found[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The recipe links of a day document, as markdown link targets.
+ *
+ * Links sit directly under their meal heading now, so this is the whole of
+ * "which recipes are planned that day".
+ */
 export function linkedRecipes(document: string): Array<{ name: string; target: string }> {
   return [...document.matchAll(/^-\s*\[([^\]]+)\]\(([^)]+)\)\s*$/gm)].map((match) => ({
     name: match[1],

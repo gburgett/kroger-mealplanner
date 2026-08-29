@@ -37,7 +37,7 @@ Then('the output is:', function (this: MealPlanWorld, expected: string) {
 
 // "lists" is a set, not a sequence: `grep -r` walks the directory in whatever
 // order the filesystem hands it back. Where the ORDER is the point — `ls
-// dinners/` being the calendar — the scenario says "the output is:" instead.
+// meals/` being the calendar — the scenario says "the output is:" instead.
 Then('the output lists:', function (this: MealPlanWorld, table: DataTable) {
   const lines = this.result()
     .stdout.split('\n')
@@ -126,6 +126,11 @@ Then('the output suggests the expected format', function (this: MealPlanWorld) {
   assert.match(this.output(), /<quantity>\s*\[unit\]\s*<item>/);
 });
 
+Then('the output suggests the expected servings format', function (this: MealPlanWorld) {
+  assert.match(this.output(), /servings/i);
+  assert.match(this.output(), /whole number|for example/i);
+});
+
 Then('the output says the folder is valid', function (this: MealPlanWorld) {
   assert.match(this.output(), /\bvalid\b/i);
 });
@@ -157,8 +162,8 @@ Then('the output says a date must be written as YYYY-MM-DD', function (this: Mea
   assert.match(this.output(), /YYYY-MM-DD/);
 });
 
-Then('the output says no dinners are planned in that range', function (this: MealPlanWorld) {
-  assert.match(this.output(), /no dinners/i);
+Then('the output says no meals are planned in that range', function (this: MealPlanWorld) {
+  assert.match(this.output(), /no meals/i);
 });
 
 Then(

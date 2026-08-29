@@ -6,7 +6,7 @@
 //
 //     README.md
 //     config
-//     dinners
+//     meals
 //     pantry
 //     preferences
 //     recipes
@@ -41,7 +41,7 @@ import {
 
 export const CORPUS_DIRECTORIES = [
   'config',
-  'dinners',
+  'meals',
   'pantry',
   'preferences',
   'recipes',
@@ -80,6 +80,14 @@ delete this notice once the document is theirs. Nothing parses this file and
 When nothing here decides the choice in front of you, ASK THE HOUSEHOLD, and
 write the answer down here. That is how this document gets good.
 
+## How many meals a day
+
+- breakfast, lunch and dinner — NOT CONFIRMED
+
+Some households plan one meal a day and some plan five. Write here which
+meals this household plans and what it calls them, then write those into
+\`meals/<date>.md\` as one \`## <meal>\` section each.
+
 ## The usual
 
 - the shop's own brand, at the lowest price per UNIT rather than the lowest
@@ -99,7 +107,7 @@ do not ask again. There are none yet.
 
 /**
  * The map, written for whichever agent opens the folder first. It has to
- * describe recipes/, dinners/ and the ingredient line format, because that is
+ * describe recipes/, meals/ and the ingredient line format, because that is
  * the one place an agent can learn the schema without being told it.
  */
 export const README = `# The meal plan
@@ -138,28 +146,44 @@ tags: [quick, kid-friendly]
 Sear the chicken, shred it, warm the tortillas in a dry skillet.
 \`\`\`
 
-## dinners/
+## meals/
 
-One document per night. The filename is the ISO date, so \`ls dinners/\` is the
-calendar in order and there is one dinner per night by construction.
+One document per day. The filename is the ISO date, so \`ls meals/\` is the
+calendar in order and there is one day per file by construction. A day holds
+as many meals as this household plans — one \`## <meal>\` section each.
 
 \`\`\`markdown
 ---
 date: 2026-08-25
-servings: 4
 ---
 
-# Dinner for Tuesday, August 25, 2026
+# Meals for Tuesday, August 25, 2026
 
-## Recipes
+## Dinner
+
+servings: 4
 
 - [Chicken Tacos](../recipes/chicken-tacos.md)
-
-## Notes
 \`\`\`
 
-A dinner may link to no recipes at all — \`## Notes\` carries "leftovers night".
-Without \`servings\` of its own, a dinner feeds what its recipes feed.
+A meal may link to no recipes at all — carry the note as prose under its
+heading. A day with no cooking is the front matter, a title and a note, with
+no meals:
+
+\`\`\`markdown
+---
+date: 2026-08-27
+---
+
+# Meals for Thursday, August 27, 2026
+
+Leftovers night.
+\`\`\`
+
+A meal's \`servings:\` line says how many people it feeds. Without one, the
+meal feeds what its recipes feed. Which meals a household plans, and how
+many, is written in \`preferences/household.md\` — read it before writing a
+new day.
 
 ## pantry/
 
@@ -189,7 +213,9 @@ to \`needs recheck\` by hand when you notice the household is running low.
 \`preferences/household.md\` says how this household chooses: which brands, what
 it will not eat, whether the cheap one or the good one. **Read it before you
 delete candidates from a shopping list**, because deleting them is choosing,
-and choosing is what this document is for.
+and choosing is what this document is for. It also says how many meals this
+household plans each day and what it calls them — **read it before you write a
+new day**.
 
 **It has no schema.** It is prose, \`mealplan validate\` never opens it, and the
 example the folder starts with is only an example — rewrite it into whatever
@@ -276,9 +302,9 @@ memory:
     mealplan validate [path]                     check the folder, or one file
     mealplan shopping-list --from DATE --to DATE one list for a range of nights
 
-\`shopping-list\` reads the dinners in the range, follows the links, scales each
-recipe to that night's servings and adds the quantities up with the units. It is
-derived from the folder every time and never stored.
+\`shopping-list\` reads the days in the range, follows every meal's links,
+scales each recipe to that meal's servings and adds the quantities up with the
+units. It is derived from the folder every time and never stored.
 `;
 
 /**

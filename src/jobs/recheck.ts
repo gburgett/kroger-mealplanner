@@ -53,7 +53,7 @@ const TASK_INSTRUCTION =
   'lists that history touched, which "stocked" consumables have probably run ' +
   'out and should be marked "needs recheck"?\n\n' +
   'Use bash and read_file to look at what changed: `git log --since="7 days ' +
-  'ago" --oneline`, the dinners and shopping lists that log names, and ' +
+  'ago" --oneline`, the day documents and shopping lists that log names, and ' +
   'pantry/consumables.md itself. A consumable that shows up across several of ' +
   "the week's meals and is still marked \"stocked\" is a candidate; one that " +
   "was just bought (a recent \"last bought\" date) probably is not.\n\n" +

@@ -57,29 +57,29 @@ Feature: The meal plan remembers what it used to say
 
   Scenario: A restart that scaffolds nothing does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And the history has 2 commits
+    And the history has 4 commits
     When the server restarts
-    Then the history has 2 commits
+    Then the history has 4 commits
 
   Scenario: A command that changes nothing does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And the history has 2 commits
+    And the history has 4 commits
     When I run "grep -r tortillas recipes/"
-    Then the history has 2 commits
+    Then the history has 4 commits
 
   Scenario: Several files changed by one command land in one commit
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    And the history has 3 commits
+    And the history has 5 commits
     When I run:
       """
       mv recipes/chicken-tacos.md recipes/taco-night.md
-      sed -i 's|chicken-tacos|taco-night|; s|Chicken Tacos|Taco Night|' dinners/2026-08-25.md
+      sed -i 's|chicken-tacos|taco-night|; s|Chicken Tacos|Taco Night|' meals/2026-08-25.md
       sed -i 's|^name: Chicken Tacos$|name: Taco Night|' recipes/taco-night.md
       """
-    Then the history has 4 commits
+    Then the history has 6 commits
     And the last commit touched the file "recipes/taco-night.md"
-    And the last commit touched the file "dinners/2026-08-25.md"
+    And the last commit touched the file "meals/2026-08-25.md"
 
   Scenario: The commit message is what the agent provided
     Given I have recorded the recipe "Chicken Tacos" serving 4
@@ -143,13 +143,13 @@ Feature: The meal plan remembers what it used to say
     And the recipe "Chicken Tacos" serves 4
 
   Scenario: Undoing a whole week of planning
-    Given I have planned the dinners:
+    Given I have planned the days:
       | date       | recipes       |
       | 2026-08-24 | Chicken Tacos |
       | 2026-08-25 | Chicken Tacos |
     When I run "git revert --no-edit HEAD"
     Then the command succeeds
-    And the file "dinners/2026-08-25.md" does not exist in the meal-plan folder
+    And the file "meals/2026-08-25.md" does not exist in the meal-plan folder
 
   Scenario: An invalid document is still committed, so it can still be recovered from
     When I write the file "recipes/broken.md":

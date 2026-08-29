@@ -142,7 +142,7 @@ Then(
     const tool = this.tools.find((candidate) => candidate.name === name);
     assert.ok(tool, `there is no "${name}" tool`);
     const description = tool.description ?? '';
-    for (const landmark of ['recipes/', 'dinners/', 'pantry/', 'preferences/', '/workspace']) {
+    for (const landmark of ['recipes/', 'meals/', 'pantry/', 'preferences/', '/workspace']) {
       assert.ok(
         description.includes(landmark),
         `the "${name}" description never mentions ${landmark}`,

@@ -2,7 +2,7 @@
 Feature: Keeping recipes
   As a busy housewife planning family meals
   I want the recipes my family likes kept as files I can search
-  So that I can plan dinners from them instead of working out the ingredients again every week
+  So that I can plan meals from them instead of working out the ingredients again every week
 
   A recipe is a markdown document in "recipes/". The filename is the recipe name
   slugged, which means the filesystem enforces unique names for free and "ls" is
@@ -132,23 +132,23 @@ Feature: Keeping recipes
     Then the command succeeds
     And the file "recipes/liver-and-onions.md" does not exist in the meal-plan folder
 
-  Scenario: Deleting a recipe a planned dinner still points at is caught by the validator
+  Scenario: Deleting a recipe a planned meal still points at is caught by the validator
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
     When I run "rm recipes/chicken-tacos.md"
     And I run "mealplan validate"
     Then the command fails
-    And the output names the file "dinners/2026-08-25.md"
+    And the output names the file "meals/2026-08-25.md"
     And the output says "recipes/chicken-tacos.md" is missing
 
   Scenario: Checking before deleting
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned the dinners:
+    And I have planned the days:
       | date       | recipes       |
       | 2026-08-25 | Chicken Tacos |
-    When I run "grep -rl chicken-tacos.md dinners/"
+    When I run "grep -rl chicken-tacos.md meals/"
     Then the output lists:
-      | dinners/2026-08-25.md |
+      | meals/2026-08-25.md |
 
   Scenario: Renaming a recipe means moving the file and fixing what points at it
     Given I have recorded the recipe "Chicken Tacos" serving 4
@@ -156,7 +156,7 @@ Feature: Keeping recipes
     When I run:
       """
       mv recipes/chicken-tacos.md recipes/taco-night.md
-      sed -i 's|\[Chicken Tacos\](../recipes/chicken-tacos.md)|[Taco Night](../recipes/taco-night.md)|' dinners/2026-08-25.md
+      sed -i 's|\[Chicken Tacos\](../recipes/chicken-tacos.md)|[Taco Night](../recipes/taco-night.md)|' meals/2026-08-25.md
       sed -i 's|^name: Chicken Tacos$|name: Taco Night|' recipes/taco-night.md
       mealplan validate
       """
@@ -165,9 +165,9 @@ Feature: Keeping recipes
 
   Scenario: Seeing when we last made something so the week is not repetitive
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned the dinners:
+    And I have planned the days:
       | date       | recipes       |
       | 2026-08-10 | Chicken Tacos |
       | 2026-08-17 | Chicken Tacos |
-    When I run "grep -rl chicken-tacos.md dinners/ | sort | tail -1"
-    Then the output is "dinners/2026-08-17.md"
+    When I run "grep -rl chicken-tacos.md meals/ | sort | tail -1"
+    Then the output is "meals/2026-08-17.md"
