@@ -141,7 +141,6 @@ export class MealPlanWorld extends World {
   async start(): Promise<void> {
     this.folder = await mkdtemp(path.join(tmpdir(), 'mealplan-scenario-'));
     this.statePath = path.join(await mkdtemp(path.join(tmpdir(), 'mealplan-state-')), 'auth.json');
-    this.port = await freePort();
     this.kroger = await KrogerMock.start();
     this.walmart = await WalmartMock.start();
     // The signing key lives outside the folder, as it would in production. It
@@ -149,6 +148,14 @@ export class MealPlanWorld extends World {
     // the scenarios share one process, and a mutation would leak.
     this.walmartKeyPath = path.join(path.dirname(this.statePath), 'walmart-key.pem');
     await writeFile(this.walmartKeyPath, walmartTestKeys().privateKey, { mode: 0o600 });
+    // The port is asked for only after the two mocks have bound theirs.
+    // freePort() learns a free port and gives it straight back, which leaves a
+    // gap before startServer binds it. Each mock's listen(0) would be glad to
+    // take that just-released port, and then startServer would fail with
+    // EADDRINUSE. With the mocks already listening, the kernel hands freePort()
+    // a port nothing else is going to grab, and nothing else asks for one
+    // before launch().
+    this.port = await freePort();
     await this.launch();
     this.commitsAtStart = await this.commitCount();
   }
@@ -393,7 +400,9 @@ export type RawResponse = {
  * A free port, learned by asking for one and giving it straight back.
  *
  * A listening socket that never accepted a connection leaves no TIME_WAIT, so
- * rebinding it immediately is safe.
+ * rebinding it immediately is safe. The give-back is still a gap, though: any
+ * other listen(0) in between can claim the port. freePort() must therefore be
+ * called only after every other listener has already bound — see start().
  */
 async function freePort(): Promise<number> {
   const probe = createServer();
