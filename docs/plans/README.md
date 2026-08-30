@@ -17,3 +17,4 @@ and deleted once its work is done — that is the difference between a plan and 
 | [0002](0002-authenticate-the-mcp-server.md) | Authenticate the MCP server | done, 2026-08-23, except Phase 0 |
 | [0003](0003-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart | done, 2026-08-25, except one Phase 0 measurement |
 | [0004](0004-import-pinterest-boards.md) | Import boards from Pinterest as pins-and-links | proposed, not started |
+| [0005](0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the server and jobs to Elixir, Phoenix and PostgreSQL | proposed, not started |
