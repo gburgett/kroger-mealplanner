@@ -1,17 +1,22 @@
 # Plan 0005 — Migrate the server and jobs to Elixir, Phoenix and PostgreSQL
 
-**Status:** proposed, not started.
+**Status:** proposed, not started. **Blocked on ADR 0021 and plan 0006**
+(`docs/plans/0006-reach-the-corpus-only-through-the-sandbox-session.md`): the
+corpus must have one ingress — the sandbox session — before this migration
+tries to build a tenant-scoped session registry on top of it. Do not start
+Phase 0 until plan 0006 is done.
 **Implements:** ADR 0020, which records the decision this plan builds. The plan
 itself decides nothing; where it looks like it is arguing a trade-off, move the
 argument into ADR 0020 and the evidence into a study beside it.
 **Definition of done:** every existing `.feature` scenario green against the
 Elixir server driven by the TypeScript MCP SDK client, with no `.feature` text
-changed; `features/sandbox.feature` `@security` green with the server inside a
-container that has no `node`; the weekly recheck running inside that same
-release and `deploy/mealplan-recheck.{service,timer}` deleted; `/` serving a
-static site on the same origin; `mix release` as the deployable artifact; and
-server state keyed by tenant id with the single-household bootstrap still
-needing no manual account setup.
+changed; `features/sandbox.feature` `@security` green with the server running
+under `mix release` on this VM's existing user systemd unit (the container is
+plan 0007, not required for this plan's done); the weekly recheck running
+inside that same release and `deploy/mealplan-recheck.{service,timer}`
+deleted; `/` serving a static site on the same origin; `mix release` as the
+deployable artifact; and server state keyed by tenant id with the
+single-household bootstrap still needing no manual account setup.
 ADR 0002 and ADR 0018 are marked superseded by ADR 0020.
 
 ## Context
@@ -162,7 +167,19 @@ command runs inside the sandbox, the committer identity is fixed, messages
 travel via `$MEALPLAN_COMMIT_MESSAGE`, and the first commit behaves as
 `features/history.feature` asserts. Port the corpus scaffold, tree and
 path-containment helper, then the dated-shell migration runner, keeping
-`.mealplan-migrations.json` in the folder.
+`.mealplan-migrations.json` in the folder. By this phase, ADR 0021 has already
+made every one of these a sandbox operation in TypeScript — `src/corpus/
+sandbox.ts` — so there is no host-`node:fs` code path left to decide whether to
+port; there is exactly one shape to translate.
+
+**The concurrency answer, and why it needs the Registry.** A single-threaded
+`GenServer` per tenant session serialises `run()` and every corpus operation
+by construction — no promise chain to get wrong, unlike `Session#enqueue`
+today. That only holds with exactly one session process per tenant, which is
+what the `DynamicSupervisor` + `Registry` here is for: the weekly recheck job
+(Phase 6) must check out the tenant's existing session rather than call
+`open()` a second time over the same folder, closing the two-sessions-one-
+folder defect ADR 0021 records and leaves open.
 
 ## Phase 5 — Kroger, Walmart and the LLM client
 
@@ -189,6 +206,15 @@ the `<7>`/`<3>` log prefix discipline so the Phoenix logger writes it.
 Delete `deploy/mealplan-recheck.service` and `deploy/mealplan-recheck.timer`.
 
 ## Phase 7 — The container and the deploy story
+
+**Deferred to plan 0007.** This VM is also the development environment;
+PostgreSQL and the Elixir toolchain are installed on it directly rather than
+in a container, and the first deployment target is the existing user systemd
+unit — `deploy/mealplan.service` runs `bin/mealplan start` in place of
+`node server.ts`, with `mix release` as the new build step before a restart.
+See ADR 0020's amendment. The Dockerfile and `compose.yaml` below describe the
+eventual container goal and are picked up again once plan 0007 exists;
+nothing in Phases 0–6, 8 or 9 depends on this phase running first.
 
 Write a multi-stage `Dockerfile`:
 

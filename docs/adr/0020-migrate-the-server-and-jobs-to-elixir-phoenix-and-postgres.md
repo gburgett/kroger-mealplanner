@@ -2,7 +2,7 @@
 status: proposed
 date: 2026-08-29
 decision-makers: gburgett
-consulted: ADR 0002, ADR 0004, ADR 0006, ADR 0007, ADR 0008, ADR 0009, ADR 0010, ADR 0017, ADR 0018
+consulted: ADR 0002, ADR 0004, ADR 0006, ADR 0007, ADR 0008, ADR 0009, ADR 0010, ADR 0017, ADR 0018, ADR 0021
 informed: all contributors
 ---
 
@@ -41,6 +41,16 @@ Four things must not change, whatever the new stack is:
   structure from `mealplan shopping-list --json`, never by parsing the grammar.
 * **The tool surface is the product.** The eight tools, their descriptions and
   their argument errors are what an agent reads. They carry over unchanged.
+
+**This record is blocked on ADR 0021.** Researching the claim two paragraphs
+above it — that the session interface keeps the tenancy question answerable
+without a rewrite — found the claim only half true: `read_file`, `write_file`
+and several other corpus operations bypass the sandbox session entirely and
+touch the host folder with `node:fs`, so a session backed by a different
+sandbox has nothing to implement for them. ADR 0021 closes that gap first, in
+TypeScript, against the currently green suite, so this migration starts from a
+corpus that already has one ingress rather than proving an architecture change
+and a language change at once.
 
 ## Decision Drivers
 
@@ -167,6 +177,21 @@ Port interface is less natural than Node's `spawn`. They are solved with a small
 wrapper, and that wrapper lives in the security path, so it gets its own
 `@security` scenarios rather than a waiver.
 
+**This is also the answer to the open concurrency defect in
+`docs/sandbox-trade-study.md` §11.7.** Two commands racing against one tenant
+folder today serialise correctly within `Session#enqueue`'s promise chain, but
+a burst of concurrent tool calls on one MCP session did not all come back in
+testing — the mechanism above the sandbox that should hold them is
+unmeasured. On the BEAM, a tenant's session is one single-threaded `GenServer`:
+its mailbox processes one message at a time by construction, so `run()` and the
+corpus operations ADR 0021 adds are serialised for free, with no promise chain
+to get wrong. The precision that matters: this only holds with **exactly one**
+session process per tenant. A `Registry` keyed by tenant id, behind a
+`DynamicSupervisor`, is what makes that true — and it is also what closes the
+two-sessions-one-folder defect ADR 0021 leaves open, because the weekly recheck
+job (Phase 6) checks out the tenant's existing session instead of opening a
+second one over the same folder.
+
 One consequence is written down rather than hidden. Inside a container there is
 no user systemd instance, so the cgroup half of the resource limits falls back
 to rlimits, the path `src/sandbox/limits.ts` already carries for machines
@@ -281,6 +306,13 @@ boundary, and the deferred decision on a real per-tenant isolation layer (ADR
   the sandbox on a container runtime, not a change to the sandbox, and it stays
   visible until the session layer moves.
 * Bad, because the build step returns. Deployment is no longer `node server.ts`.
+* Neutral for now, because **the container is deferred to a follow-on plan.**
+  This VM is also the development environment, and PostgreSQL is installed on
+  it natively rather than in a container. The first Elixir deployment is
+  `mix release` under the same user systemd unit that runs the server today,
+  amending `deploy/mealplan.service` in place. Phase 7's Dockerfile and
+  `compose.yaml` become plan 0007; nothing about the eventual container goal
+  changes, only its sequencing.
 * Bad, because the dependency surface grows from three Node runtime packages to
   a Phoenix stack, and the pnpm supply-chain settings do not exist in Mix. The
   discipline moves to `mix.lock`, Hex, and the same "few, reviewed, justified"
@@ -302,8 +334,12 @@ boundary, and the deferred decision on a real per-tenant isolation layer (ADR
    one release, and `deploy/mealplan-recheck.service` is gone.
 4. `/` serves a static site on the same origin, and the OAuth, MCP and Kroger
    routes behave as the existing scenarios describe.
-5. `mix release` is the deployable artifact, and a build step is accepted in
-   return for one image.
+5. `mix release` is the deployable artifact. The first target is the existing
+   user systemd unit on this VM, not a container — `deploy/mealplan.service`
+   runs `bin/mealplan start` in place of `node server.ts`, and a build step
+   (`mix release`) is accepted before the restart that used to be the whole
+   deploy. The Dockerfile and one-image goal move to plan 0007 and are
+   confirmed there.
 6. A tenant-scoped scenario shows a bearer token minted for one tenant cannot
    authorise another tenant's resource, and the `@security` scenarios still pass
    unchanged because the sandbox boundary was not touched.
@@ -352,9 +388,17 @@ boundary, and the deferred decision on a real per-tenant isolation layer (ADR
 
 ## More Information
 
-The migration is sequenced in
+**This record is blocked on ADR 0021**
+([`0021-reach-the-corpus-only-through-the-sandbox-session.md`](0021-reach-the-corpus-only-through-the-sandbox-session.md))
+and its plan
+([`docs/plans/0006-reach-the-corpus-only-through-the-sandbox-session.md`](../plans/0006-reach-the-corpus-only-through-the-sandbox-session.md)).
+Work on this migration does not start until that one is done.
+
+The migration itself is sequenced in
 [`docs/plans/0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md`](../plans/0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md).
-That plan decides nothing; it is how this record gets built.
+That plan decides nothing; it is how this record gets built. Its Phase 7
+(the Dockerfile and `compose.yaml`) is deferred out to a later plan 0007, once
+one is written; the amendment above records why.
 
 When ADR 0020 is accepted, mark ADR 0002 `superseded by ADR-0020`. Mark
 ADR 0018 `superseded by ADR-0020` as well, and note that only its process and
