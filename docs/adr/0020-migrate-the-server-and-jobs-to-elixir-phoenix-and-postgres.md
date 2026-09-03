@@ -42,15 +42,15 @@ Four things must not change, whatever the new stack is:
 * **The tool surface is the product.** The eight tools, their descriptions and
   their argument errors are what an agent reads. They carry over unchanged.
 
-**This record is blocked on ADR 0021.** Researching the claim two paragraphs
-above it — that the session interface keeps the tenancy question answerable
-without a rewrite — found the claim only half true: `read_file`, `write_file`
-and several other corpus operations bypass the sandbox session entirely and
-touch the host folder with `node:fs`, so a session backed by a different
-sandbox has nothing to implement for them. ADR 0021 closes that gap first, in
-TypeScript, against the currently green suite, so this migration starts from a
-corpus that already has one ingress rather than proving an architecture change
-and a language change at once.
+**This record was blocked on ADR 0021, and is not any more.** Researching the
+claim two paragraphs above it — that the session interface keeps the tenancy
+question answerable without a rewrite — found the claim only half true:
+`read_file`, `write_file` and several other corpus operations bypassed the
+sandbox session entirely and touched the host folder with `node:fs`, so a
+session backed by a different sandbox had nothing to implement for them. ADR
+0021 closed that gap first, in TypeScript, against the currently green suite,
+so this migration now starts from a corpus that already has one ingress
+rather than proving an architecture change and a language change at once.
 
 ## Decision Drivers
 
@@ -388,11 +388,11 @@ boundary, and the deferred decision on a real per-tenant isolation layer (ADR
 
 ## More Information
 
-**This record is blocked on ADR 0021**
+**This record was blocked on ADR 0021**
 ([`0021-reach-the-corpus-only-through-the-sandbox-session.md`](0021-reach-the-corpus-only-through-the-sandbox-session.md))
 and its plan
 ([`docs/plans/0006-reach-the-corpus-only-through-the-sandbox-session.md`](../plans/0006-reach-the-corpus-only-through-the-sandbox-session.md)).
-Work on this migration does not start until that one is done.
+ADR 0021 is accepted and implemented. Work on this migration can start.
 
 The migration itself is sequenced in
 [`docs/plans/0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md`](../plans/0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md).

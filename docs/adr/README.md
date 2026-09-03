@@ -34,8 +34,8 @@ decision, write a new record. Give the old record the status
 | [0017](0017-shop-at-walmart-through-the-affiliate-api-with-a-link-for-the-cart.md) | Shop at Walmart through the affiliate API, with a link for the cart | accepted |
 | [0018](0018-run-a-weekly-llm-job-to-recheck-consumables.md) | Run a weekly LLM job to recheck consumables | proposed |
 | [0019](0019-import-pinterest-boards-as-a-pins-and-links-ledger.md) | Import Pinterest boards as a pins-and-links ledger the agent converts | proposed |
-| [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; blocked on ADR 0021 |
-| [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | proposed |
+| [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021 |
+| [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and
