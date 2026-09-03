@@ -125,12 +125,40 @@ Proven for `bash` / `read_file` / `write_file`: command output + structured
 content, the missing/blank-argument refusals, `../escape.md` containment, and
 write-then-commit. The Kroger/Walmart tools land with Phase 5.
 
-## Not started
+## Phase 3 — OAuth authorisation server + bearer gate (done)
 
-- **Phase 3 — OAuth authorisation server + bearer plug.** Still ours: `/register`
-  (DCR), `/authorize` (PKCE + consent-before-code), `/consent`, `/token`
-  (code + refresh), `/revoke`, both discovery documents, and the custom bearer
-  Plug (opaque-in-store tokens). The transport is done (see above).
+The half no MCP library ships. Ported from `src/auth/provider.ts` and the
+`mcpAuthRouter` wiring in `src/mcp/server.ts`.
+
+| Node source | Elixir |
+| --- | --- |
+| `MealPlanOAuthProvider` (`src/auth/provider.ts`) | `Mealplan.Auth.Provider` |
+| `ConsentDesk` (`src/auth/consent.ts`) | `Mealplan.Auth.ConsentDesk` (GenServer) |
+| `consentPage` / `notTheHouseholdPage` | `MealplanWeb.ConsentPage` (5-char escape kept — the app is `--no-html`) |
+| `householdOnly` | `MealplanWeb.Plugs.ExedevGate` |
+| `requireBearerAuth` | `MealplanWeb.Plugs.BearerAuth` |
+| `mcpAuthRouter` endpoints | `MealplanWeb.OAuthController` + router |
+
+- Open at the proxy: `/register`, `/token`, `/revoke`, `/.well-known/*`.
+- exe.dev-gated: `/authorize`, `/consent`.
+- Bearer-gated then forwarded to anubis: `/mcp`.
+- Issuer is `Mealplan.Config.public_url/0`, never a `Host` header.
+- Consent + token checks are tenant membership (`Accounts.owner?/2`), not one
+  global email.
+- One code, one exchange (`Store.take_code` is `DELETE … RETURNING`); PKCE S256
+  verified on exchange; refresh rotates and cannot widen scope.
+
+Proven over loopback with `curl`: the full register → authorize → consent →
+token dance, an authenticated `tools/call`, the 401 `resource_metadata`
+challenge, the 302 login redirect with a come-back-here `redirect`, and the
+403 naming both emails for a non-household sign-in.
+
+**Not yet wired:** the consent page's "connect Kroger" checkbox renders when
+Kroger is configured, but the `connect_kroger=yes` branch (park the consent,
+bounce through the Kroger store picker, mint the code at the far end) needs the
+Kroger API client — it lands with Phase 5. `kroger_link.feature` fails until then.
+
+## Not started
 - **Phase 5 — Kroger / Walmart / LLM clients.** `Req` for the one HTTP path.
   RSA-SHA256 via `:public_key` (no package). Pure ports of `src/kroger/api.ts`,
   `src/walmart/api.ts`, `src/kroger/list.ts` (candidate grammar),
