@@ -215,19 +215,40 @@ one this meal planner started"; `GET /kroger` (household) → "Connect your
 Kroger account"; `POST /kroger/connect` → 302 to
 `api.kroger.com/v1/connect/oauth2/authorize?…scope=cart.basic:write&state=<uuid>`.
 
-Nothing has been run against the Cucumber suite yet — that needs the
-`features/support/world.ts` rework.
+Nothing has been run against the Cucumber suite yet — see the harness section
+below.
+
+## Test harness rework (done, unrun) — and what it costs
+
+Commit 8d4ccb0 did it: `world.ts` spawns the Elixir app per scenario with
+`mix run --no-halt --no-compile`, passes folder + owner + clock + the three mock
+seams as env, and reads state back with host `git` and `psql`. No `.feature`
+changed and no `features/steps/*.ts` changed, as the plan required.
+
+That design costs a whole BEAM boot, an Ecto migration sweep, ~35 sandbox round
+trips of scaffolding, an OAuth dance and a teardown for **each of 226
+scenarios** — roughly 2.5–4.5 s of fixed cost apiece, which is most of the
+suite's wall clock. `docs/test-suite-parallelisation-study.md` measures what it
+could and counts the rest.
+
+Acted on there: the suite now runs `cucumber-js --parallel`, with a database per
+worker (`MIX_TEST_PARTITION` from `CUCUMBER_WORKER_ID`) because a scenario clears
+its rows with `TRUNCATE`, plus a retry on the ephemeral-port race and a smaller
+Cucumber-only connection pool. Expected ~5–6× on an 8-core VM. **None of it has
+been run** — the environment it was written in could not build
+`sandbox-image/rootfs`, so timing the suite serially against in parallel is the
+first job on a machine that can.
+
+Proposed there, not built: one long-lived server per worker instead of one per
+scenario, which needs `tenants` to carry its own folder so `Sandbox.open(tenant)`
+stops reading `Mealplan.Config.folder()`. That is the `open(tenant)` seam ADR
+0008 kept, and it is worth about ten times what the parallelism is. It changes
+tenant resolution, so it needs an ADR first.
 
 ## Not started
 - **Phase 6 — Oban weekly recheck** inside the release; delete
   `deploy/mealplan-recheck.{service,timer}`.
 - **Phase 8 — the static site at `/`.**
-- **Test harness rework.** `features/support/world.ts` still imports
-  `startServer` / `runRecheckJob` in-process. It must spawn the Elixir release
-  on the reserved port, pass folder + DB URL + mock seams + owner as env, and
-  replace `world.session()` / `commitCount()` with host `git -C <folder>`. The
-  `.feature` files do not change; `features/steps/*.ts` should not need to
-  either — if they do, stop and ask.
 - **Phase 9 — records + cleanup.** Mark ADR 0002 / 0018 superseded, update the
   index tables and `AGENTS.md`, remove `src/**`, `server.ts`, `recheck.ts`,
   `package.json`, `pnpm-*`.

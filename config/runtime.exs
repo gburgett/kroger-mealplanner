@@ -84,9 +84,13 @@ end
 if config_env() == :test and System.get_env("CUCUMBER") do
   config :mealplan, MealplanWeb.Endpoint, server: true
 
+  # `cucumber-js --parallel N` has N of these servers up at once, each holding a
+  # whole pool, so the pool size is multiplied by N against one Postgres and its
+  # default max_connections of 100. A scenario drives one client through one
+  # request at a time; it does not need ten connections to do it.
   config :mealplan, Mealplan.Repo,
     pool: DBConnection.ConnectionPool,
-    pool_size: 10
+    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4")
 end
 
 if config_env() == :prod do
