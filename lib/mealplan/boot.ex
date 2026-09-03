@@ -24,14 +24,24 @@ defmodule Mealplan.Boot do
 
   @impl true
   def init(_opts) do
-    tenant = Mealplan.Config.tenant()
+    tenant_slug = Mealplan.Config.tenant()
     folder = Mealplan.Config.folder()
+    owner = Mealplan.Config.owner()
     base_url = Mealplan.Config.public_url()
 
-    Logger.info("meal-plan folder: #{folder}")
-    Logger.info("the household is #{Mealplan.Config.owner()}")
+    # Server state on PostgreSQL. The database is outside the corpus by
+    # construction — that is what replaced the two `assertOutsideFolder` guards.
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(Mealplan.Repo, &Ecto.Migrator.run(&1, :up, all: true))
 
-    {:ok, session} = Sandbox.open(tenant, folder)
+    # MEALPLAN_OWNER is the bootstrap: seed the first tenant and its owner so one
+    # household starts with no manual account setup.
+    _tenant_row = Mealplan.Accounts.bootstrap!(tenant_slug, owner)
+
+    Logger.info("meal-plan folder: #{folder}")
+    Logger.info("the household is #{owner}")
+
+    {:ok, session} = Sandbox.open(tenant_slug, folder)
     now = DateTime.utc_now()
 
     # The folder first, then the repository, so the first commit holds the
