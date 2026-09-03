@@ -16,11 +16,9 @@
 // explains the folder layout, because an agent that has to guess the schema
 // will invent one.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { z } from 'zod';
 
-import { resolveInsideFolder } from '../corpus/files.ts';
+import { readCorpusFile, writeCorpusFileDirect } from '../corpus/sandbox.ts';
 import type { Clock } from '../git/repository.ts';
 import { commitIfChanged } from '../git/commit.ts';
 import type { KrogerApi } from '../kroger/api.ts';
@@ -214,29 +212,10 @@ export async function runBash(session: Session, command: string): Promise<BashRe
   };
 }
 
-export async function readCorpusFile(folder: string, requested: string): Promise<string> {
-  const resolved = await resolveInsideFolder(folder, requested);
-  try {
-    return await readFile(resolved, 'utf8');
-  } catch (error) {
-    throw new Error(`could not read "${requested}": ${messageOf(error)}`);
-  }
-}
-
-export async function writeCorpusFile(
-  folder: string,
-  requested: string,
-  content: string,
-): Promise<number> {
-  const resolved = await resolveInsideFolder(folder, requested);
-  await mkdir(path.dirname(resolved), { recursive: true });
-  try {
-    await writeFile(resolved, content, 'utf8');
-  } catch (error) {
-    throw new Error(`could not write "${requested}": ${messageOf(error)}`);
-  }
-  return Buffer.byteLength(content, 'utf8');
-}
+// read_file and write_file are thin re-exports: the sandboxed containment
+// check and the corpus-sized output cap live in corpus/sandbox.ts (ADR 0021),
+// once, for every corpus operation rather than once per tool.
+export { readCorpusFile, writeCorpusFileDirect } from '../corpus/sandbox.ts';
 
 /** stdout and stderr, rendered for a reader rather than for a parser. */
 export function renderBashResult(result: BashResult): string {
@@ -254,8 +233,8 @@ function messageOf(error: unknown): string {
 // ---------------------------------------------------------------------------
 // The two tools that are the network.
 //
-// Both work on ONE document in shopping-lists/, and both resolve their path
-// with resolveInsideFolder, so "cannot reach outside the folder" has exactly
+// Both work on ONE document in shopping-lists/, and both read and write it
+// through corpus/sandbox.ts, so "cannot reach outside the folder" has exactly
 // the shape read_file already has. Both write through session.enqueue() and
 // commit, the write_file pattern, so the write and the commit stay atomic
 // against a racing bash command.
@@ -469,7 +448,6 @@ const CANDIDATES_PER_LINE = 5;
 
 export async function findProducts(options: {
   session: Session;
-  folder: string;
   now: Clock;
   kroger: KrogerApi | null;
   requested: string;
@@ -477,14 +455,13 @@ export async function findProducts(options: {
   /** This server's address, so a refusal can say where a person has to go. */
   baseUrl?: string;
 }): Promise<FindProductsResult> {
-  const { session, folder, now, kroger, requested, message, baseUrl } = options;
+  const { session, now, kroger, requested, message, baseUrl } = options;
   // Searching uses the SERVER'S application token, not the household's, so a
   // link is not needed for it — only a store, because Kroger returns no price
   // without one. Sending is what needs the household's credential.
   if (!kroger) throw new NotConfiguredError();
 
-  const resolved = await resolveInsideFolder(folder, requested);
-  const config = await readKrogerConfig(folder);
+  const config = await readKrogerConfig(session);
   if (!config.store) {
     throw new Error(
       'no Kroger shop is chosen, and Kroger returns no prices at all without one.\n\n' +
@@ -492,9 +469,7 @@ export async function findProducts(options: {
     );
   }
 
-  const before = await readFile(resolved, 'utf8').catch((error: unknown) => {
-    throw new Error(`could not read "${requested}": ${messageOf(error)}`);
-  });
+  const before = await readCorpusFile(session, requested);
   const list = parseList(requested, before);
   const waiting = unmatched(list);
 
@@ -540,7 +515,7 @@ export async function findProducts(options: {
   const after = moveToNotFound(attachCandidates(before, found), notFound);
 
   await session.enqueue(async () => {
-    await writeFile(resolved, after, 'utf8');
+    await writeCorpusFileDirect(session, requested, after);
     await commitIfChanged(session, message, now());
   });
 
@@ -554,7 +529,6 @@ export async function findProducts(options: {
 
 export async function sendToCart(options: {
   session: Session;
-  folder: string;
   now: Clock;
   kroger: KrogerApi | null;
   requested: string;
@@ -563,14 +537,11 @@ export async function sendToCart(options: {
   /** This server's address, so a refusal can say where a person has to go. */
   baseUrl?: string;
 }): Promise<SendToCartResult> {
-  const { session, folder, now, kroger, requested, message, only, baseUrl } = options;
+  const { session, now, kroger, requested, message, only, baseUrl } = options;
   if (!kroger) throw new NotConfiguredError();
   if (!kroger.store.connected) throw new NotLinkedError(baseUrl ?? kroger.publicUrl);
 
-  const resolved = await resolveInsideFolder(folder, requested);
-  const before = await readFile(resolved, 'utf8').catch((error: unknown) => {
-    throw new Error(`could not read "${requested}": ${messageOf(error)}`);
-  });
+  const before = await readCorpusFile(session, requested);
   const list = parseList(requested, before);
 
   // "(check)" is the literal suffix `mealplan shopping-list` appends to a line
@@ -592,7 +563,7 @@ export async function sendToCart(options: {
     );
   }
 
-  const config = await readKrogerConfig(folder);
+  const config = await readKrogerConfig(session);
 
   const sending: Array<{ upc: string; quantity: number; description: string }> = [];
   // The shopping-list line text each entry of `sending` came from, same order
@@ -711,8 +682,7 @@ export async function sendToCart(options: {
   const consumablesPath = 'pantry/consumables.md';
   let updatedConsumables: string | null = null;
   try {
-    const resolvedConsumables = await resolveInsideFolder(folder, consumablesPath);
-    const currentConsumables = await readFile(resolvedConsumables, 'utf8');
+    const currentConsumables = await readCorpusFile(session, consumablesPath);
     const marked = markConsumablesBought(currentConsumables, sendingLines, now());
     if (marked !== currentConsumables) updatedConsumables = marked;
   } catch {
@@ -720,9 +690,9 @@ export async function sendToCart(options: {
   }
 
   await session.enqueue(async () => {
-    await writeFile(resolved, after, 'utf8');
+    await writeCorpusFileDirect(session, requested, after);
     if (updatedConsumables !== null) {
-      await writeFile(await resolveInsideFolder(folder, consumablesPath), updatedConsumables, 'utf8');
+      await writeCorpusFileDirect(session, consumablesPath, updatedConsumables);
     }
     await commitIfChanged(session, message, now());
   });
@@ -962,22 +932,18 @@ export async function findStores(options: {
 
 export async function findWalmartProducts(options: {
   session: Session;
-  folder: string;
   now: Clock;
   walmart: WalmartApi | null;
   requested: string;
   message: string;
 }): Promise<FindProductsResult> {
-  const { session, folder, now, walmart, requested, message } = options;
+  const { session, now, walmart, requested, message } = options;
   // Searching is signed with the SERVER'S own key, and Walmart returns online
   // prices with no store needed — so unlike Kroger this works before any store
   // is chosen. The store matters to the cart LINK, not to the search.
   if (!walmart) throw new WalmartNotConfiguredError();
 
-  const resolved = await resolveInsideFolder(folder, requested);
-  const before = await readFile(resolved, 'utf8').catch((error: unknown) => {
-    throw new Error(`could not read "${requested}": ${messageOf(error)}`);
-  });
+  const before = await readCorpusFile(session, requested);
   const list = parseList(requested, before);
   const waiting = unmatched(list);
 
@@ -1022,7 +988,7 @@ export async function findWalmartProducts(options: {
   const after = moveToNotFound(attachCandidates(before, found), notFound);
 
   await session.enqueue(async () => {
-    await writeFile(resolved, after, 'utf8');
+    await writeCorpusFileDirect(session, requested, after);
     await commitIfChanged(session, message, now());
   });
 
@@ -1036,20 +1002,16 @@ export async function findWalmartProducts(options: {
 
 export async function buildCartLink(options: {
   session: Session;
-  folder: string;
   now: Clock;
   walmart: WalmartApi | null;
   requested: string;
   message: string;
   only?: Array<{ id: string; quantity: number }>;
 }): Promise<CartLinkResult> {
-  const { session, folder, now, walmart, requested, message, only } = options;
+  const { session, now, walmart, requested, message, only } = options;
   if (!walmart) throw new WalmartNotConfiguredError();
 
-  const resolved = await resolveInsideFolder(folder, requested);
-  const before = await readFile(resolved, 'utf8').catch((error: unknown) => {
-    throw new Error(`could not read "${requested}": ${messageOf(error)}`);
-  });
+  const before = await readCorpusFile(session, requested);
   const list = parseList(requested, before);
 
   // The same "(check)" gate as kroger_send_to_cart, for the same reason: the
@@ -1146,7 +1108,7 @@ export async function buildCartLink(options: {
   // The store comes from the folder, and is optional: a link with no storeId
   // fills the cart for whatever fulfilment the household's Walmart account
   // defaults to.
-  const config = await readWalmartConfig(folder);
+  const config = await readWalmartConfig(session);
   const url = walmart.cartLink(
     linking.map((item) => ({ itemId: walmartItemId(item.id), quantity: item.quantity })),
     config.store ? { storeId: config.store, accessPointId: config.accessPoint || undefined } : undefined,
@@ -1157,7 +1119,7 @@ export async function buildCartLink(options: {
   const after = appendCartLink(before, url, now());
 
   await session.enqueue(async () => {
-    await writeFile(resolved, after, 'utf8');
+    await writeCorpusFileDirect(session, requested, after);
     await commitIfChanged(session, message, now());
   });
 

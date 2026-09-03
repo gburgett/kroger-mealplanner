@@ -23,7 +23,7 @@ import {
   readCorpusFile,
   renderBashResult,
   runBash,
-  writeCorpusFile,
+  writeCorpusFileDirect,
   writeFileInputSchema,
 } from '../mcp/tools.ts';
 import {
@@ -145,7 +145,7 @@ export async function runRecheckJob(options: RecheckOptions): Promise<RecheckRes
     }
     debugLog('the folder changed within the last week; asking the model');
 
-    const system = await buildSystemPrompt(session, options.folder);
+    const system = await buildSystemPrompt(session);
     const tools = buildToolSchemas();
     const messages: LlmMessage[] = [{ role: 'user', content: [{ type: 'text', text: TASK_INSTRUCTION }] }];
 
@@ -181,7 +181,7 @@ export async function runRecheckJob(options: RecheckOptions): Promise<RecheckRes
       const results: LlmContentBlock[] = [];
       for (const use of toolUses) {
         debugLog(`the model called ${use.name}`);
-        const { resultText, isError } = await runOneTool(session, options.folder, options.now, use.name, use.input);
+        const { resultText, isError } = await runOneTool(session, options.now, use.name, use.input);
         toolCalls.push({ name: use.name, input: use.input, resultText, isError });
         results.push({ type: 'tool_result', tool_use_id: use.id, content: resultText, is_error: isError });
       }
@@ -200,8 +200,8 @@ export async function runRecheckJob(options: RecheckOptions): Promise<RecheckRes
  * household's agent at connect time (src/corpus/tree.ts, recentHistory), plus
  * the task. Built fresh every run — nothing here is cached across weeks.
  */
-async function buildSystemPrompt(session: Session, folder: string): Promise<string> {
-  const tree = renderTree(await snapshot(folder));
+async function buildSystemPrompt(session: Session): Promise<string> {
+  const tree = renderTree(await snapshot(session));
   const history = await recentHistory(session);
   return (
     `${tree}\n\n${history}\n\n` +
@@ -230,7 +230,6 @@ function buildToolSchemas(): LlmToolSchema[] {
  */
 async function runOneTool(
   session: Session,
-  folder: string,
   now: Clock,
   name: string,
   rawInput: unknown,
@@ -244,12 +243,12 @@ async function runOneTool(
     }
     if (name === 'read_file') {
       const input = readFileSchema.parse(rawInput);
-      const content = await readCorpusFile(folder, input.path);
+      const content = await readCorpusFile(session, input.path);
       return { resultText: content, isError: false };
     }
     if (name === 'write_file') {
       const input = writeFileSchema.parse(rawInput);
-      await writeCorpusFile(folder, input.path, input.content);
+      await writeCorpusFileDirect(session, input.path, input.content);
       await commitIfChanged(session, COMMIT_PREFIX + input.message, now());
       return { resultText: `wrote ${Buffer.byteLength(input.content, 'utf8')} bytes to ${input.path}`, isError: false };
     }

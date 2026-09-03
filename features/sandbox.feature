@@ -251,11 +251,12 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
 
   @security
   Scenario Outline: The file tools cannot be steered outside the folder either
-    read_file and write_file do not run in bubblewrap — the server holds the
-    folder and reads it directly — so they do not get the mount namespace for
-    free. A symbolic link an agent plants dangles in the sandbox and resolves on
-    the host, which is the one way a path could leave the folder without a
-    command being run.
+    read_file and write_file run inside the sandbox, in the same mount
+    namespace a bash command does, but the mount alone does not contain a bare
+    path: /usr is inside the sandbox and outside /workspace, so an unguarded
+    read could walk to it. A symbolic link an agent plants is resolved with
+    realpath against /workspace, in the same namespace the agent planted it
+    in, and anything the result leaves is refused.
 
     Given I have run "ln -s /etc/passwd recipes/escape.md"
     When I read the file "<path>"

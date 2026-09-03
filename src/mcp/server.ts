@@ -97,7 +97,7 @@ import {
   sendToCartDescription,
   sendToCartInputSchema,
   sendToCartOutputSchema,
-  writeCorpusFile,
+  writeCorpusFileDirect,
   writeFileInputSchema,
   writeFileOutputSchema,
 } from './tools.ts';
@@ -260,7 +260,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // config/kroger.md names the page a person has to open and a relative
   // "/kroger" is no use to somebody reading it in a chat window. Nothing is
   // being served yet: the listener answers 503 until `app` is assigned.
-  const scaffolded = await scaffold(session.folder, baseUrl);
+  const scaffolded = await scaffold(session, baseUrl);
   await ensureRepository(session, now);
 
   // Scaffolding an EXISTING folder has to commit itself. `ensureRepository`
@@ -601,7 +601,6 @@ async function completeConsent(
 function mountKroger(app: Express, context: AppContext): void {
   const { kroger, linkDesk, session, now } = context;
   const form = express.urlencoded({ extended: false });
-  const folder = session.folder;
 
   app.get(KROGER_PATH, (request, response, next) => {
     void (async () => {
@@ -613,7 +612,7 @@ function mountKroger(app: Express, context: AppContext): void {
       }
       // Read from the folder rather than asked of Kroger: the store is written
       // down precisely so that nothing has to go and ask.
-      const config = await readKrogerConfig(folder);
+      const config = await readKrogerConfig(session);
       response.setHeader('Cache-Control', 'no-store');
       response.status(200).type('html').send(
         krogerStatusPage({
@@ -759,7 +758,6 @@ function mountKroger(app: Express, context: AppContext): void {
 
       await writeKrogerConfig(
         session,
-        folder,
         now,
         {
           locationId: chosen.locationId,
@@ -802,7 +800,7 @@ function mountKroger(app: Express, context: AppContext): void {
       // The folder's half goes back to "not connected" too. `cat
       // config/kroger.md` has to keep answering the question truthfully, and a
       // store left behind for an account we no longer hold is a lie.
-      await writeKrogerConfig(session, folder, now, null, context.baseUrl);
+      await writeKrogerConfig(session, now, null, context.baseUrl);
       response.setHeader('Cache-Control', 'no-store');
       response.redirect(302, KROGER_PATH);
     })().catch(next);
@@ -893,7 +891,6 @@ async function handleMcp(
 
   const mcp = await buildMcpServer(
     context.session,
-    context.session.folder,
     context.now,
     context.kroger,
     context.baseUrl,
@@ -967,13 +964,12 @@ function loggedTool<Args extends Record<string, unknown> | undefined, Result ext
 
 export async function buildMcpServer(
   session: Session,
-  folder: string,
   now: Clock,
   kroger: KrogerApi | null = null,
   baseUrl?: string,
   walmart: WalmartApi | null = null,
 ): Promise<McpServer> {
-  const tree = renderTree(await snapshot(folder));
+  const tree = renderTree(await snapshot(session));
   const history = await recentHistory(session);
 
   const mcp = new McpServer(
@@ -1044,7 +1040,7 @@ export async function buildMcpServer(
       outputSchema: readFileOutputSchema,
     },
     loggedTool('read_file', async ({ path: requested }) => {
-      const content = await readCorpusFile(folder, requested);
+      const content = await readCorpusFile(session, requested);
       return {
         content: [{ type: 'text', text: content }],
         structuredContent: { content },
@@ -1064,7 +1060,7 @@ export async function buildMcpServer(
       // Written and committed under one turn of the session, so a bash command
       // arriving in between cannot be committed under this message.
       const bytes = await session.enqueue(async () => {
-        const written = await writeCorpusFile(folder, requested, content);
+        const written = await writeCorpusFileDirect(session, requested, content);
         await commitIfChanged(session, message, now());
         return written;
       });
@@ -1090,7 +1086,7 @@ export async function buildMcpServer(
       outputSchema: findProductsOutputSchema,
     },
     loggedTool('kroger_find_products', async ({ path: requested, message }) => {
-      const result = await findProducts({ session, folder, now, kroger, requested, message, baseUrl });
+      const result = await findProducts({ session, now, kroger, requested, message, baseUrl });
       return {
         content: [{ type: 'text', text: renderFindProducts(result) }],
         structuredContent: result,
@@ -1109,7 +1105,6 @@ export async function buildMcpServer(
     loggedTool('kroger_send_to_cart', async ({ path: requested, items, message }) => {
       const result = await sendToCart({
         session,
-        folder,
         now,
         kroger,
         requested,
@@ -1158,7 +1153,7 @@ export async function buildMcpServer(
       outputSchema: findProductsOutputSchema,
     },
     loggedTool('walmart_find_products', async ({ path: requested, message }) => {
-      const result = await findWalmartProducts({ session, folder, now, walmart, requested, message });
+      const result = await findWalmartProducts({ session, now, walmart, requested, message });
       return {
         content: [{ type: 'text', text: renderWalmartFindProducts(result) }],
         structuredContent: result,
@@ -1177,7 +1172,6 @@ export async function buildMcpServer(
     loggedTool('walmart_cart_link', async ({ path: requested, items, message }) => {
       const result = await buildCartLink({
         session,
-        folder,
         now,
         walmart,
         requested,

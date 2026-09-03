@@ -21,13 +21,11 @@
 // shopping against the wrong store, and every list carries the store it was
 // matched against in its own front matter, so the mistake is visible.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import { commitIfChanged } from '../git/commit.ts';
 import { krogerHowTo } from './help.ts';
 import type { Clock } from '../git/repository.ts';
 import type { Session } from '../sandbox/session.ts';
+import { readCorpusFile, writeCorpusFileDirect } from '../corpus/sandbox.ts';
 
 export const KROGER_CONFIG_PATH = 'config/kroger.md';
 
@@ -103,19 +101,16 @@ ${howTo}`;
  */
 export async function writeKrogerConfig(
   session: Session,
-  folder: string,
   now: Clock,
   choice: StoreChoice | null,
   baseUrl?: string,
 ): Promise<void> {
-  const target = path.join(folder, KROGER_CONFIG_PATH);
   const message = choice
     ? `kroger: shop at ${oneLine(choice.name)} for ${choice.modality}`
     : 'kroger: disconnect the account';
 
   await session.enqueue(async () => {
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, krogerConfigDocument(choice, baseUrl), 'utf8');
+    await writeCorpusFileDirect(session, KROGER_CONFIG_PATH, krogerConfigDocument(choice, baseUrl));
     await commitIfChanged(session, message, now());
   });
 }
@@ -129,11 +124,11 @@ export async function writeKrogerConfig(
  * an error — that is the state every folder starts in.
  */
 export async function readKrogerConfig(
-  folder: string,
+  session: Session,
 ): Promise<{ store: string; modality: Modality }> {
   let text = '';
   try {
-    text = await readFile(path.join(folder, KROGER_CONFIG_PATH), 'utf8');
+    text = await readCorpusFile(session, KROGER_CONFIG_PATH);
   } catch {
     /* not there yet */
   }

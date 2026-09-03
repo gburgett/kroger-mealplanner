@@ -25,9 +25,6 @@
 //     and a worked example teaches it everything. It is WRITTEN ONCE AND NEVER
 //     TOUCHED AGAIN — the household owns its shape from the first edit.
 
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import {
   KROGER_CONFIG_PATH,
   krogerConfigDocument,
@@ -38,6 +35,8 @@ import {
   readWalmartConfig,
   walmartConfigDocument,
 } from '../walmart/config.ts';
+import type { Session } from '../sandbox/session.ts';
+import { existsCorpusPath, readCorpusFile, writeCorpusFileDirect } from './sandbox.ts';
 
 export const CORPUS_DIRECTORIES = [
   'config',
@@ -324,23 +323,25 @@ units. It is derived from the folder every time and never stored.
  * `.gitkeep` is left out of the list. It is committed like anything else, but
  * it is scaffolding for the scaffolding and naming it in a message is noise.
  */
-export async function scaffold(folder: string, baseUrl?: string): Promise<string[]> {
+export async function scaffold(session: Session, baseUrl?: string): Promise<string[]> {
   const written: string[] = [];
-  await mkdir(folder, { recursive: true });
+  // The folder itself is already there: `open()` creates it before handing
+  // back a session (src/sandbox/session.ts), which is what scaffold() always
+  // runs against.
 
-  const readme = path.join(folder, 'README.md');
-  if (!(await exists(readme))) {
-    await writeFile(readme, README, 'utf8');
+  if ((await existsCorpusPath(session, 'README.md')) === 'missing') {
+    await writeCorpusFileDirect(session, 'README.md', README);
     written.push('README.md');
   }
 
   for (const directory of CORPUS_DIRECTORIES) {
-    const full = path.join(folder, directory);
-    const isNew = !(await exists(full));
-    await mkdir(full, { recursive: true });
-    const keep = path.join(full, '.gitkeep');
-    if (!(await exists(keep))) {
-      await writeFile(keep, '', 'utf8');
+    const isNew = (await existsCorpusPath(session, directory)) === 'missing';
+    const keep = `${directory}/.gitkeep`;
+    // Writing .gitkeep creates the directory as a side effect — every corpus
+    // write `mkdir -p`s its own parent — so there is nothing left to do for a
+    // directory that already holds one.
+    if ((await existsCorpusPath(session, keep)) === 'missing') {
+      await writeCorpusFileDirect(session, keep, '');
       if (isNew) written.push(`${directory}/`);
     }
   }
@@ -352,9 +353,8 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<string
   // It IS restored when it is missing, which is how a folder that predates this
   // feature gets the example at all. So deleting it is not how a household says
   // "we have no preferences"; emptying it is, and that survives.
-  const preferences = path.join(folder, PREFERENCES_PATH);
-  if (!(await exists(preferences))) {
-    await writeFile(preferences, PREFERENCES_EXAMPLE, 'utf8');
+  if ((await existsCorpusPath(session, PREFERENCES_PATH)) === 'missing') {
+    await writeCorpusFileDirect(session, PREFERENCES_PATH, PREFERENCES_EXAMPLE);
     written.push(PREFERENCES_PATH);
   }
 
@@ -370,12 +370,11 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<string
   // The moment a store IS set the file is never touched here again — that one
   // is a choice, and `writeKrogerConfig` owns it. Nothing is lost either way:
   // the folder is a git repository and every version is in the history.
-  const kroger = path.join(folder, KROGER_CONFIG_PATH);
-  const { store } = await readKrogerConfig(folder);
+  const { store } = await readKrogerConfig(session);
   if (store === '') {
     const wanted = krogerConfigDocument(null, baseUrl);
-    if ((await read(kroger)) !== wanted) {
-      await writeFile(kroger, wanted, 'utf8');
+    if ((await read(session, KROGER_CONFIG_PATH)) !== wanted) {
+      await writeCorpusFileDirect(session, KROGER_CONFIG_PATH, wanted);
       written.push(KROGER_CONFIG_PATH);
     }
   }
@@ -383,12 +382,11 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<string
   // config/walmart.md follows the same rule: boilerplate that is REGENERATED
   // while no store is set, and a choice that is never touched here once one
   // is. The household or the agent writes the choice with write_file.
-  const walmart = path.join(folder, WALMART_CONFIG_PATH);
-  const { store: walmartStore } = await readWalmartConfig(folder);
+  const { store: walmartStore } = await readWalmartConfig(session);
   if (walmartStore === '') {
     const wanted = walmartConfigDocument(null);
-    if ((await read(walmart)) !== wanted) {
-      await writeFile(walmart, wanted, 'utf8');
+    if ((await read(session, WALMART_CONFIG_PATH)) !== wanted) {
+      await writeCorpusFileDirect(session, WALMART_CONFIG_PATH, wanted);
       written.push(WALMART_CONFIG_PATH);
     }
   }
@@ -403,20 +401,11 @@ export async function scaffold(folder: string, baseUrl?: string): Promise<string
   );
 }
 
-/** The file's contents, or null when it is not there. */
-async function read(target: string): Promise<string | null> {
+/** The document's contents, or null when it is not there. */
+async function read(session: Session, target: string): Promise<string | null> {
   try {
-    return await readFile(target, 'utf8');
+    return await readCorpusFile(session, target);
   } catch {
     return null;
-  }
-}
-
-async function exists(target: string): Promise<boolean> {
-  try {
-    await access(target);
-    return true;
-  } catch {
-    return false;
   }
 }

@@ -65,6 +65,21 @@ export type RunOptions = {
   commit?: boolean;
   /** Extra variables for the sandbox. Used to freeze git's clock. */
   env?: Record<string, string>;
+  /**
+   * Piped to the command's stdin, then the pipe is closed. Absent (the
+   * default) leaves stdin `'ignore'`, exactly as every command before this
+   * option existed. Used to carry a corpus document's content into a write
+   * without interpolating it into the command string — see
+   * src/corpus/sandbox.ts.
+   */
+  input?: string;
+  /**
+   * Overrides the session's own per-stream output cap for this one command.
+   * A corpus read needs a larger ceiling than an ordinary bash command's 64 KB
+   * default, so that an ordinary document is never silently truncated — see
+   * ADR 0021.
+   */
+  maxOutputBytes?: number;
 };
 
 export type CommitHook = (
@@ -134,18 +149,18 @@ export class Session {
    * wait for a slot that only it can release.
    */
   runDirect(command: string, options: RunOptions = {}): Promise<RunResult> {
-    return this.#spawn(command, options.env ?? {});
+    return this.#spawn(command, options);
   }
 
   async #runNow(command: string, options: RunOptions): Promise<RunResult> {
-    const result = await this.#spawn(command, options.env ?? {});
+    const result = await this.#spawn(command, options);
     if (options.commit !== false && this.onChange) {
       await this.onChange(this, command);
     }
     return result;
   }
 
-  #spawn(command: string, extraEnv: Record<string, string>): Promise<RunResult> {
+  #spawn(command: string, options: RunOptions): Promise<RunResult> {
     const startedAt = process.hrtime.bigint();
 
     const inner = ['bwrap', ...bubblewrapArgs({
@@ -153,7 +168,7 @@ export class Session {
       workspace: this.folder,
       command,
       seccomp: this.seccompFilter !== null,
-      env: extraEnv,
+      env: options.env ?? {},
     })];
 
     scopeCounter += 1;
@@ -166,7 +181,14 @@ export class Session {
     // offset with the child, so the second command would hand bubblewrap an
     // empty filter and get no seccomp at all.
     const filterFd = this.seccompFilter === null ? null : openSync(this.seccompFilter, 'r');
-    const stdio: Array<'ignore' | 'pipe' | number> = ['ignore', 'pipe', 'pipe'];
+    // 'pipe' only when there is something to write. Every command before this
+    // option existed got 'ignore', and still does — a corpus write is the only
+    // caller that passes input.
+    const stdio: Array<'ignore' | 'pipe' | number> = [
+      options.input === undefined ? 'ignore' : 'pipe',
+      'pipe',
+      'pipe',
+    ];
     if (filterFd !== null) {
       while (stdio.length < SECCOMP_FD) stdio.push('ignore');
       stdio[SECCOMP_FD] = filterFd;
@@ -183,6 +205,15 @@ export class Session {
       detached: true,
     });
 
+    if (options.input !== undefined) {
+      // A dead or non-writable stdin (the command exited before reading, or
+      // never opened one) would otherwise raise an unhandled 'error' on the
+      // stream; the command's own exit code is what the caller sees either
+      // way, so this is a no-op guard, not a swallow of a real failure.
+      child.stdin?.on('error', () => undefined);
+      child.stdin?.end(options.input, 'utf8');
+    }
+
     return new Promise<RunResult>((resolve, reject) => {
       let settled = false;
       const closeFilter = () => {
@@ -196,8 +227,9 @@ export class Session {
       };
       child.once('spawn', closeFilter);
 
-      const stdout = new Collector(this.maxOutputBytes);
-      const stderr = new Collector(this.maxOutputBytes);
+      const cap = options.maxOutputBytes ?? this.maxOutputBytes;
+      const stdout = new Collector(cap);
+      const stderr = new Collector(cap);
       child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
       child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
 

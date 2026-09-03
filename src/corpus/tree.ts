@@ -7,16 +7,16 @@
 //
 // Counts inside each directory are always shown so the agent knows the full
 // extent of what exists.
-
-import { readdir, stat } from 'node:fs/promises';
-import path from 'node:path';
+//
+// The walk itself runs inside the sandbox — see src/corpus/sandbox.ts and
+// ADR 0021 — rather than as a host-side readdir/stat, so this file only does
+// the grouping, sorting and MAX_PER_DIR cap a host walk used to do inline.
 
 import { CORPUS_DIRECTORIES } from './scaffold.ts';
+import { listCorpusEntries } from './sandbox.ts';
+import type { Session } from '../sandbox/session.ts';
 
 const MAX_PER_DIR = 5;
-
-/** Files and directories excluded from the tree listing. */
-const IGNORED = new Set(['.gitkeep', '.git']);
 
 export interface DirListing {
   /** Directory name relative to the meal-plan root. */
@@ -41,41 +41,28 @@ export interface TreeSnapshot {
  * shopping-lists). Files inside each directory are sorted lexicographically
  * and capped at the last MAX_PER_DIR entries.
  */
-export async function snapshot(folder: string): Promise<TreeSnapshot> {
-  const rootFiles: string[] = [];
-  try {
-    const entries = await readdir(folder);
-    for (const entry of entries.sort()) {
-      // Dotfiles are bookkeeping (`.git`, `.mealplan-migrations.json`), not
-      // part of the folder a person or an agent plans over.
-      if (entry.startsWith('.') || IGNORED.has(entry)) continue;
-      const full = path.join(folder, entry);
-      try {
-        const s = await stat(full);
-        if (s.isFile()) rootFiles.push(entry);
-      } catch {
-        // Gone between listing and stat — skip.
-      }
-    }
-  } catch {
-    // Folder does not exist.
+export async function snapshot(session: Session): Promise<TreeSnapshot> {
+  const entries = await listCorpusEntries(session, CORPUS_DIRECTORIES);
+
+  const rootFiles = entries
+    .filter((entry) => entry.dir === 'ROOT')
+    .map((entry) => entry.name)
+    .sort();
+
+  const byDirectory = new Map<string, string[]>();
+  for (const entry of entries) {
+    if (entry.dir === 'ROOT') continue;
+    const names = byDirectory.get(entry.dir) ?? [];
+    names.push(entry.name);
+    byDirectory.set(entry.dir, names);
   }
 
-  const dirs: DirListing[] = [];
-  for (const dir of CORPUS_DIRECTORIES) {
-    const full = path.join(folder, dir);
-    let all: string[] = [];
-    try {
-      all = (await readdir(full))
-        .filter((e) => !IGNORED.has(e) && !e.startsWith('.'))
-        .sort();
-    } catch {
-      // Directory does not exist yet.
-    }
+  const dirs: DirListing[] = CORPUS_DIRECTORIES.map((dir) => {
+    const all = (byDirectory.get(dir) ?? []).sort();
     const total = all.length;
     const files = total > MAX_PER_DIR ? all.slice(-MAX_PER_DIR) : all;
-    dirs.push({ name: dir, total, files });
-  }
+    return { name: dir, total, files };
+  });
 
   return { dirs, rootFiles };
 }

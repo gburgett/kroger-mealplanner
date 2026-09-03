@@ -21,13 +21,14 @@
 // session-open tree view skips them. Each migration's run commits the corpus
 // change and the updated ledger together, under the migration's own name.
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { commitIfChanged } from '../git/commit.ts';
 import type { Clock } from '../git/repository.ts';
 import type { Session } from '../sandbox/session.ts';
+import { readCorpusFile, writeCorpusFileDirect } from '../corpus/sandbox.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const MIGRATIONS_DIR = path.resolve(here, '..', '..', 'migrations');
@@ -57,10 +58,9 @@ export type MigrationRun = {
  */
 export async function runMigrations(options: MigrationOptions): Promise<MigrationRun[]> {
   const { session, now } = options;
-  const ledgerPath = path.join(session.folder, MIGRATIONS_LEDGER);
 
   const files = await listMigrations();
-  const applied = await readApplied(ledgerPath);
+  const applied = await readApplied(session);
   const done: MigrationRun[] = [];
 
   for (const file of files) {
@@ -83,7 +83,7 @@ export async function runMigrations(options: MigrationOptions): Promise<Migratio
       }
 
       applied.add(id);
-      await writeApplied(ledgerPath, applied);
+      await writeApplied(session, applied);
       await commitIfChanged(session, `migration ${id}`, now());
     });
 
@@ -101,9 +101,9 @@ async function listMigrations(): Promise<string[]> {
   }
 }
 
-async function readApplied(ledgerPath: string): Promise<Set<string>> {
+async function readApplied(session: Session): Promise<Set<string>> {
   try {
-    const text = await readFile(ledgerPath, 'utf8');
+    const text = await readCorpusFile(session, MIGRATIONS_LEDGER);
     const parsed = JSON.parse(text) as unknown;
     const ids = Array.isArray(parsed)
       ? parsed
@@ -116,11 +116,10 @@ async function readApplied(ledgerPath: string): Promise<Set<string>> {
   }
 }
 
-async function writeApplied(ledgerPath: string, applied: Set<string>): Promise<void> {
-  await mkdir(path.dirname(ledgerPath), { recursive: true });
-  await writeFile(
-    ledgerPath,
+async function writeApplied(session: Session, applied: Set<string>): Promise<void> {
+  await writeCorpusFileDirect(
+    session,
+    MIGRATIONS_LEDGER,
     `${JSON.stringify({ applied: [...applied].sort() }, null, 2)}\n`,
-    'utf8',
   );
 }

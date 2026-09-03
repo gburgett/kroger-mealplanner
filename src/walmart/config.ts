@@ -18,8 +18,8 @@
 // the store id and access point, and the worst a wrong value does is build a
 // link for the wrong store, which the household sees when they open it.
 
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+import type { Session } from '../sandbox/session.ts';
+import { readCorpusFile } from '../corpus/sandbox.ts';
 
 export const WALMART_CONFIG_PATH = 'config/walmart.md';
 
@@ -88,11 +88,11 @@ server's own signing key and lives outside this folder.
  * household's Walmart account defaults to.
  */
 export async function readWalmartConfig(
-  folder: string,
+  session: Session,
 ): Promise<{ store: string; accessPoint: string }> {
   let text = '';
   try {
-    text = await readFile(path.join(folder, WALMART_CONFIG_PATH), 'utf8');
+    text = await readCorpusFile(session, WALMART_CONFIG_PATH);
   } catch {
     /* not there yet */
   }
