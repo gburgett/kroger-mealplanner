@@ -2,10 +2,10 @@ import Config
 
 # Configure your database
 config :mealplan, Mealplan.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "mealplan_dev",
+  username: System.get_env("PGUSER", "exedev"),
+  password: System.get_env("PGPASSWORD", "mealplan_dev"),
+  hostname: System.get_env("PGHOST", "localhost"),
+  database: System.get_env("PGDATABASE", "mealplan_dev"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10

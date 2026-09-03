@@ -12,8 +12,13 @@ defmodule Mealplan.Application do
       Mealplan.Repo,
       {DNSCluster, query: Application.get_env(:mealplan, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Mealplan.PubSub},
-      # Start a worker by calling: Mealplan.Worker.start_link(arg)
-      # {Mealplan.Worker, arg},
+      # The sandbox session layer: one Session process per tenant, registered
+      # by tenant id. See Mealplan.Sandbox.
+      {Registry, keys: :unique, name: Mealplan.Sandbox.Registry},
+      {DynamicSupervisor, strategy: :one_for_one, name: Mealplan.Sandbox.DynamicSupervisor},
+      # Opens the household's session, scaffolds the corpus, runs migrations,
+      # and prints the start-up health check.
+      Mealplan.Boot,
       # Start to serve requests, typically the last entry
       MealplanWeb.Endpoint
     ]

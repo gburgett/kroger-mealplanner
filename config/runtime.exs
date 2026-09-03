@@ -21,7 +21,47 @@ if System.get_env("PHX_SERVER") do
 end
 
 config :mealplan, MealplanWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [port: String.to_integer(System.get_env("MEALPLAN_PORT") || System.get_env("PORT", "4000"))]
+
+# --- MEALPLAN_* runtime configuration, for every environment ---------------
+#
+# Mirrors the environment variables `server.ts` reads. Runs for `mix release`
+# too, so the systemd unit only has to set these.
+
+get = fn key, default -> System.get_env(key) || default end
+
+walmart_private_key =
+  cond do
+    key = System.get_env("WALMART_PRIVATE_KEY") -> key
+    path = System.get_env("WALMART_PRIVATE_KEY_PATH") -> File.read!(path)
+    true -> nil
+  end
+
+config :mealplan,
+  owner: get.("MEALPLAN_OWNER", "gordon@gordonburgett.net"),
+  folder: get.("MEALPLAN_FOLDER", Path.expand("~/meal-plan")),
+  tenant: get.("MEALPLAN_TENANT", "household"),
+  public_url: System.get_env("MEALPLAN_PUBLIC_URL"),
+  kroger_client_id: get.("KROGER_CLIENT_ID", ""),
+  kroger_client_secret: get.("KROGER_CLIENT_SECRET", ""),
+  kroger_api_base: System.get_env("KROGER_API_BASE"),
+  walmart_consumer_id: get.("WALMART_CONSUMER_ID", ""),
+  walmart_private_key: walmart_private_key,
+  walmart_api_base: System.get_env("WALMART_API_BASE"),
+  walmart_cart_base: System.get_env("WALMART_CART_BASE"),
+  walmart_key_version: get.("WALMART_KEY_VERSION", "1"),
+  walmart_publisher_id: System.get_env("WALMART_PUBLISHER_ID"),
+  llm_base: System.get_env("MEALPLAN_LLM_BASE")
+
+config :mealplan, Mealplan.Sandbox,
+  image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
+  seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER")
+
+# The database lives outside the meal-plan folder by construction. `mix release`
+# and dev both accept DATABASE_URL; dev falls back to the config/dev.exs values.
+if url = System.get_env("DATABASE_URL") do
+  config :mealplan, Mealplan.Repo, url: url
+end
 
 if config_env() == :prod do
   database_url =
