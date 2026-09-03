@@ -37,6 +37,9 @@ defmodule MealplanWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # anubis_mcp's plug (mounted at /mcp) takes the JSON-RPC message straight from
+  # conn.body_params when Plug.Parsers has already decoded it, so the parser
+  # runs for every route including /mcp.
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
