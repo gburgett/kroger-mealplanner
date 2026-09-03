@@ -672,6 +672,24 @@ defmodule Mealplan.Mcp.Tools do
     }
   ]
 
+  # --- the interactive tool bodies, for the weekly recheck job --------------
+  #
+  # ADR 0018's unattended caller drives the SAME bash / read_file / write_file
+  # behaviour, so `Mealplan.Recheck` builds its LLM tool schemas from these and
+  # renders results with `render_bash_result/1`. The verbatim text has one home.
+  @doc false
+  def bash_description, do: @bash_description
+  @doc false
+  def read_file_description, do: @read_file_description
+  @doc false
+  def write_file_description, do: @write_file_description
+  @doc false
+  def bash_input_schema, do: @bash_input_schema
+  @doc false
+  def read_file_input_schema, do: @read_file_input_schema
+  @doc false
+  def write_file_input_schema, do: @write_file_input_schema
+
   @doc "The wire descriptors for `tools/list`, in the MCP shape."
   @spec list() :: [map()]
   def list do
@@ -897,8 +915,11 @@ defmodule Mealplan.Mcp.Tools do
   end
 
   def call("walmart_find_products", args, tenant, now) do
-    with {:ok, path} <- required_string(args, "path", @fwp_path_required),
-         {:ok, message} <- required_trimmed(args, "message", @fwp_message_required) do
+    with {:ok, %{"path" => path, "message" => message}} <-
+           required_all(args, [
+             {"path", :string, @fwp_path_required},
+             {"message", :trimmed, @fwp_message_required}
+           ]) do
       run_network(fn ->
         walmart = Mealplan.Walmart.Api.new()
         result = Shopping.find_walmart_products(session!(tenant), now, walmart, path, message)
@@ -917,8 +938,11 @@ defmodule Mealplan.Mcp.Tools do
   end
 
   def call("walmart_cart_link", args, tenant, now) do
-    with {:ok, path} <- required_string(args, "path", @cl_path_required),
-         {:ok, message} <- required_trimmed(args, "message", @cl_message_required),
+    with {:ok, %{"path" => path, "message" => message}} <-
+           required_all(args, [
+             {"path", :string, @cl_path_required},
+             {"message", :trimmed, @cl_message_required}
+           ]),
          {:ok, only} <- parse_cart_items(Map.get(args, "items"), "id", @cl_id_required) do
       run_network(fn ->
         walmart = Mealplan.Walmart.Api.new()
@@ -1025,7 +1049,8 @@ defmodule Mealplan.Mcp.Tools do
   end
 
   # stdout and stderr, rendered for a reader rather than for a parser.
-  defp render_bash_result(result) do
+  @doc false
+  def render_bash_result(result) do
     parts =
       []
       |> maybe_append(result.stdout != "", String.replace_suffix(result.stdout, "\n", ""))
@@ -1040,6 +1065,36 @@ defmodule Mealplan.Mcp.Tools do
 
   defp maybe_append(list, true, value), do: list ++ [value]
   defp maybe_append(list, false, _value), do: list
+
+  # Check several required arguments at once and report EVERY one that is
+  # missing or blank, joined, the way the TypeScript server's Zod `inputSchema`
+  # did — it collected all issues rather than stopping at the first. It matters
+  # for the tools a caller can reach with `{}` (the Walmart tools, which the
+  # step file has no VALID_ARGS entry for): `sandbox.feature` asserts the
+  # refusal names each argument, so one refusal has to name them all.
+  #
+  # `specs` is a list of `{key, :string | :trimmed, message}`. Returns
+  # `{:ok, %{key => value}}` or `{:refuse, joined}`.
+  defp required_all(args, specs) do
+    {values, refusals} =
+      Enum.reduce(specs, {%{}, []}, fn {key, kind, message}, {values, refusals} ->
+        checked =
+          case kind do
+            :string -> required_string(args, key, message)
+            :trimmed -> required_trimmed(args, key, message)
+          end
+
+        case checked do
+          {:ok, value} -> {Map.put(values, key, value), refusals}
+          {:refuse, _} -> {values, [message | refusals]}
+        end
+      end)
+
+    case refusals do
+      [] -> {:ok, values}
+      _ -> {:refuse, refusals |> Enum.reverse() |> Enum.join("\n")}
+    end
+  end
 
   # A required argument that must be a non-empty string.
   defp required_string(args, key, message) do

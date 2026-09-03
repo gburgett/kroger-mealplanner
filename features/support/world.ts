@@ -1,111 +1,212 @@
-// The World each scenario gets: a fresh meal-plan folder, a real MCP server, a
-// real OAuth handshake, and a real MCP client talking to it.
+// The World each scenario gets: a fresh meal-plan folder and a real Elixir
+// server, spawned as its own OS process on a reserved port and driven over
+// loopback — the way a real MCP client reaches it.
 //
-// Nothing here is stubbed. A `When` step is a web request against our own API,
-// and a `Then` step reads the files that ended up on disk.
+// This replaces the in-process `startServer` the TypeScript server offered
+// (ADR 0020 / plan 0005). The server is Elixir now, so a scenario cannot call
+// it as a function. It sets the same knobs `startServer` took — folder, owner,
+// frozen clock, the three mock base URLs — as environment variables instead,
+// and reads state back the way an operator would: `git` on the host against the
+// folder, and SQL against the test database for the two token stores.
 //
-// Since ADR 0009 that request carries a bearer token, and the token is one the
-// scenario actually went and got: register, consent as the household, exchange
-// the code. See features/support/oauth.ts for why it is done the long way.
+// Nothing here is stubbed. A `When` step is a web request against the running
+// server, and a `Then` step reads the files that ended up on disk. The only
+// things ever mocked are the three third-party HTTP APIs — Kroger, Walmart and
+// the exe.dev LLM gateway.
 
 import { setWorldConstructor, World, type IWorldOptions } from '@cucumber/cucumber';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 
-import { DEFAULT_OWNER, startServer, type RunningServer } from '../../src/mcp/server.ts';
-import type { RunResult, Session } from '../../src/sandbox/session.ts';
+import { DEFAULT_IMAGE_ROOT, DEFAULT_SECCOMP_FILTER } from '../../src/sandbox/session.ts';
 import type { BashResult } from '../../src/mcp/tools.ts';
+import type { RecheckResult } from '../../src/jobs/recheck.ts';
 import { CLIENT_ID, CLIENT_SECRET, KrogerMock } from './kroger.ts';
 import { CONSUMER_ID as WALMART_CONSUMER_ID, WalmartMock, walmartTestKeys } from './walmart.ts';
 import { LlmMock } from './llm.ts';
 import { HouseholdOAuthClient } from './oauth.ts';
-import { runRecheckJob, type RecheckResult } from '../../src/jobs/recheck.ts';
+
+/** The household the server bootstraps when MEALPLAN_OWNER is not overridden. */
+export const DEFAULT_OWNER = 'gordon@gordonburgett.net';
+
+/** The MCP endpoint path, appended to the base URL for the client. */
+const MCP_PATH = '/mcp';
+
+/** The repository root — where `mix` is run. */
+const REPO_ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
 /**
- * A frozen clock. Scenarios use fixed dates, so the git history a scenario
- * produces has to be fixed too. It advances one second per reading so that
- * commits stay in order without anybody having to wait for a real second.
+ * The instant every scenario pins the server's clock to, passed as
+ * MEALPLAN_CLOCK. The old FrozenClock ticked one second per reading; a linear
+ * git history stays correctly ordered without that, so the server reads one
+ * fixed instant. Matches FrozenClock.START (2026-08-23 12:00 UTC).
  */
-export class FrozenClock {
-  static readonly START = Date.UTC(2026, 7, 23, 12, 0, 0);
-  #ticks = 0;
+const FROZEN_CLOCK_ISO = '2026-08-23T12:00:00Z';
 
-  now = (): Date => {
-    const at = new Date(FrozenClock.START + this.#ticks * 1000);
-    this.#ticks += 1;
-    return at;
-  };
+const TENANT_SLUG = 'scenario';
+
+// config/test.exs points Ecto at mealplan_test with these credentials. The
+// harness talks to the same database directly for the two things a step needs
+// that are not HTTP: ageing a token out, and reading back what got stored.
+const PG = {
+  host: process.env.PGHOST ?? 'localhost',
+  user: process.env.PGUSER ?? 'exedev',
+  password: process.env.PGPASSWORD ?? 'mealplan_dev',
+  database: `mealplan_test${process.env.MIX_TEST_PARTITION ?? ''}`,
+};
+
+// The tenant-scoped rows a scenario must not carry into the next. TRUNCATE from
+// `tenants` with CASCADE clears the children; naming them keeps the intent
+// legible, and RESTART IDENTITY keeps ids from creeping across a run.
+const SCENARIO_TABLES = [
+  'tenants',
+  'users',
+  'memberships',
+  'oauth_clients',
+  'oauth_codes',
+  'oauth_access_tokens',
+  'oauth_refresh_tokens',
+  'kroger_tokens',
+].join(', ');
+
+/**
+ * A stand-in path for the Kroger token store. There is no file any more — the
+ * credential is a row in Postgres — but two scenarios still assert it is
+ * outside the folder and unreadable from the sandbox, and both hold for any
+ * absolute path the mount does not bind.
+ */
+const KROGER_TOKEN_STORE = '/var/lib/postgresql/mealplan/kroger_tokens';
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Signal a whole process group (the detached child and its BEAM), ignoring ESRCH. */
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // already gone
+  }
+}
+
+/** SHA-256 hex, lowercase — the exact shape `Mealplan.Auth.Store.hash/1` stores. */
+function tokenHash(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+/** Single-quote a value for a SQL string literal. */
+function lit(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/** Run psql against the test database and return trimmed stdout. Throws on error. */
+function psql(query: string): string {
+  return execFileSync(
+    'psql',
+    ['-h', PG.host, '-U', PG.user, '-d', PG.database, '-v', 'ON_ERROR_STOP=1', '-Atqc', query],
+    { env: { ...process.env, PGPASSWORD: PG.password }, encoding: 'utf8' },
+  ).trim();
+}
+
+/** `tenant_id = (this scenario's tenant)`, as a SQL scalar subquery. */
+const TENANT_ID_SQL = `(SELECT id FROM tenants WHERE slug = ${lit(TENANT_SLUG)})`;
+
+type HostResult = { stdout: string; stderr: string; exitCode: number };
+
+function execFileAsync(
+  file: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<HostResult> {
+  return new Promise((resolve) => {
+    execFile(
+      file,
+      args,
+      { cwd: options.cwd, env: options.env, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const code =
+          error && typeof (error as { code?: unknown }).code === 'number'
+            ? (error as { code: number }).code
+            : error
+              ? 1
+              : 0;
+        resolve({ stdout: stdout.toString(), stderr: stderr.toString(), exitCode: code });
+      },
+    );
+  });
+}
+
+/** Run a shell command on the host, in `cwd`, and report both streams and the code. */
+function runHost(command: string, cwd: string, env?: Record<string, string>): Promise<HostResult> {
+  return execFileAsync('bash', ['-c', command], { cwd, env: { ...process.env, ...env } });
+}
+
+/**
+ * Compile the app and make sure the test database is migrated. Runs once for
+ * the whole suite; every scenario after the first reuses the warm build.
+ */
+let toolchain: Promise<void> | undefined;
+function prepareToolchain(): Promise<void> {
+  toolchain ??= (async () => {
+    const mixEnv = { ...process.env, MIX_ENV: 'test' };
+    const compile = await execFileAsync('mix', ['compile'], { cwd: REPO_ROOT, env: mixEnv });
+    if (compile.exitCode !== 0) {
+      throw new Error(`mix compile failed:\n${compile.stdout}\n${compile.stderr}`);
+    }
+    const create = await execFileAsync('mix', ['ecto.create', '--quiet'], { cwd: REPO_ROOT, env: mixEnv });
+    if (create.exitCode !== 0 && !/already/i.test(create.stdout + create.stderr)) {
+      throw new Error(`mix ecto.create failed:\n${create.stdout}\n${create.stderr}`);
+    }
+    const migrate = await execFileAsync('mix', ['ecto.migrate', '--quiet'], { cwd: REPO_ROOT, env: mixEnv });
+    if (migrate.exitCode !== 0) {
+      throw new Error(`mix ecto.migrate failed:\n${migrate.stdout}\n${migrate.stderr}`);
+    }
+  })();
+  return toolchain;
 }
 
 export class MealPlanWorld extends World {
   folder = '';
   /**
-   * The token store, in its own temp directory.
-   *
-   * Two things it must not be, and both would be silent: inside the meal-plan
-   * folder, which the server refuses outright, and the real
-   * ~/.local/state/mealplan/auth.json, which would leak state between
-   * scenarios and stamp on whatever the developer is actually running.
+   * A path the OAuth token store would live at if it were a file. It is a
+   * Postgres table now, but scenarios still assert the store is outside the
+   * folder and unreadable from the sandbox, and a temp path nobody binds keeps
+   * both true.
    */
   statePath = '';
   owner = DEFAULT_OWNER;
-  server: RunningServer | null = null;
   client: Client | null = null;
-  clock = new FrozenClock();
 
-  /**
-   * The port, reserved before the server starts.
-   *
-   * Every scenario now runs with a configured public URL rather than one
-   * derived from the bound address, because Kroger matches the redirect URI
-   * exactly and the server refuses to start with credentials and no public URL.
-   * The port has to be known before startServer is called, so it is asked for
-   * and given back. A restart reuses it, which is more faithful anyway: the
-   * address a client was given does not change because the process did.
-   */
+  /** The reserved port. Fixed before the server starts; a restart reuses it. */
   port = 0;
 
-  /**
-   * Kroger, stood in for. One of the three mocks in the suite — see
-   * features/support/kroger.ts.
-   */
+  /** The spawned server process, and everything it wrote to its two streams. */
+  proc: ChildProcess | null = null;
+  serverLog = '';
+
+  /** Kroger, stood in for. features/support/kroger.ts. */
   kroger: KrogerMock | null = null;
-
-  /**
-   * Walmart, stood in for. The second mock, in the one shape the rule
-   * permits: a third-party HTTP API, one file. features/support/walmart.ts.
-   */
+  /** Walmart, stood in for. features/support/walmart.ts. */
   walmart: WalmartMock | null = null;
-
-  /**
-   * The exe.dev LLM gateway, stood in for. The third mock, in the one shape
-   * the rule permits — features/support/llm.ts. Only the weekly recheck job
-   * (ADR 0018) ever calls it; the household's own assistant never does.
-   */
+  /** The exe.dev LLM gateway, stood in for. features/support/llm.ts. */
   llm: LlmMock | null = null;
 
-  /**
-   * Where the Walmart signing key is written, OUTSIDE the meal-plan folder,
-   * so the containment scenario has a real path to try to read.
-   */
+  /** Where the Walmart signing key is written, OUTSIDE the meal-plan folder. */
   walmartKeyPath = '';
 
-  /**
-   * "Today", for the weekly recheck job alone. Set by a `Given today is`
-   * step; the job's own staleness gate and commit timestamps read this
-   * instead of `this.clock` so a scenario can pick a fixed date without
-   * disturbing the ticking clock every other scenario in the suite relies on.
-   */
+  /** "Today", for the weekly recheck job alone. Set by a `Given today is` step. */
   recheckToday: Date | null = null;
-
-  /** What the last `runRecheckJob` call returned. */
+  /** What the last recheck run returned. */
   recheckResult: RecheckResult | null = null;
 
   /** Which browser session the raw-request steps are speaking as. */
@@ -124,18 +225,14 @@ export class MealPlanWorld extends World {
   /** Pieces of documentation a scenario has collected, to assert against together. */
   documentation: string[] = [];
 
-  /**
-   * The household's own client. It outlives a restart on purpose: keeping the
-   * tokens across one is what "the token still works after the server
-   * restarts" actually measures.
-   */
+  /** The household's own client. It outlives a restart on purpose. */
   household = new HouseholdOAuthClient(DEFAULT_OWNER);
 
   /** The result of the most recent bash command. */
   lastResult: BashResult | null = null;
-  /** What the most recent write_file wrote, for "reading X returns that content". */
+  /** What the most recent write_file wrote. */
   lastWritten: { path: string; content: string } | null = null;
-  /** Every command this scenario has run, so "I never ran a git command" is checkable. */
+  /** Every command this scenario has run. */
   commandsRun: string[] = [];
   /** How many commits the folder had once it was scaffolded and opened. */
   commitsAtStart = 0;
@@ -153,13 +250,7 @@ export class MealPlanWorld extends World {
   transport: StreamableHTTPClientTransport | null = null;
   /** An MCP session id captured before a restart, to replay against the new process. */
   rememberedSessionId: string | null = null;
-  /**
-   * Seed the (fresh) folder before the server first opens it over it.
-   *
-   * Set by a tagged Before hook for scenarios that need the corpus to start in
-   * a shape that predates a migration, so the migration runs at session open —
-   * which is the moment under test.
-   */
+  /** Seed the (fresh) folder before the server first opens over it. */
   seedBeforeOpen: (() => Promise<void>) | null = null;
 
   constructor(options: IWorldOptions) {
@@ -173,8 +264,6 @@ export class MealPlanWorld extends World {
     this.walmart = await WalmartMock.start();
     this.llm = await LlmMock.start();
     // The signing key lives outside the folder, as it would in production.
-    // The key is passed to the server as an option rather than through
-    // process.env — the scenarios share one process, and a mutation would leak.
     this.walmartKeyPath = path.join(path.dirname(this.statePath), 'walmart-key.pem');
     await writeFile(this.walmartKeyPath, walmartTestKeys().privateKey, { mode: 0o600 });
     // The seed runs before the server's first open over this folder, so a
@@ -183,43 +272,101 @@ export class MealPlanWorld extends World {
       await this.seedBeforeOpen();
       this.seedBeforeOpen = null;
     }
-    // The port is asked for only after the three mocks have bound theirs.
-    // freePort() learns a free port and gives it straight back, which leaves a
-    // gap before startServer binds it. Each mock's listen(0) would be glad to
-    // take that just-released port, and then startServer would fail with
-    // EADDRINUSE. With the mocks already listening, the kernel hands freePort()
-    // a port nothing else is going to grab, and nothing else asks for one
-    // before launch().
+    // The port is asked for only after the three mocks have bound theirs — see
+    // freePort's note. A fresh database for the scenario, then the server.
     this.port = await freePort();
+    this.resetDatabase();
     await this.launch();
     this.commitsAtStart = await this.commitCount();
   }
 
-  /** Start a server over the existing folder, and connect a client to it. */
+  /** Empty the tenant-scoped tables so this scenario starts from nothing. */
+  resetDatabase(): void {
+    psql(`TRUNCATE ${SCENARIO_TABLES} RESTART IDENTITY CASCADE`);
+  }
+
+  /** Spawn the Elixir server over the existing folder, and connect a client. */
   async launch(): Promise<void> {
-    this.server = await startServer({
-      folder: this.folder,
-      tenant: 'scenario',
-      now: this.clock.now,
-      owner: this.owner,
-      statePath: this.statePath,
-      port: this.port,
-      publicUrl: `http://127.0.0.1:${this.port}`,
-      // Passed as options, NEVER as process.env: the scenarios share one
-      // process, so a mutation here would leak into the next one. The same
-      // reasoning as statePath, and the reason the mock takes a base URL at all.
-      krogerApiBase: this.kroger?.base,
-      krogerClientId: CLIENT_ID,
-      krogerClientSecret: CLIENT_SECRET,
-      walmartApiBase: this.walmart?.base,
-      // The cart link host is a second seam because it is a second host in
-      // production — www.walmart.com against developer.api.walmart.com.
-      walmartCartBase: this.walmart?.base,
-      walmartConsumerId: WALMART_CONSUMER_ID,
-      walmartPrivateKey: walmartTestKeys().privateKey,
+    await prepareToolchain();
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      MIX_ENV: 'test',
+      // Turns on the HTTP server and the ordinary connection pool. `mix test`
+      // (ExUnit) leaves both off.
+      CUCUMBER: '1',
+      PHX_SERVER: 'true',
+      MEALPLAN_PORT: String(this.port),
+      // The OAuth issuer and Kroger redirect base. Configuration, never a Host
+      // header — and it has to match the reserved port before the bind.
+      MEALPLAN_PUBLIC_URL: `http://127.0.0.1:${this.port}`,
+      MEALPLAN_OWNER: this.owner,
+      MEALPLAN_FOLDER: this.folder,
+      MEALPLAN_TENANT: TENANT_SLUG,
+      MEALPLAN_CLOCK: FROZEN_CLOCK_ISO,
+      MEALPLAN_IMAGE_ROOT: DEFAULT_IMAGE_ROOT,
+      MEALPLAN_SECCOMP_FILTER: DEFAULT_SECCOMP_FILTER,
+      // The three mock seams. Passed as env because the server is a separate
+      // process now; the reasoning that kept them out of process.env in-process
+      // (one shared process) no longer applies.
+      MEALPLAN_LLM_BASE: this.llm?.base,
+      KROGER_API_BASE: this.kroger?.base,
+      KROGER_CLIENT_ID: CLIENT_ID,
+      KROGER_CLIENT_SECRET: CLIENT_SECRET,
+      WALMART_API_BASE: this.walmart?.base,
+      // A second host in production (www.walmart.com vs developer.api...), a
+      // second seam here.
+      WALMART_CART_BASE: this.walmart?.base,
+      WALMART_CONSUMER_ID: WALMART_CONSUMER_ID,
+      WALMART_PRIVATE_KEY: walmartTestKeys().privateKey,
+      ELIXIR_ERL_OPTIONS: '+fnu',
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+    };
+
+    // `detached` puts the BEAM in its own process group. `mix` on this box is
+    // a mise shim that does not `exec` all the way to the BEAM, so a signal to
+    // the direct child would leave the BEAM running; the group gets them both.
+    const child = spawn('mix', ['run', '--no-halt', '--no-compile'], {
+      cwd: REPO_ROOT,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
+    this.proc = child;
+    this.serverLog = '';
+    child.stdout?.on('data', (chunk) => {
+      this.serverLog += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk) => {
+      this.serverLog += chunk.toString();
+    });
+
+    await this.waitForReady(child);
+
     this.client = await this.connect(this.household);
     this.tools = (await this.client.listTools()).tools;
+  }
+
+  /** Poll the root path until the server answers, or the process dies trying. */
+  async waitForReady(child: ChildProcess): Promise<void> {
+    const url = `http://127.0.0.1:${this.port}/`;
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(
+          `the server exited (${child.exitCode ?? child.signalCode}) before it answered:\n${this.serverLog}`,
+        );
+      }
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
+        if (response.status === 200) return;
+      } catch {
+        // not up yet
+      }
+      await delay(200);
+    }
+    throw new Error(`the server did not answer on ${url} within 45s:\n${this.serverLog}`);
   }
 
   /**
@@ -228,8 +375,7 @@ export class MealPlanWorld extends World {
    * The SDK answers a 401 by running discovery and registration and then asking
    * the provider to send the person to the consent page. It cannot go further
    * on its own — a person has to act — so it raises UnauthorizedError, and the
-   * caller finishes with the code the consent page gave back. That is the
-   * documented shape of the flow, and this is a real client walking it.
+   * caller finishes with the code the consent page gave back.
    */
   async connect(provider: HouseholdOAuthClient): Promise<Client> {
     const url = () => new URL(this.serverUrl());
@@ -258,16 +404,15 @@ export class MealPlanWorld extends World {
   }
 
   serverUrl(): string {
-    if (!this.server) throw new Error('no server: the scenario has none running');
-    return this.server.url;
+    return `${this.baseUrl()}${MCP_PATH}`;
   }
 
   baseUrl(): string {
-    if (!this.server) throw new Error('no server: the scenario has none running');
-    return this.server.baseUrl;
+    if (!this.port) throw new Error('no server: the scenario has none running');
+    return `http://127.0.0.1:${this.port}`;
   }
 
-  /** "the server restarts": a new process over the same folder on disk. */
+  /** "the server restarts": a new process over the same folder, same database. */
   async restart(): Promise<void> {
     await this.stopServer();
     await this.launch();
@@ -275,9 +420,20 @@ export class MealPlanWorld extends World {
 
   async stopServer(): Promise<void> {
     await this.client?.close().catch(() => undefined);
-    await this.server?.close().catch(() => undefined);
     this.client = null;
-    this.server = null;
+    const child = this.proc;
+    this.proc = null;
+    if (!child || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    const ended = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    // Signal the whole process group (negative pid). SIGTERM first so the BEAM
+    // flushes and the sandbox's git releases .git/index.lock — a hard kill
+    // mid-commit would strand the lock for the next launch over this folder.
+    signalGroup(child.pid, 'SIGTERM');
+    const hard = setTimeout(() => signalGroup(child.pid!, 'SIGKILL'), 4_000);
+    await ended;
+    clearTimeout(hard);
   }
 
   async stop(): Promise<void> {
@@ -310,18 +466,46 @@ export class MealPlanWorld extends World {
   }
 
   /**
-   * Run the weekly recheck job for real: its own sandbox session, opened and
-   * closed fresh, exactly as production does. Not the household's assistant
-   * and not the MCP server under test elsewhere in this suite — this is the
-   * second, unattended caller ADR 0018 adds.
+   * The half of the old in-process `RunningServer` the step files still reach
+   * for: the two token stores. Backed by SQL against the test database now,
+   * because the stores are Postgres rows.
+   */
+  get server(): ServerHandle | null {
+    if (!this.proc) return null;
+    return SERVER_HANDLE;
+  }
+
+  /**
+   * Run the weekly recheck job for real, as its own OS process with its own
+   * sandbox session — the way production's unattended caller does (ADR 0018).
    */
   async runRecheck(): Promise<RecheckResult> {
-    this.recheckResult = await runRecheckJob({
-      folder: this.folder,
-      tenant: 'weekly-recheck-scenario',
-      now: () => this.recheckToday ?? this.clock.now(),
-      llmBase: this.llmMock().base,
-    });
+    const now = (this.recheckToday ?? new Date(FROZEN_CLOCK_ISO)).toISOString();
+    const result = await execFileAsync(
+      'mix',
+      [
+        'mealplan.recheck',
+        '--folder',
+        this.folder,
+        '--llm-base',
+        this.llmMock().base,
+        '--now',
+        now,
+        '--image-root',
+        DEFAULT_IMAGE_ROOT,
+        '--seccomp-filter',
+        DEFAULT_SECCOMP_FILTER,
+      ],
+      { cwd: REPO_ROOT, env: { ...process.env, MIX_ENV: 'test' } },
+    );
+    const marker = result.stdout.indexOf('<<<RECHECK>>>');
+    if (marker === -1) {
+      throw new Error(
+        `the recheck job printed no result:\n${result.stdout}\n${result.stderr}`,
+      );
+    }
+    const json = result.stdout.slice(marker + '<<<RECHECK>>>'.length).split('\n')[0];
+    this.recheckResult = JSON.parse(json) as RecheckResult;
     return this.recheckResult;
   }
 
@@ -331,10 +515,8 @@ export class MealPlanWorld extends World {
   }
 
   /**
-   * Call one of the two Kroger tools, and remember what it said.
-   *
-   * A refusal is an ordinary tool result with isError set, not an exception, so
-   * the assertions read the text the agent would actually be shown.
+   * Call one of the network tools, and remember what it said. A refusal is an
+   * ordinary tool result with isError set, not an exception.
    */
   async callTool(name: string, args: Record<string, unknown>): Promise<void> {
     const response = await this.mcp().callTool({ name, arguments: args });
@@ -342,9 +524,21 @@ export class MealPlanWorld extends World {
     this.lastToolError = response.isError === true ? this.lastToolText : null;
   }
 
-  session(): Session {
-    if (!this.server) throw new Error('no sandbox session: the scenario has no server');
-    return this.server.session;
+  /**
+   * The git history, read with the host's git rather than the sandbox's.
+   *
+   * The server still commits through its sandbox — hooks and filters planted in
+   * the bind-mounted .git stay contained there. The harness only reads, and it
+   * lives outside the server process now, so it reads from the host.
+   */
+  session(): HostGit {
+    return {
+      folder: this.folder,
+      run: (command: string, opts?: { env?: Record<string, string> }) =>
+        runHost(command, this.folder, opts?.env),
+      runDirect: (command: string, opts?: { env?: Record<string, string> }) =>
+        runHost(command, this.folder, opts?.env),
+    };
   }
 
   /**
@@ -352,8 +546,8 @@ export class MealPlanWorld extends World {
    * ran. "I never ran a git command" has to stay true while the Then steps
    * read the history.
    */
-  git(command: string): Promise<RunResult> {
-    return this.session().run(command, { commit: false });
+  git(command: string): Promise<HostResult> {
+    return runHost(command, this.folder);
   }
 
   async commitCount(): Promise<number> {
@@ -454,13 +648,94 @@ export type RawResponse = {
   body: string;
 };
 
+type HostGit = {
+  folder: string;
+  run(command: string, opts?: { env?: Record<string, string> }): Promise<HostResult>;
+  runDirect(command: string, opts?: { env?: Record<string, string> }): Promise<HostResult>;
+};
+
+type ServerHandle = {
+  store: {
+    revokeAccessToken(token: string): void;
+    expireAccessToken(token: string): void;
+  };
+  krogerStore: {
+    readonly file: string;
+    readonly connected: boolean;
+    readonly tokens: { accessToken: string; refreshToken: string } | undefined;
+    save(tokens: {
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scope: string;
+    }): void;
+    expireAccessToken(): void;
+  };
+};
+
+/**
+ * The token-store shims. Stateless — every reader and writer goes straight to
+ * the test database — so one instance serves every scenario.
+ */
+const SERVER_HANDLE: ServerHandle = {
+  store: {
+    revokeAccessToken(token: string): void {
+      psql(`DELETE FROM oauth_access_tokens WHERE token_hash = ${lit(tokenHash(token))}`);
+    },
+    expireAccessToken(token: string): void {
+      psql(
+        `UPDATE oauth_access_tokens SET expires_at = extract(epoch FROM now())::int - 1 ` +
+          `WHERE token_hash = ${lit(tokenHash(token))}`,
+      );
+    },
+  },
+  krogerStore: {
+    get file(): string {
+      return KROGER_TOKEN_STORE;
+    },
+    get connected(): boolean {
+      return psql(`SELECT 1 FROM kroger_tokens WHERE tenant_id = ${TENANT_ID_SQL}`) === '1';
+    },
+    get tokens(): { accessToken: string; refreshToken: string } | undefined {
+      const row = psql(
+        `SELECT access_token, refresh_token FROM kroger_tokens WHERE tenant_id = ${TENANT_ID_SQL}`,
+      );
+      if (!row) return undefined;
+      const [accessToken, refreshToken] = row.split('|');
+      return { accessToken, refreshToken };
+    },
+    save(tokens: {
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scope: string;
+    }): void {
+      psql(
+        `INSERT INTO kroger_tokens ` +
+          `(tenant_id, access_token, refresh_token, expires_at, scope, inserted_at, updated_at) ` +
+          `VALUES (${TENANT_ID_SQL}, ${lit(tokens.accessToken)}, ${lit(tokens.refreshToken)}, ` +
+          `${Math.trunc(tokens.expiresAt)}, ${lit(tokens.scope)}, now(), now()) ` +
+          `ON CONFLICT (tenant_id) DO UPDATE SET ` +
+          `access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token, ` +
+          `expires_at = EXCLUDED.expires_at, scope = EXCLUDED.scope, updated_at = now()`,
+      );
+    },
+    expireAccessToken(): void {
+      psql(
+        `UPDATE kroger_tokens SET expires_at = extract(epoch FROM now())::int - 1 ` +
+          `WHERE tenant_id = ${TENANT_ID_SQL}`,
+      );
+    },
+  },
+};
+
 /**
  * A free port, learned by asking for one and giving it straight back.
  *
  * A listening socket that never accepted a connection leaves no TIME_WAIT, so
- * rebinding it immediately is safe. The give-back is still a gap, though: any
- * other listen(0) in between can claim the port. freePort() must therefore be
- * called only after every other listener has already bound — see start().
+ * rebinding it immediately is safe. The give-back is still a gap: any other
+ * listen(0) in between can claim the port, so freePort() must be called only
+ * after every mock has already bound — see start().
  */
 async function freePort(): Promise<number> {
   const probe = createServer();

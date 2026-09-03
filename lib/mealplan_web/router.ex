@@ -16,6 +16,9 @@ defmodule MealplanWeb.Router do
   # client follows to start its OAuth dance.
   pipeline :mcp_bearer do
     plug MealplanWeb.Plugs.BearerAuth
+    # Restores the TypeScript server's "reconnect with a fresh initialize"
+    # answer when a client replays a session id the process forgot at restart.
+    plug MealplanWeb.Plugs.McpSessionGone
   end
 
   scope "/", MealplanWeb do

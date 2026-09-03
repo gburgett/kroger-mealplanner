@@ -42,7 +42,11 @@ defmodule Mealplan.Boot do
     Logger.info("the household is #{owner}")
 
     {:ok, session} = Sandbox.open(tenant_slug, folder)
-    now = DateTime.utc_now()
+    # One instant for the whole boot. Production reads the wall clock; a
+    # scenario pins it through MEALPLAN_CLOCK so the first commit's date is
+    # deterministic. Mirrors `startServer`, which threaded one `now` through
+    # ensureRepository, the scaffold commit and the migrations.
+    now = Mealplan.Clock.now()
 
     # The folder first, then the repository, so the first commit holds the
     # scaffold rather than an empty tree.
@@ -55,12 +59,12 @@ defmodule Mealplan.Boot do
         Session.commit_if_changed(
           session,
           "scaffold #{Enum.join(scaffolded, ", ")}",
-          DateTime.utc_now()
+          now
         )
     end
 
     # Migrations, oldest first, each committed under its own name.
-    _ = Migrations.run(session, DateTime.utc_now())
+    _ = Migrations.run(session, now)
 
     Logger.info("tree at open:\n" <> Tree.render(session))
     Logger.info("kroger: " <> kroger_status())

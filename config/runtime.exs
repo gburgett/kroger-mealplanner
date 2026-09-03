@@ -63,10 +63,30 @@ config :mealplan, Mealplan.Sandbox,
   image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
   seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER")
 
+# The frozen clock. The Cucumber suite runs the release as its own OS process
+# and cannot inject a `now` function, so it pins the instant through
+# MEALPLAN_CLOCK (ISO 8601). `Mealplan.Clock` reads it back. Mirrors the
+# `now: Clock` option the TypeScript `startServer` took.
+if clock = System.get_env("MEALPLAN_CLOCK") do
+  config :mealplan, :clock, clock
+end
+
 # The database lives outside the meal-plan folder by construction. `mix release`
 # and dev both accept DATABASE_URL; dev falls back to the config/dev.exs values.
 if url = System.get_env("DATABASE_URL") do
   config :mealplan, Mealplan.Repo, url: url
+end
+
+# The Cucumber harness (features/support/world.ts) spawns this app as a real
+# server on a reserved port and drives it over loopback, the same way the
+# TypeScript `startServer` was driven in-process. `mix test` (ExUnit) keeps the
+# Ecto SQL sandbox and no HTTP server; CUCUMBER=1 turns both on.
+if config_env() == :test and System.get_env("CUCUMBER") do
+  config :mealplan, MealplanWeb.Endpoint, server: true
+
+  config :mealplan, Mealplan.Repo,
+    pool: DBConnection.ConnectionPool,
+    pool_size: 10
 end
 
 if config_env() == :prod do
