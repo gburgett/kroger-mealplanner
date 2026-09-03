@@ -47,7 +47,14 @@ defmodule Mealplan.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      # The MCP transport and protocol (Streamable HTTP, JSON-RPC, initialize,
+      # Mcp-Session-Id, SSE vs JSON, protocol negotiation). ADR 0020 named a
+      # library for this half; Phase 0 spike 1 picked anubis_mcp over ex_mcp —
+      # see docs/plans/0005-progress.md. The OAuth authorisation server, the
+      # bearer plug and the eight tool handlers stay our own code.
+      {:anubis_mcp, "~> 2.0"},
+      {:req, "~> 0.5"}
     ]
   end
 

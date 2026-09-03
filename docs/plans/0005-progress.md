@@ -98,15 +98,39 @@ and retires `deploy/mealplan.service` + the recheck units.
 `systemctl --user status mealplan-elixir` → active; `GET /` → 200; a sandbox
 command through the release lists the seven corpus names.
 
+## Phase 0 spike 1 — MCP library (done: anubis_mcp)
+
+ADR 0020 named a library for the transport half, `ex_mcp` preferred and
+`anubis_mcp` the fallback, with the spike deciding. The spike picked
+**`anubis_mcp` 2.0.0**, against `ex_mcp` 1.1.1:
+
+- **Dependency surface.** `anubis_mcp` pulls `finch` + `peri` and marks `plug`,
+  `jose`, `gun`, `redix` optional. `ex_mcp` forces `plug_cowboy`, `mint`,
+  `mint_web_socket`, `jose`, `ex_json_schema` and `fuse`. AGENTS.md makes the
+  server's out-of-sandbox dependencies the one risk the sandbox does not cover,
+  so the smaller graph wins — and it keeps us on Bandit instead of dragging in
+  a second HTTP server.
+- **Protocol.** `anubis_mcp`'s Streamable HTTP transport advertises
+  `2025-11-25`, which is what the pinned `@modelcontextprotocol/sdk` 1.30.0
+  client asks for. Negotiation, `Mcp-Session-Id`, SSE vs JSON and `ping` all
+  work over loopback.
+- **Verbatim text kept.** Registering tools as `anubis_mcp` components would run
+  its Peri schema DSL and generate the wire schema. Instead
+  `Mealplan.Mcp.Server` overrides `handle_request/2` for `tools/list` and
+  `tools/call` only and answers from `Mealplan.Mcp.Tools` — hand-authored JSON
+  schemas, verbatim descriptions, and `isError: true` refusals that name the
+  argument. Every other method falls through to the library.
+
+Proven for `bash` / `read_file` / `write_file`: command output + structured
+content, the missing/blank-argument refusals, `../escape.md` containment, and
+write-then-commit. The Kroger/Walmart tools land with Phase 5.
+
 ## Not started
 
-- **Phase 3 — MCP transport + tool registry + OAuth authorisation server.** The
-  hard part. Decision still open: hand-roll the Streamable HTTP plug (full
-  control over what the pinned TS SDK client expects) vs `ex_mcp` / `anubis_mcp`.
-  `hex.search` was unhelpful in this environment; recommend hand-rolling the
-  transport as one Plug and the OAuth server as controllers, since the OAuth
-  server is hand-rolled regardless and the transport surface is small and fully
-  specified. The bearer plug stays custom (opaque-in-store tokens).
+- **Phase 3 — OAuth authorisation server + bearer plug.** Still ours: `/register`
+  (DCR), `/authorize` (PKCE + consent-before-code), `/consent`, `/token`
+  (code + refresh), `/revoke`, both discovery documents, and the custom bearer
+  Plug (opaque-in-store tokens). The transport is done (see above).
 - **Phase 5 — Kroger / Walmart / LLM clients.** `Req` for the one HTTP path.
   RSA-SHA256 via `:public_key` (no package). Pure ports of `src/kroger/api.ts`,
   `src/walmart/api.ts`, `src/kroger/list.ts` (candidate grammar),

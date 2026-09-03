@@ -19,6 +19,12 @@ defmodule Mealplan.Application do
       # Opens the household's session, scaffolds the corpus, runs migrations,
       # and prints the start-up health check.
       Mealplan.Boot,
+      # HTTP pool for the outbound API calls (Kroger, Walmart, the LLM gateway).
+      {Finch, name: Mealplan.Finch},
+      # The MCP server: anubis_mcp owns the Streamable HTTP transport and the
+      # protocol; MealplanWeb.Router forwards /mcp to its plug. Tools and OAuth
+      # are our own code. See Mealplan.Mcp.Server.
+      {Mealplan.Mcp.Server, transport: :streamable_http},
       # Start to serve requests, typically the last entry
       MealplanWeb.Endpoint
     ]
