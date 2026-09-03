@@ -158,11 +158,47 @@ Kroger is configured, but the `connect_kroger=yes` branch (park the consent,
 bounce through the Kroger store picker, mint the code at the far end) needs the
 Kroger API client — it lands with Phase 5. `kroger_link.feature` fails until then.
 
+## Phase 5 — Kroger / Walmart / LLM clients + the five network tools (mostly done)
+
+Pure ports, `Req` for the one HTTP path, RSA-SHA256 via `:public_key` (no
+package).
+
+| Node source | Elixir |
+| --- | --- |
+| `src/kroger/list.ts` (candidate grammar) | `Mealplan.Shopping.List` (+ `.FormatError`) |
+| `src/kroger/consumables.ts` | `Mealplan.Kroger.Consumables` |
+| `src/kroger/api.ts` | `Mealplan.Kroger.Api` (+ `.Error` / `.NotLinkedError` / `.NotConfiguredError`), app-token cache `Mealplan.Kroger.AppToken` (Agent) |
+| `src/walmart/api.ts` | `Mealplan.Walmart.Api` (+ `.Error` / `.NotConfiguredError`) |
+| `src/gateway/llm.ts` | `Mealplan.Llm` |
+| `findProducts` / `sendToCart` / `findStores` / `findWalmartProducts` / `buildCartLink` + `shoppingListStructure` + the `render*` helpers | `Mealplan.Shopping.Tools` (+ `.Refusal`) |
+| the five `registerTool` blocks | five `Mealplan.Mcp.Tools.call/4` clauses + `network_tools/0` (descriptions carry `Kroger.Help.how_to/1` / `Walmart.Help.how_to/0`, threaded from `public_url`) |
+
+- Descriptions, hand JSON schemas and the "name the argument" refusals are
+  verbatim from `src/mcp/tools.ts`.
+- A raise inside a network tool — `Refusal`, a Kroger/Walmart API error, a list
+  `FormatError` — becomes an ordinary `isError: true` result via
+  `run_network/1`, exactly as a thrown `Error` did in the TS server. Only an
+  unknown tool name is a JSON-RPC error.
+- `shoppingListStructure` runs `mealplan shopping-list --json` inside the
+  sandbox and keys the result by the rendered line — the ADR 0010 seam, the
+  server never parses the ingredient grammar.
+- Write-then-commit is one session message: `write_and_commit/5` for the
+  single-file tools, `transaction/2` for `send_to_cart` (list + consumables).
+
+Verified on the running release: all eight tools serialise; the missing-arg
+refusals, the bad-zip refusal, the "Walmart not configured" and "no Kroger
+account connected" refusals all come back as `isError: true` with the verbatim
+text. Candidate grammar round-trips (`attach_candidates` → re-parse →
+`append_sent` / `append_cart_link`) in a scratch script.
+
+**Not yet wired:** the consent page's `connect_kroger=yes` branch and the
+`/kroger` UI pages (`LinkDesk`, `/kroger`, `/kroger/connect`, `/kroger/callback`,
+`/kroger/store`). Ported from `src/kroger/link.ts` and `src/kroger/pages.ts`;
+`kroger_link.feature` fails until they land. Nothing has been run against the
+Cucumber suite yet — that needs the `features/support/world.ts` rework.
+
 ## Not started
-- **Phase 5 — Kroger / Walmart / LLM clients.** `Req` for the one HTTP path.
-  RSA-SHA256 via `:public_key` (no package). Pure ports of `src/kroger/api.ts`,
-  `src/walmart/api.ts`, `src/kroger/list.ts` (candidate grammar),
-  `src/kroger/consumables.ts`, `src/gateway/llm.ts`.
+- **Phase 5 remainder — the `/kroger` UI + consent Kroger branch** (above).
 - **Phase 6 — Oban weekly recheck** inside the release; delete
   `deploy/mealplan-recheck.{service,timer}`.
 - **Phase 8 — the static site at `/`.**

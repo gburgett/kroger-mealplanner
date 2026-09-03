@@ -21,6 +21,9 @@ defmodule Mealplan.Application do
       Mealplan.Boot,
       # HTTP pool for the outbound API calls (Kroger, Walmart, the LLM gateway).
       {Finch, name: Mealplan.Finch},
+      # The server's own Kroger application token, cached in memory. See
+      # Mealplan.Kroger.AppToken.
+      Mealplan.Kroger.AppToken,
       # The consent requests waiting for a click. In memory, lost on restart by
       # design (plan 0005, Phase 2).
       Mealplan.Auth.ConsentDesk,
