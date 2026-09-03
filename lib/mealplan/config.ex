@@ -19,10 +19,11 @@ defmodule Mealplan.Config do
   @doc """
   The OAuth issuer, and the address clients reach this server at.
 
-  NEVER derived from Host or X-Forwarded-Host. Nil in local development, where
-  `http://127.0.0.1:<port>` is synthesised from the bind instead.
+  NEVER derived from Host or X-Forwarded-Host. `config/runtime.exs` synthesises
+  `http://127.0.0.1:<port>` from the bind when `MEALPLAN_PUBLIC_URL` is unset,
+  so this never returns nil.
   """
-  def public_url, do: get(:public_url)
+  def public_url, do: get(:public_url) || "http://127.0.0.1:#{get(:port) || 4000}"
 
   def kroger_client_id, do: get(:kroger_client_id) || ""
   def kroger_client_secret, do: get(:kroger_client_secret) || ""

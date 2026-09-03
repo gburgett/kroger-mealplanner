@@ -20,10 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :mealplan, MealplanWeb.Endpoint, server: true
 end
 
-config :mealplan, MealplanWeb.Endpoint,
-  http: [
-    port: String.to_integer(System.get_env("MEALPLAN_PORT") || System.get_env("PORT", "4000"))
-  ]
+mealplan_port =
+  String.to_integer(System.get_env("MEALPLAN_PORT") || System.get_env("PORT", "4000"))
+
+config :mealplan, MealplanWeb.Endpoint, http: [port: mealplan_port]
 
 # --- MEALPLAN_* runtime configuration, for every environment ---------------
 #
@@ -43,7 +43,11 @@ config :mealplan,
   owner: get.("MEALPLAN_OWNER", "gordon@gordonburgett.net"),
   folder: get.("MEALPLAN_FOLDER", Path.expand("~/meal-plan")),
   tenant: get.("MEALPLAN_TENANT", "household"),
-  public_url: System.get_env("MEALPLAN_PUBLIC_URL"),
+  port: mealplan_port,
+  # The OAuth issuer and the address clients reach this server at. Never
+  # derived from a Host header. Synthesised from the bind when unset, so local
+  # development and a scenario's spawned release both have a usable value.
+  public_url: System.get_env("MEALPLAN_PUBLIC_URL") || "http://127.0.0.1:#{mealplan_port}",
   kroger_client_id: get.("KROGER_CLIENT_ID", ""),
   kroger_client_secret: get.("KROGER_CLIENT_SECRET", ""),
   kroger_api_base: System.get_env("KROGER_API_BASE"),
