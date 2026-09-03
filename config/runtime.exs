@@ -21,7 +21,9 @@ if System.get_env("PHX_SERVER") do
 end
 
 config :mealplan, MealplanWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("MEALPLAN_PORT") || System.get_env("PORT", "4000"))]
+  http: [
+    port: String.to_integer(System.get_env("MEALPLAN_PORT") || System.get_env("PORT", "4000"))
+  ]
 
 # --- MEALPLAN_* runtime configuration, for every environment ---------------
 #
@@ -93,19 +95,25 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  # The public host comes from MEALPLAN_PUBLIC_URL (the OAuth issuer), the same
+  # single source of truth server.ts used, never from a request header.
+  host =
+    case System.get_env("MEALPLAN_PUBLIC_URL") do
+      nil -> System.get_env("PHX_HOST") || "example.com"
+      url -> URI.parse(url).host || "example.com"
+    end
 
   config :mealplan, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :mealplan, MealplanWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
-      # See the documentation on https://bandit.hexdocs.pm/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
+      # exe.dev reaches the VM over eth0, not loopback, so bind every interface.
       ip: {0, 0, 0, 0, 0, 0, 0, 0}
     ],
+    # exe.dev terminates TLS and forwards; the MCP transport does its own Host
+    # allow-listing (DNS-rebinding protection) once Phase 3 lands.
+    check_origin: false,
     secret_key_base: secret_key_base
 
   # ## SSL Support

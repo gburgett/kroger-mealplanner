@@ -41,7 +41,12 @@ defmodule Mealplan.Boot do
 
     # Scaffolding an EXISTING folder has to commit itself.
     if scaffolded != [] do
-      _ = Session.commit_if_changed(session, "scaffold #{Enum.join(scaffolded, ", ")}", DateTime.utc_now())
+      _ =
+        Session.commit_if_changed(
+          session,
+          "scaffold #{Enum.join(scaffolded, ", ")}",
+          DateTime.utc_now()
+        )
     end
 
     # Migrations, oldest first, each committed under its own name.
@@ -50,7 +55,14 @@ defmodule Mealplan.Boot do
     Logger.info("tree at open:\n" <> Tree.render(session))
     Logger.info("kroger: " <> kroger_status())
     Logger.info("walmart: " <> walmart_status())
-    Logger.info("resource limits: " <> if(Session.config(session).use_user_scope, do: "cgroup v2 scope, plus rlimits", else: "rlimits only — no user systemd instance was reachable"))
+
+    Logger.info(
+      "resource limits: " <>
+        if(Session.config(session).use_user_scope,
+          do: "cgroup v2 scope, plus rlimits",
+          else: "rlimits only — no user systemd instance was reachable"
+        )
+    )
 
     {:ok, %{session: session}}
   end
@@ -64,7 +76,8 @@ defmodule Mealplan.Boot do
   end
 
   defp walmart_status do
-    if Mealplan.Config.walmart_consumer_id() != "" and Mealplan.Config.walmart_private_key() not in [nil, ""] do
+    if Mealplan.Config.walmart_consumer_id() != "" and
+         Mealplan.Config.walmart_private_key() not in [nil, ""] do
       "configured, consumer #{Mealplan.Config.walmart_consumer_id()}"
     else
       "not configured. Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY_PATH to enable the cart links."

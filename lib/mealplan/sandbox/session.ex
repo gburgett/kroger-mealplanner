@@ -87,7 +87,9 @@ defmodule Mealplan.Sandbox.Session do
     File.mkdir_p!(folder)
 
     image_root = Keyword.get(opts, :image_root) || Mealplan.Sandbox.default_image_root()
-    seccomp_filter = Keyword.get(opts, :seccomp_filter) || Mealplan.Sandbox.default_seccomp_filter()
+
+    seccomp_filter =
+      Keyword.get(opts, :seccomp_filter) || Mealplan.Sandbox.default_seccomp_filter()
 
     unless File.exists?(Path.join([image_root, "usr", "bin", "bash"])) do
       raise "no sandbox image at #{image_root}. Build it with ./sandbox-image/build.sh"

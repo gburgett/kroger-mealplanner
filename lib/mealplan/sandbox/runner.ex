@@ -73,7 +73,8 @@ defmodule Mealplan.Sandbox.Runner do
           p
       end
 
-    unit_name = "mealplan-#{sanitise_unit(tenant)}-#{:os.getpid()}-#{System.unique_integer([:positive])}.scope"
+    unit_name =
+      "mealplan-#{sanitise_unit(tenant)}-#{:os.getpid()}-#{System.unique_integer([:positive])}.scope"
 
     inner_bwrap =
       ["bwrap"] ++
@@ -166,13 +167,19 @@ defmodule Mealplan.Sandbox.Runner do
   # group takes every process in the sandbox with it. Mirrors session.ts#killTree.
   defp kill_tree(port, unit_name, use_user_scope) do
     if use_user_scope do
-      _ = System.cmd("systemctl", ["--user", "kill", "--signal=KILL", unit_name], env: Limits.systemd_env(), stderr_to_stdout: true)
+      _ =
+        System.cmd("systemctl", ["--user", "kill", "--signal=KILL", unit_name],
+          env: Limits.systemd_env(),
+          stderr_to_stdout: true
+        )
     end
 
     case Port.info(port, :os_pid) do
       {:os_pid, os_pid} ->
         pgid =
-          case System.cmd("ps", ["-o", "pgid=", "-p", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+          case System.cmd("ps", ["-o", "pgid=", "-p", Integer.to_string(os_pid)],
+                 stderr_to_stdout: true
+               ) do
             {out, 0} -> String.trim(out)
             _ -> Integer.to_string(os_pid)
           end
@@ -190,7 +197,12 @@ defmodule Mealplan.Sandbox.Runner do
 
   # Only systemd-run gets anything, and only what it needs to find the user bus.
   # `env -i` inside the limits chain stops even that reaching bubblewrap.
-  defp port_env(true), do: Enum.map(Limits.systemd_env(), fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+  defp port_env(true),
+    do:
+      Enum.map(Limits.systemd_env(), fn {k, v} ->
+        {String.to_charlist(k), String.to_charlist(v)}
+      end)
+
   defp port_env(false), do: []
 
   # Keep the first `cap` bytes, count the rest, append the notice ports never see.

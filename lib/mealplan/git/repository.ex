@@ -38,7 +38,7 @@ defmodule Mealplan.Git.Repository do
 
       if result.exit_code != 0 do
         raise "could not make the meal-plan folder a git repository:\n" <>
-                (if(result.stderr == "", do: result.stdout, else: result.stderr))
+                if(result.stderr == "", do: result.stdout, else: result.stderr)
       end
 
       :ok
@@ -70,7 +70,12 @@ defmodule Mealplan.Git.Repository do
   @spec recent_history(pid()) :: String.t()
   def recent_history(session) do
     log = Session.run(session, "git log --oneline -3 --no-decorate")
-    files = Session.run(session, "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | head -5")
+
+    files =
+      Session.run(
+        session,
+        "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | head -5"
+      )
 
     lines = ["recent commits:"]
 
@@ -83,7 +88,9 @@ defmodule Mealplan.Git.Repository do
 
     lines =
       if files.exit_code == 0 and String.trim(files.stdout) != "" do
-        lines ++ ["", "files in HEAD:"] ++ Enum.map(String.split(String.trim(files.stdout), "\n"), &("  " <> &1))
+        lines ++
+          ["", "files in HEAD:"] ++
+          Enum.map(String.split(String.trim(files.stdout), "\n"), &("  " <> &1))
       else
         lines
       end

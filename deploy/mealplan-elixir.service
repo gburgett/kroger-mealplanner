@@ -1,0 +1,87 @@
+[Unit]
+# The Elixir/Phoenix MCP server (ADR 0020, plan 0005). Runs a `mix release`
+# instead of `node server.ts`.
+#
+# THIS FILE IS THE ONE THAT IS INSTALLED, and it is a USER unit — the same
+# pattern as deploy/mealplan.service:
+#
+#     cp deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.service
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now mealplan-elixir.service
+#     loginctl enable-linger "$USER"   # or it stops when you log out
+#
+#     diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.service
+#
+# CONCRETE, NOT A TEMPLATE. Every path and address below is this machine's, the
+# same reasoning as deploy/mealplan.service: one household, one machine
+# (ADR 0008).
+#
+# WHILE THE MIGRATION IS IN PROGRESS this runs ALONGSIDE the Node service:
+# port 8001 (Node is on 8000), and its own meal-plan folder
+# (/home/exedev/meal-plan-elixir) so the two servers never commit to one git
+# repository at once. Plan 0005 Phase 9 retires deploy/mealplan.service and
+# this one moves to port 8000 and /home/exedev/meal-plan.
+#
+# DEPLOY = `mix release` THEN RESTART. There is a build step now (ADR 0020):
+#
+#     cd /home/exedev/kroger-mealplanner
+#     git pull
+#     MIX_ENV=prod mix deps.get --only prod
+#     MIX_ENV=prod mix release --overwrite
+#     systemctl --user restart mealplan-elixir.service
+#
+# A change to cli/ still needs ./cli/build.sh and a change to the sandbox image
+# still needs ./sandbox-image/build.sh — unchanged by this migration.
+Description=Kroger meal planner MCP server (Elixir)
+Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/exedev/kroger-mealplanner
+# The release. `mix release` writes it here; there is no daemon, one BEAM node
+# holds the server, the sandbox children and (Phase 6) the Oban job.
+ExecStart=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan start
+ExecStop=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan stop
+
+# The endpoint only serves in a release when this is set.
+Environment=PHX_SERVER=true
+# 8001 while the Node server holds 8000. Phase 9 moves this to 8000.
+Environment=MEALPLAN_PORT=8001
+# The OAuth issuer. Configuration, never the Host header (ADR 0009). Left unset
+# until the Elixir server is the one exe.dev points the public hostname at.
+#Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
+Environment=MEALPLAN_OWNER=gordon@gordonburgett.net
+# Its OWN folder during the migration, so it never races the Node server on
+# .git/index.lock. Phase 9 switches this to /home/exedev/meal-plan.
+Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan-elixir
+# systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
+# environment regardless: `env -i` sits between prlimit and bwrap.
+Environment=PATH=/usr/bin:/bin
+# The BEAM must run UTF-8 or Elixir mangles non-ASCII output. rel/env.sh.eex
+# also sets these; belt and braces.
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
+Environment=ELIXIR_ERL_OPTIONS=+fnu
+
+# DATABASE_URL and SECRET_KEY_BASE, from the gitignored 0600 file — this unit is
+# world-readable and in git. KROGER_CLIENT_ID / KROGER_CLIENT_SECRET and the
+# Walmart credential travel the same path in .env. Both optional (leading "-"):
+# without the database the server will not start (it needs Postgres), but a
+# missing Kroger credential just disables the cart, the same as the Node server.
+EnvironmentFile=-/home/exedev/kroger-mealplanner/.env
+EnvironmentFile=-/home/exedev/kroger-mealplanner/.env.elixir
+
+# The BEAM exits 0 on SIGTERM, so a deliberate stop stays stopped.
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+
+# No NoNewPrivileges=, RestrictNamespaces= or PrivateUsers= here, on purpose:
+# the product's whole boundary is bubblewrap creating user and pid namespaces
+# per command, and those three would break it. Containment lives in
+# sandbox-image/, not in this unit.
+
+[Install]
+WantedBy=default.target

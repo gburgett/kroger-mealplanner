@@ -56,7 +56,6 @@ defmodule Mealplan.Sandbox.Bubblewrap do
       # sort(1) spills here. It is memory, so it counts against MemoryMax.
       "--tmpfs",
       "/tmp",
-
       "--bind",
       workspace,
       "/workspace",
