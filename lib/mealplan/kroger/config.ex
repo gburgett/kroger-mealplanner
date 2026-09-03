@@ -66,6 +66,22 @@ defmodule Mealplan.Kroger.Config do
     """
   end
 
+  @doc """
+  Write `config/kroger.md` and commit it. `choice` is
+  `%{location_id, name, address, modality}` or nil to reset to "not connected".
+  Ported from `writeKrogerConfig` in `src/kroger/config.ts`.
+  """
+  def write(session, %DateTime{} = now, choice, base_url) do
+    message =
+      if choice do
+        "kroger: shop at #{one_line(choice.name)} for #{choice.modality}"
+      else
+        "kroger: disconnect the account"
+      end
+
+    Session.write_and_commit(session, @path, document(choice, base_url), message, now)
+  end
+
   @doc "The store the folder currently says to shop at. Only the front matter is read."
   @spec read(pid()) :: %{store: String.t(), modality: String.t()}
   def read(session) do

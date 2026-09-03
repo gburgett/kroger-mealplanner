@@ -35,12 +35,22 @@ defmodule MealplanWeb.Router do
     post "/revoke", OAuthController, :revoke
   end
 
-  # --- the two gated pages ---------------------------------------------
+  # --- the gated pages: the only screens a person opens ---------------
   scope "/", MealplanWeb do
     pipe_through :household
 
     get "/authorize", OAuthController, :authorize
     post "/consent", OAuthController, :consent
+
+    # The Kroger screens (ADR 0010). /kroger/callback is gated too, because
+    # Kroger redirects a top-level browser navigation and the exe.dev session
+    # is on it.
+    get "/kroger", KrogerController, :index
+    post "/kroger/connect", KrogerController, :connect
+    get "/kroger/callback", KrogerController, :callback
+    get "/kroger/store", KrogerController, :store
+    post "/kroger/store", KrogerController, :store_submit
+    post "/kroger/disconnect", KrogerController, :disconnect
   end
 
   # --- the MCP endpoint: bearer-gated, then anubis_mcp's transport ------

@@ -15,6 +15,8 @@ defmodule MealplanWeb.OAuthController do
   use MealplanWeb, :controller
 
   alias Mealplan.Auth.{ConsentDesk, Exedev, Provider}
+  alias Mealplan.Kroger
+  alias Mealplan.Kroger.LinkDesk
   alias MealplanWeb.ConsentPage
 
   # --- discovery documents -------------------------------------------
@@ -126,6 +128,8 @@ defmodule MealplanWeb.OAuthController do
   end
 
   defp complete_consent(conn, identity, pending, params) do
+    kroger = Kroger.Api.for_household()
+
     cond do
       not Exedev.same_email?(identity.email, pending.identity.email) ->
         conn
@@ -146,6 +150,17 @@ defmodule MealplanWeb.OAuthController do
           ],
           pending.params["state"]
         )
+
+      # The Kroger box, and the whole reason the link goes HERE rather than
+      # after the code. A code lives 60 seconds; a Kroger sign-in plus a store
+      # choice does not fit. Park the pending consent in the LinkDesk and bounce
+      # through Kroger; the code is minted at the far end (KrogerController).
+      params["connect_kroger"] == "yes" and not is_nil(kroger) ->
+        link = LinkDesk.open(identity, pending)
+
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> redirect_to(Kroger.Api.authorize_url(kroger, link.state || ""))
 
       true ->
         case Provider.issue_code(
@@ -222,6 +237,12 @@ defmodule MealplanWeb.OAuthController do
     |> put_resp_header("access-control-allow-origin", "*")
     |> put_resp_header("cache-control", "no-store")
     |> json(metadata)
+  end
+
+  defp redirect_to(conn, location) do
+    conn
+    |> put_resp_header("location", location)
+    |> send_resp(302, "")
   end
 
   defp redirect_with(conn, uri, pairs, state) do

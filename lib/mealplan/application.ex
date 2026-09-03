@@ -27,6 +27,9 @@ defmodule Mealplan.Application do
       # The consent requests waiting for a click. In memory, lost on restart by
       # design (plan 0005, Phase 2).
       Mealplan.Auth.ConsentDesk,
+      # A Kroger link in flight: the pending consent parked across the Kroger
+      # sign-in hop. In memory, one shot, with a TTL. See Mealplan.Kroger.LinkDesk.
+      Mealplan.Kroger.LinkDesk,
       # The MCP server: anubis_mcp owns the Streamable HTTP transport and the
       # protocol; MealplanWeb.Router forwards /mcp to its plug. Tools and OAuth
       # are our own code. See Mealplan.Mcp.Server.

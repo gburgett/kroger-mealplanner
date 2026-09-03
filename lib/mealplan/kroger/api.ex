@@ -85,6 +85,14 @@ defmodule Mealplan.Kroger.Api do
     end
   end
 
+  @doc "The client for the single household tenant, or nil when unconfigured."
+  def for_household do
+    case Mealplan.Accounts.get_tenant_by_slug(Mealplan.Config.tenant()) do
+      %{id: id} -> new(id)
+      _ -> new(nil)
+    end
+  end
+
   def max_cart_items, do: @max_cart_items
 
   # --- the household's link ---------------------------------------------

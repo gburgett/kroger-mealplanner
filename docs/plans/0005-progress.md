@@ -191,14 +191,34 @@ account connected" refusals all come back as `isError: true` with the verbatim
 text. Candidate grammar round-trips (`attach_candidates` → re-parse →
 `append_sent` / `append_cart_link`) in a scratch script.
 
-**Not yet wired:** the consent page's `connect_kroger=yes` branch and the
-`/kroger` UI pages (`LinkDesk`, `/kroger`, `/kroger/connect`, `/kroger/callback`,
-`/kroger/store`). Ported from `src/kroger/link.ts` and `src/kroger/pages.ts`;
-`kroger_link.feature` fails until they land. Nothing has been run against the
-Cucumber suite yet — that needs the `features/support/world.ts` rework.
+### The `/kroger` UI + the consent Kroger branch (done)
+
+Ported from `mountKroger` in `src/mcp/server.ts`, `src/kroger/link.ts`,
+`src/kroger/pages.ts`, and `writeKrogerConfig`.
+
+| Node | Elixir |
+| --- | --- |
+| `LinkDesk` | `Mealplan.Kroger.LinkDesk` (GenServer, 15-min TTL, one-shot `state`) |
+| `krogerStatusPage` / `krogerStorePage` / `krogerLinkedPage` / `krogerLinkGonePage` | `MealplanWeb.KrogerPages` (same 5-char escape) |
+| `mountKroger` routes | `MealplanWeb.KrogerController` — `index` / `connect` / `callback` / `store` / `store_submit` / `disconnect` |
+| `writeKrogerConfig` | `Mealplan.Kroger.Config.write/4` |
+| the `connect_kroger === 'yes'` branch of `completeConsent` | a `cond` clause in `MealplanWeb.OAuthController.complete_consent/4` — parks the pending consent in `LinkDesk`, 302 to `Kroger.Api.authorize_url/2` |
+
+All six `/kroger` routes sit in the `:household` pipeline (ExedevGate),
+`/kroger/callback` included. `Kroger.Api.for_household/0` resolves the single
+tenant's id. The code is minted last, in `store_submit/2`, and spent at once.
+
+Verified live on :8001 (Kroger really configured from `.env`): `GET /kroger`
+with no identity → 302 to the exe.dev login; a non-household identity → 403
+naming the owner; `GET /kroger/callback?state=<bogus>` → 403 "does not match
+one this meal planner started"; `GET /kroger` (household) → "Connect your
+Kroger account"; `POST /kroger/connect` → 302 to
+`api.kroger.com/v1/connect/oauth2/authorize?…scope=cart.basic:write&state=<uuid>`.
+
+Nothing has been run against the Cucumber suite yet — that needs the
+`features/support/world.ts` rework.
 
 ## Not started
-- **Phase 5 remainder — the `/kroger` UI + consent Kroger branch** (above).
 - **Phase 6 — Oban weekly recheck** inside the release; delete
   `deploy/mealplan-recheck.{service,timer}`.
 - **Phase 8 — the static site at `/`.**
