@@ -1,0 +1,99 @@
+name: test
+
+# The scenarios under features/ run in process, in host mode: no sandbox image
+# to build, no server to spawn, no OAuth handshake. See ADR 0022.
+#
+# What this job does NOT prove is containment. Every @security scenario is
+# excluded in host mode, and mix test says so in a banner rather than reporting
+# a quiet green. Those scenarios need bubblewrap and a built image — the
+# `sandboxed` job below, which is where a release gets its evidence.
+
+on:
+  push:
+    branches: [main, elixir-migration]
+  pull_request:
+
+env:
+  MIX_ENV: test
+  ELIXIR_ERL_OPTIONS: "+fnu"
+  LANG: C.UTF-8
+
+jobs:
+  logic:
+    name: application logic (host mode)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: exedev
+          POSTGRES_PASSWORD: mealplan_dev
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          # Matches the VM (plan 0005: OTP 28.5.0.6, Elixir 1.19.6-otp-28), so
+          # CI and the machine that serves the household agree.
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      # The corpus reaches for `mealplan` on PATH. Under bubblewrap it is staged
+      # into the image; in host mode it has to be a real binary on the runner,
+      # so it is built here and found through MEALPLAN_CLI_PATH.
+      - uses: actions/cache@v4
+        with:
+          path: cli/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('cli/Cargo.lock') }}
+
+      - name: Build the mealplan CLI
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      # `mix format --check-formatted` is deliberately not here yet. The
+      # formatter's output moves between Elixir versions, and this branch was
+      # written on 1.18 while the VM runs 1.19 — a check added blind would fail
+      # on files nobody in this change touched. Add it in a commit that runs
+      # `mix format` on 1.19 first.
+
+      - name: Run the scenarios
+        env:
+          MEALPLAN_SANDBOX: host
+          MEALPLAN_CLI_PATH: cli/target/x86_64-unknown-linux-musl/release
+          PGHOST: localhost
+          PGUSER: exedev
+          PGPASSWORD: mealplan_dev
+        run: mix test
+
+  # Not wired to run yet: it needs a runner that can build the sandbox image
+  # (Docker) and use unprivileged user namespaces for bwrap. Until it does, the
+  # @security scenarios are run by a person on the VM before a release, per
+  # AGENTS.md — "those scenarios are not optional and not 'later'".
+  #
+  #  sandboxed:
+  #    name: containment (@security, bubblewrap)
+  #    runs-on: ubuntu-latest
+  #    steps:
+  #      - run: ./sandbox-image/build.sh && ./cli/build.sh
+  #      - run: mix test --only security

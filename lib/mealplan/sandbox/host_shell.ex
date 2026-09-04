@@ -88,18 +88,20 @@ defmodule Mealplan.Sandbox.HostShell do
   end
 
   defp cli_dir do
-    configured = System.get_env("MEALPLAN_CLI_PATH")
-
+    # Absolute, always. The command's working directory is the meal-plan folder,
+    # so a relative PATH entry would be resolved against that folder and the
+    # binary would not be found — `mealplan: command not found`, in every
+    # scenario that runs the CLI.
     candidates =
-      [configured] ++
+      [System.get_env("MEALPLAN_CLI_PATH")] ++
         [
-          Path.join(File.cwd!(), "sandbox-image/rootfs/usr/bin"),
-          Path.join(File.cwd!(), "cli/target/x86_64-unknown-linux-musl/release")
+          "sandbox-image/rootfs/usr/bin",
+          "cli/target/x86_64-unknown-linux-musl/release"
         ]
 
-    Enum.find(candidates, fn
-      nil -> false
-      dir -> File.exists?(Path.join(dir, "mealplan"))
-    end)
+    candidates
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&Path.expand/1)
+    |> Enum.find(&File.exists?(Path.join(&1, "mealplan")))
   end
 end
