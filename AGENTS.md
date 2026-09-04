@@ -218,27 +218,48 @@ Working rhythm:
 3. Write the smallest implementation that passes it.
 4. Refactor with the suite green.
 
-Every scenario is a full integration test. Nothing in the stack is stubbed:
-a `When` step acts by sending a loopback web request to our own API, and a
-`Then` step asserts against the files that ended up on disk. The only thing
-ever mocked is a third-party HTTP API — Kroger, Walmart and the exe.dev LLM
-gateway, and nothing else. Each lives in one file
-(`features/support/kroger.ts`, `features/support/walmart.ts`,
-`features/support/llm.ts`), which is what makes that rule something a person
-can check. Our sandbox, our transport, our commands and our git history all
-run for real.
+**The scenarios run in the test BEAM** (`mix test`, ADR 0022). A `When` step
+calls `Mealplan.Mcp.Tools.call/4` — the same function the MCP server calls when
+a client asks for a tool — and a `Then` step asserts against the files that
+ended up on disk. Nothing is spawned per scenario. The runner is the `cucumber`
+hex package reading the same `features/*.feature` files; only the runner
+changed, never the scenarios.
+
+Below the tool nothing is stubbed: a real sandbox session, real shell commands,
+a real git repository, and the real `mealplan` binary. The only thing ever
+mocked is a third-party HTTP API — Kroger, Walmart and the exe.dev LLM gateway,
+and nothing else.
+
+**What that costs, stated plainly:** the Streamable HTTP transport and the OAuth
+authorisation server above the tool are no longer exercised by every scenario.
+They were, and the reason given here for driving a real request — that the
+transport is the part most likely to break for a real client — has not stopped
+being true. They need their own tests. ADR 0022 records the debt.
+
+**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine that
+cannot build the sandbox image, such as a CI runner. Every `@security` scenario
+is EXCLUDED in that mode and `mix test` prints a banner saying so, because a
+green run that quietly skipped them would be the worst possible outcome. Before
+a release, run them for real:
+
+```bash
+./sandbox-image/build.sh && ./cli/build.sh && mix test   # bubblewrap, @security included
+```
 
 Rules of thumb:
 
 - **`Given` steps may write files directly** — that is setup. **`When` steps go
-  through the real MCP server**: real transport, real sandbox, real command.
-  Never short-circuit the interface under test; the transport and the sandbox
-  are the parts most likely to break for a real client.
+  through the tool handler**: `Mealplan.Mcp.Tools.call/4`, real sandbox, real
+  command. Never short-circuit the interface under test. The transport above it
+  is the one part this no longer covers, which is exactly why it needs its own
+  tests — see ADR 0022.
 - **Scenarios are deterministic**: fixed ISO dates, frozen clock, a fresh
   meal-plan folder per scenario.
 - **A bug gets a failing scenario before it gets a fix.**
 - `@core` and `@security` must pass before any release. `@future` documents
-  intent and is excluded from the default run.
+  intent and is excluded from the default run. `@security` cannot pass under
+  `MEALPLAN_SANDBOX=host`, where it does not run at all — a release needs the
+  bubblewrap run.
 
 See `features/README.md` for the conventions the scenarios follow.
 
