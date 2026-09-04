@@ -92,20 +92,26 @@ if url = System.get_env("DATABASE_URL") do
   config :mealplan, Mealplan.Repo, url: url
 end
 
-# The Cucumber harness (features/support/world.ts) spawns this app as a real
-# server on a reserved port and drives it over loopback, the same way the
-# TypeScript `startServer` was driven in-process. `mix test` (ExUnit) keeps the
-# Ecto SQL sandbox and no HTTP server; CUCUMBER=1 turns both on.
-if config_env() == :test and System.get_env("CUCUMBER") do
-  config :mealplan, MealplanWeb.Endpoint, server: true
+# The scenarios run in this BEAM (ADR 0022), and the ones that walk the consent
+# page and the /kroger screens need a server to walk it on. They drive it over
+# loopback with a real HTTP client, so the exe.dev gate, the redirects and the
+# form posts are all the real ones — which is how the authorisation server keeps
+# the coverage the move in process would otherwise have cost it.
+#
+# The issuer must be the address the server actually answers on, because a
+# redirect_uri is built from it and Kroger's callback comes back to it.
+if config_env() == :test do
+  test_port =
+    String.to_integer(
+      System.get_env("MEALPLAN_TEST_PORT") ||
+        Integer.to_string(4002 + String.to_integer(System.get_env("MIX_TEST_PARTITION") || "0"))
+    )
 
-  # `cucumber-js --parallel N` has N of these servers up at once, each holding a
-  # whole pool, so the pool size is multiplied by N against one Postgres and its
-  # default max_connections of 100. A scenario drives one client through one
-  # request at a time; it does not need ten connections to do it.
-  config :mealplan, Mealplan.Repo,
-    pool: DBConnection.ConnectionPool,
-    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4")
+  config :mealplan, MealplanWeb.Endpoint,
+    server: true,
+    http: [ip: {127, 0, 0, 1}, port: test_port]
+
+  config :mealplan, public_url: "http://127.0.0.1:#{test_port}"
 end
 
 if config_env() == :prod do

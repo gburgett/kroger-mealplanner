@@ -13,12 +13,11 @@ config :mealplan, Mealplan.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# The server IS run during test, and `config/runtime.exs` turns it on: the
+# scenarios that walk the consent page and the /kroger screens drive it over
+# loopback. That file also picks the port and matches the OAuth issuer to it.
 config :mealplan, MealplanWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4002],
-  secret_key_base: "3wOsSBZcVA3BmHDWOFzU2zCimGsoke+zhZ4cZWmb7LGTEH3nDnTljYpHDot45MjO",
-  server: false
+  secret_key_base: "3wOsSBZcVA3BmHDWOFzU2zCimGsoke+zhZ4cZWmb7LGTEH3nDnTljYpHDot45MjO"
 
 # Print only warnings and errors during test
 config :logger, level: :warning
@@ -62,7 +61,8 @@ config :cucumber,
     "features/preferences.feature",
     "features/recipes.feature",
     "features/shopping_list.feature",
-    "features/kroger_cart.feature"
+    "features/kroger_cart.feature",
+    "features/kroger_link.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

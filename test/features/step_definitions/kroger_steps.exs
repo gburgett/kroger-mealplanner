@@ -18,6 +18,7 @@ defmodule Mealplan.Features.KrogerSteps do
   import ExUnit.Assertions
 
   alias Mealplan.Kroger.{Config, Store}
+  alias Mealplan.Features.BrowserSteps, as: Browser
   alias Mealplan.Mcp.Tools
   alias Mealplan.Mock.Kroger
 
@@ -423,6 +424,349 @@ defmodule Mealplan.Features.KrogerSteps do
     refute String.contains?(output(context), "KROGER_CLIENT_SECRET"), "even the name leaked in"
     {:ok, context}
   end
+
+  # ---------------------------------------------------------------------------
+  # The link flow, through the browser.
+  #
+  # These go over real HTTP to the endpoint this BEAM is running, so the exe.dev
+  # gate, the consent page, the store picker and every redirect are the real
+  # ones. Kroger's sign-in is the only thing stood in for, and it redirects
+  # straight back with a code — what is under test is our half of the exchange,
+  # not Kroger's login form.
+  # ---------------------------------------------------------------------------
+
+  step "the consent page offers to connect my Kroger account", context do
+    response = Browser.response(context)
+    assert response.status == 200, "the consent page answered #{response.status}"
+
+    assert Regex.match?(~r/name="connect_kroger"/, response.body),
+           "the consent page has no Kroger checkbox"
+
+    {:ok, context}
+  end
+
+  step "I approve the client and ask to connect Kroger", context do
+    {:ok, approve(context, true)}
+  end
+
+  step "I approve the client without connecting Kroger", context do
+    {:ok, approve(context, false)}
+  end
+
+  step "I am sent to Kroger to sign in", context do
+    response = Browser.response(context)
+    assert response.status == 302, "expected a redirect to Kroger, got #{response.status}"
+    to = response.location || ""
+
+    assert String.starts_with?(to, "#{context.kroger.base}/v1/connect/oauth2/authorize"),
+           "it was sent to #{to}, which is not Kroger's sign-in"
+
+    # No code may have been minted yet: the whole point of the ordering is that
+    # the sixty-second code is issued last.
+    refute Regex.match?(~r/[?&]code=/, to), "a code was issued before the link finished"
+    {:ok, context}
+  end
+
+  step "the sign-in asks Kroger for only {string}", %{args: [scopes]} = context do
+    # Read off the redirect rather than the mock's log: what is under test is
+    # what we ASK for, and the ask is the thing the household's browser carries
+    # to Kroger. A scope Kroger has not granted this application never reaches a
+    # password box — it is refused at /authorize.
+    asked = Browser.response(context).location |> URI.parse() |> query_of() |> Map.get("scope")
+    assert asked == scopes, ~s(the sign-in asked Kroger for "#{asked}")
+    {:ok, context}
+  end
+
+  step "Kroger sends me back with a code", context do
+    {:ok, follow_kroger_sign_in(context)}
+  end
+
+  step "I have connected my Kroger account through the consent page", context do
+    context = Map.put(context, :signed_in_as, Mealplan.Config.owner())
+
+    {:ok,
+     context
+     |> Browser.register_client("Test Assistant")
+     |> ask_for_authorisation()
+     |> approve(true)
+     |> follow_kroger_sign_in()}
+  end
+
+  step "the meal planner holds my Kroger credential", context do
+    assert Store.connected?(tenant_id(context)), "no Kroger credential was saved"
+    {:ok, context}
+  end
+
+  step "the meal planner holds no Kroger credential", context do
+    refute Store.connected?(tenant_id(context)), "a Kroger credential was saved"
+    {:ok, context}
+  end
+
+  step "I am asked which store I shop at", context do
+    response = Browser.response(context)
+    assert response.status == 302, "expected the store picker, got #{response.status}"
+
+    assert String.starts_with?(response.location || "", "/kroger/store"),
+           "it went to #{response.location}, not the store picker"
+
+    page = Browser.visit(context, response.location)
+    assert Regex.match?(~r/Which store do you shop at/i, Browser.response(page).body)
+    {:ok, page}
+  end
+
+  step "I look for stores near {string}", %{args: [zip]} = context do
+    {:ok, context |> Map.put(:kroger_zip, zip) |> open_store_picker(zip)}
+  end
+
+  step "I am shown the store {string}", %{args: [name]} = context do
+    body = Browser.response(context).body
+    assert String.contains?(body, name), ~s("#{name}" is not on the picker:\n#{body})
+    {:ok, context}
+  end
+
+  step ~r/^I choose the store "([^"]*)" for (\w+)$/, %{args: [name, modality]} = context do
+    # The same default the TypeScript world carried: a scenario that chooses a
+    # store without searching first still has to search on the way, and 45202 is
+    # the postcode both mock stores are near.
+    zip = context[:kroger_zip] || "45202"
+    context = if context[:kroger_link_id], do: context, else: open_store_picker(context, zip)
+    store = Kroger.store_named(name)
+
+    {:ok,
+     Browser.submit(context, "/kroger/store", %{
+       "link" => context.kroger_link_id,
+       "zip" => zip,
+       "store" => store.location_id,
+       "modality" => modality
+     })}
+  end
+
+  step "the client is given an authorisation code", context do
+    response = Browser.response(context)
+
+    assert response.status == 302,
+           "expected a redirect back to the client, got #{response.status}"
+
+    back = URI.parse(response.location || "")
+
+    assert "#{back.scheme}://#{back.authority}#{back.path}" == Browser.callback_url(),
+           "it went to #{response.location}, not the client's callback"
+
+    assert query_of(back)["code"], "no code came back: #{response.location}"
+    {:ok, context}
+  end
+
+  step "the store was committed to the meal plan's history", context do
+    context = run_bash(context, "git log --oneline -20")
+
+    assert Regex.match?(~r/kroger: shop at/, context.last.stdout),
+           "the store was never committed:\n#{context.last.stdout}"
+
+    {:ok, context}
+  end
+
+  step "I open {string} in a browser", %{args: [where]} = context do
+    {:ok, Browser.visit(context, where)}
+  end
+
+  step "I am told my Kroger account is connected", context do
+    response = Browser.response(context)
+    assert response.status == 200, "the page answered #{response.status}"
+    assert Regex.match?(~r/Your Kroger account is connected/i, response.body)
+    {:ok, context}
+  end
+
+  step "I disconnect my Kroger account", context do
+    {:ok, Browser.submit(context, "/kroger/disconnect", %{})}
+  end
+
+  step "Kroger sends me back with the state {string}", %{args: [state]} = context do
+    url = "/kroger/callback?code=made-up&state=#{URI.encode_www_form(state)}"
+    {:ok, context |> Map.put(:kroger_callback_url, url) |> Browser.visit(url)}
+  end
+
+  step "Kroger sends me back with the same state a second time", context do
+    url = context[:kroger_callback_url] || flunk("no Kroger callback has happened in this scenario")
+    {:ok, Browser.visit(context, url)}
+  end
+
+  step "the Kroger token store is outside the meal-plan folder", context do
+    # It is a database row, not a file: there is no path under the folder for it
+    # to be at, and the sandbox has no client, no socket and no credential to
+    # reach Postgres with. The assertion is that the folder holds nothing that
+    # looks like the credential.
+    held = Store.tokens(tenant_id(context))
+    assert held, "no Kroger token is held, so this scenario proves nothing"
+
+    context = run_bash(context, "grep -rl #{shell_quote(held.access_token)} . 2>/dev/null || true")
+
+    assert String.trim(context.last.stdout) == "",
+           "the Kroger credential is inside the folder, which the agent can read:\n#{context.last.stdout}"
+
+    {:ok, context}
+  end
+
+  # --- what the agent can find out about linking -----------------------------
+  #
+  # The agent cannot connect an account or change a shop — it needs a person and
+  # a browser. What it CAN do is say where to go, and these steps check that the
+  # answer is one somebody can act on: the real address, and the actual steps.
+
+  step "the meal planner's instructions say how to change shops", context do
+    instructions = Mealplan.Mcp.Server.server_instructions()
+    says_how_to_change_shops(instructions, "the handshake instructions")
+    {:ok, Map.put(context, :documentation, [instructions])}
+  end
+
+  step "the {string} tool description says how to change shops", %{args: [name]} = context do
+    tool =
+      Enum.find(Tools.list(), &(Map.get(&1, "name") == name)) ||
+        flunk(~s(there is no "#{name}" tool))
+
+    description = Map.get(tool, "description") || ""
+    says_how_to_change_shops(description, ~s(the "#{name}" description))
+    {:ok, Map.update(context, :documentation, [description], &(&1 ++ [description]))}
+  end
+
+  step "each of those names this server's own address", context do
+    collected = context[:documentation] || []
+    assert collected != [], "nothing was collected to check"
+
+    for text <- collected do
+      assert String.contains?(text, "#{Mealplan.Config.public_url()}/kroger"),
+             "this names no address a person could open — a bare \"/kroger\" is no use " <>
+               "in a chat window:\n#{text}"
+    end
+
+    {:ok, context}
+  end
+
+  step "the output says how to change shops", context do
+    says_how_to_change_shops(output(context), "the output")
+    {:ok, context}
+  end
+
+  step "the output names this server's own address", context do
+    assert String.contains?(output(context), "#{Mealplan.Config.public_url()}/kroger"),
+           "the output names no address a person could open:\n#{output(context)}"
+
+    {:ok, context}
+  end
+
+  step "the refusal says how to change shops", context do
+    says_how_to_change_shops(refusal(context), "the refusal")
+    {:ok, context}
+  end
+
+  step "the refusal names this server's own address", context do
+    assert String.contains?(refusal(context), "#{Mealplan.Config.public_url()}/kroger"),
+           "the refusal names no address a person could open:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the refusal names {string}", %{args: [what]} = context do
+    assert String.contains?(refusal(context), what),
+           "the refusal does not name #{what}:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  # The four beats a person has to walk, wherever the text is found.
+  defp says_how_to_change_shops(text, where) do
+    for beat <- [~r/postcode/i, ~r/find stores/i, ~r/pickup or delivery/i, ~r{config/kroger\.md}] do
+      assert Regex.match?(beat, text), "#{where} never mentions #{inspect(beat)}"
+    end
+
+    # It must be honest about who does it. An agent that thinks it can do this
+    # itself will try, fail, and tell the household nothing useful.
+    assert Regex.match?(~r/person at a browser|needs a person|cannot do it/i, text),
+           "#{where} does not say a person has to do it"
+  end
+
+  # --- the browser, walked ---------------------------------------------------
+
+  defp approve(context, connect_kroger?) do
+    form = %{
+      "consent_id" => Browser.consent_id_in(Browser.response(context).body),
+      "decision" => "approve"
+    }
+
+    form = if connect_kroger?, do: Map.put(form, "connect_kroger", "yes"), else: form
+    Browser.submit(context, "/consent", form)
+  end
+
+  defp ask_for_authorisation(context) do
+    {_verifier, challenge} = Browser.pkce()
+
+    query =
+      URI.encode_query(%{
+        "response_type" => "code",
+        "client_id" => context.registered["client_id"],
+        "redirect_uri" => Browser.callback_url(),
+        "code_challenge" => challenge,
+        "code_challenge_method" => "S256"
+      })
+
+    context = Browser.visit(context, "/authorize?#{query}")
+    page = Browser.response(context)
+    assert page.status == 200, "the consent page answered #{page.status}:\n#{page.body}"
+    context
+  end
+
+  # Follow the redirect to Kroger, sign in, and come back.
+  #
+  # The mock's authorize endpoint redirects straight back with a code, which is
+  # what stands in for Kroger's login screen. Everything after that — the token
+  # exchange, saving the credential, the hop to the store picker — is the real
+  # server doing the real thing.
+  defp follow_kroger_sign_in(context) do
+    to_kroger = Browser.response(context).location
+    assert to_kroger, "nothing redirected to Kroger"
+
+    signed_in = Mealplan.Browser.get_url(to_kroger)
+    back = signed_in.location
+    assert back, "Kroger did not redirect back: #{signed_in.status}"
+
+    callback = URI.parse(back)
+    url = "#{callback.path}?#{callback.query}"
+
+    context =
+      context
+      |> Map.put(:kroger_callback_url, url)
+      |> Browser.visit(url)
+
+    picker = Browser.response(context).location || ""
+
+    case picker |> URI.parse() |> query_of() |> Map.get("link") do
+      nil -> context
+      link -> Map.put(context, :kroger_link_id, link)
+    end
+  end
+
+  # Open the store picker, and remember the link it is holding.
+  defp open_store_picker(context, zip) do
+    query =
+      %{"zip" => zip}
+      |> then(fn q ->
+        if context[:kroger_link_id], do: Map.put(q, "link", context.kroger_link_id), else: q
+      end)
+      |> URI.encode_query()
+
+    context = Browser.visit(context, "/kroger/store?#{query}")
+    page = Browser.response(context)
+    assert page.status == 200, "the store picker answered #{page.status}:\n#{page.body}"
+
+    case Regex.run(~r/name="link" value="([^"]+)"/, page.body) do
+      [_, link] -> Map.put(context, :kroger_link_id, link)
+      _ -> flunk("the picker carries no link:\n#{page.body}")
+    end
+  end
+
+  defp query_of(%URI{query: nil}), do: %{}
+  defp query_of(%URI{query: query}), do: URI.decode_query(query)
+
+  defp shell_quote(word), do: "'" <> String.replace(word, "'", "'\\''") <> "'"
 
   # --- the tools -------------------------------------------------------------
 
