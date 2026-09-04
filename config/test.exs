@@ -43,7 +43,11 @@ config :mealplan, boot_household: false
 # ported yet and a glob would report them as failures rather than as work:
 #
 #   auth.feature, kroger_link.feature, kroger_cart.feature, walmart.feature,
-#   consumable_recheck.feature
+#   consumable_recheck.feature   — need the OAuth handshake and the three
+#                                   mocked third-party HTTP APIs
+#   sandbox.feature              — 51 of its 69 scenarios are @security and
+#                                   belong to bubblewrap mode; the rest need
+#                                   step definitions nobody has written yet
 #
 # Those need the OAuth handshake and the three mocked third-party HTTP APIs,
 # which the TypeScript harness stood up per scenario. Adding a file here is how
@@ -57,7 +61,6 @@ config :cucumber,
     "features/pantry.feature",
     "features/preferences.feature",
     "features/recipes.feature",
-    "features/sandbox.feature",
     "features/shopping_list.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],

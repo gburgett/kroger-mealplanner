@@ -51,7 +51,11 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, run_bash(context, command, message)}
   end
 
-  step ~r/^I (?:have )?run "(.*)"$/, %{args: [command]} = context do
+  # The negative lookahead is the TypeScript's, verbatim, and it is load-bearing:
+  # without it `(.*)` swallows `" with the message "…"` and both definitions
+  # match. cucumber-js took the first; this runner calls it ambiguous, which is
+  # the better behaviour and how the defect was found.
+  step ~r/^I (?:have )?run (?!.*" with the message ")"(.*)"$/, %{args: [command]} = context do
     {:ok, run_bash(context, command, "bash #{command}")}
   end
 
@@ -223,7 +227,11 @@ defmodule Mealplan.Features.CorpusSteps do
   end
 
   step "the file {string} reads:", %{args: [path]} = context do
-    assert String.trim_trailing(read!(context, path)) == String.trim_trailing(context.docstring)
+    # Trailing whitespace on a line is invisible in a Gherkin doc string and in
+    # the document it wrote, so it is not what this step is about.
+    assert without_trailing_space(read!(context, path)) ==
+             without_trailing_space(context.docstring)
+
     {:ok, context}
   end
 
@@ -283,15 +291,31 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  step ~r/^the ingredient "([^"]*)" in "([^"]*)" is read as "([^"]*)"(?: with no unit)?$/,
+  # How the `mealplan` CLI read a line, not how the line is written. The corpus
+  # parser lives only in the CLI (ADR 0007), so `mealplan validate --json` is
+  # the only honest way to ask — the same pass that reports the problems, with
+  # no second parser anywhere. A port of features/steps/mealplan.steps.ts.
+  step "the ingredient {string} in {string} is read as {string} with no unit",
+       %{args: [item, recipe, quantity]} = context do
+    parsed = ingredient_as(context, item, recipe)
+    assert parsed["quantity"] == quantity
+
+    assert parsed["unit"] in [nil, ""],
+           "#{inspect(item)} was read with the unit #{inspect(parsed["unit"])}"
+
+    {:ok, context}
+  end
+
+  step "the ingredient {string} in {string} is read as {string}",
        %{args: [item, recipe, reading]} = context do
-    lines = context |> read!(Documents.recipe_path(recipe)) |> Documents.ingredients_of()
-    line = Enum.find(lines, &String.contains?(&1, item))
-    assert line, "no ingredient #{inspect(item)} in #{recipe}:\n#{Enum.join(lines, "\n")}"
+    parsed = ingredient_as(context, item, recipe)
 
-    assert line in ["- #{reading} #{item}", "- #{reading}"],
-           "#{inspect(item)} reads #{inspect(line)}, not #{inspect("- #{reading} #{item}")}"
+    actual =
+      if parsed["unit"] in [nil, ""],
+        do: parsed["quantity"],
+        else: "#{parsed["quantity"]} #{parsed["unit"]}"
 
+    assert actual == reading
     {:ok, context}
   end
 
@@ -404,7 +428,7 @@ defmodule Mealplan.Features.CorpusSteps do
   end
 
   step "the output says the folder is valid", context do
-    assert String.contains?(output(context), "no problems")
+    assert String.contains?(output(context), "is valid"), output(context)
     {:ok, context}
   end
 
@@ -585,6 +609,26 @@ defmodule Mealplan.Features.CorpusSteps do
   # Nothing to do: no step above ever ran one.
   step "I never ran a git command", context do
     {:ok, context}
+  end
+
+  step "the history has 1 more commit than before", context do
+    before = Map.get(context, :commits_before) || flunk("no earlier commit count was remembered")
+    assert commit_count(context) == before + 1
+    {:ok, context}
+  end
+
+  step "the recipe {string} has been edited on:", %{args: [name]} = context do
+    context =
+      Enum.reduce(Enum.drop(context.datatable.raw, 1), context, fn [date | _], acc ->
+        acc
+        |> Map.put(:now, at_noon(date))
+        |> write_file(
+          Documents.recipe_path(name),
+          Documents.recipe_document(name: name, servings: 4) <> "\n<!-- edited #{date} -->\n"
+        )
+      end)
+
+    {:ok, Map.put(context, :now, Mealplan.Features.CorpusHooks.frozen_clock())}
   end
 
   step "the last commit to the meal-plan folder was made on {string}",
@@ -791,6 +835,40 @@ defmodule Mealplan.Features.CorpusSteps do
       tool -> Map.get(tool, "description", "")
     end
   end
+
+  defp ingredient_as(context, item, recipe) do
+    context =
+      run_bash(
+        context,
+        "mealplan validate --json #{shell_quote(Documents.recipe_path(recipe))}",
+        "bash mealplan validate"
+      )
+
+    result = last(context)
+
+    assert result.exit_code == 0,
+           "mealplan could not read #{recipe}:\n#{result.stdout}#{result.stderr}"
+
+    ingredients =
+      result.stdout
+      |> Jason.decode!()
+      |> Map.get("recipes", [])
+      |> Enum.flat_map(&Map.get(&1, "ingredients", []))
+
+    found = Enum.find(ingredients, &(Map.get(&1, "item") == item))
+    assert found, "#{recipe} has no ingredient #{inspect(item)}: #{inspect(ingredients)}"
+    found
+  end
+
+  defp without_trailing_space(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map(&String.trim_trailing/1)
+    |> Enum.join("\n")
+    |> String.trim_trailing()
+  end
+
+  defp at_noon(date), do: DateTime.new!(Date.from_iso8601!(date), ~T[12:00:00], "Etc/UTC")
 
   defp read!(context, path), do: File.read!(host_path(context, path))
   defp host_path(context, path), do: Path.join(context.folder, path)
