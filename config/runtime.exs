@@ -92,6 +92,22 @@ if url = System.get_env("DATABASE_URL") do
   config :mealplan, Mealplan.Repo, url: url
 end
 
+# The TypeScript harness (features/support/world.ts) is still the only runner for
+# features/sandbox.feature, and it spawns this app as an OS process on a port it
+# reserved itself. CUCUMBER=1 is how it says so: the port and the pool below are
+# ITS choices, and the ExUnit block after this one must not overrule them.
+if config_env() == :test and System.get_env("CUCUMBER") do
+  config :mealplan, MealplanWeb.Endpoint, server: true
+
+  # `cucumber-js --parallel N` has N of these servers up at once, each holding a
+  # whole pool, so the pool size is multiplied by N against one Postgres and its
+  # default max_connections of 100. A scenario drives one client through one
+  # request at a time; it does not need ten connections to do it.
+  config :mealplan, Mealplan.Repo,
+    pool: DBConnection.ConnectionPool,
+    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4")
+end
+
 # The scenarios run in this BEAM (ADR 0022), and the ones that walk the consent
 # page and the /kroger screens need a server to walk it on. They drive it over
 # loopback with a real HTTP client, so the exe.dev gate, the redirects and the
@@ -100,7 +116,7 @@ end
 #
 # The issuer must be the address the server actually answers on, because a
 # redirect_uri is built from it and Kroger's callback comes back to it.
-if config_env() == :test do
+if config_env() == :test and is_nil(System.get_env("CUCUMBER")) do
   test_port =
     String.to_integer(
       System.get_env("MEALPLAN_TEST_PORT") ||

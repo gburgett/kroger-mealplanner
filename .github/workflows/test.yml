@@ -1,12 +1,24 @@
 name: test
 
-# The scenarios under features/ run in process, in host mode: no sandbox image
-# to build, no server to spawn, no OAuth handshake. See ADR 0022.
+# The scenarios under features/ run in host mode: no sandbox image to build, and
+# nothing spawned per scenario. See ADR 0022.
+#
+# The tool scenarios run in the test BEAM against the handlers. The ones about
+# the screens and the transport go over a real socket to an endpoint this same
+# BEAM is running, so the exe.dev gate, the OAuth handshake and anubis_mcp's
+# Streamable HTTP transport are all under test here too — ADR 0023. The three
+# third parties (Kroger, Walmart, the exe.dev LLM gateway) are real listeners on
+# 127.0.0.1, so nothing in this job can reach a real one.
 #
 # What this job does NOT prove is containment. Every @security scenario is
 # excluded in host mode, and mix test says so in a banner rather than reporting
 # a quiet green. Those scenarios need bubblewrap and a built image — the
 # `sandboxed` job below, which is where a release gets its evidence.
+#
+# (That exclusion is wider than it needs to be: 22 of the 23 @security scenarios
+# in the ported files pass under host mode, because most are about the
+# authorisation boundary rather than containment. Narrowing it needs a second
+# tag and a decision about what @security promises — see ADR 0023.)
 
 on:
   push:

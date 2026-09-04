@@ -38,19 +38,15 @@ config :mealplan, boot_household: false
 
 # The scenarios stay in features/, where AGENTS.md puts them and where the
 # Cucumber suite read them from. Only the runner changed.
-# Named one by one rather than globbed, because four feature files are NOT
-# ported yet and a glob would report them as failures rather than as work:
 #
-#   auth.feature, kroger_link.feature, kroger_cart.feature, walmart.feature,
-#   consumable_recheck.feature   — need the OAuth handshake and the three
-#                                   mocked third-party HTTP APIs
-#   sandbox.feature              — 51 of its 69 scenarios are @security and
-#                                   belong to bubblewrap mode; the rest need
-#                                   step definitions nobody has written yet
+# Named one by one rather than globbed, because one feature file is NOT ported:
 #
-# Those need the OAuth handshake and the three mocked third-party HTTP APIs,
-# which the TypeScript harness stood up per scenario. Adding a file here is how
-# they come back. See docs/test-suite-parallelisation-study.md §9.
+#   sandbox.feature   — 51 of its 69 scenarios are @security and belong to
+#                       bubblewrap mode, and the rest need step definitions
+#                       nobody has written yet. The TypeScript harness
+#                       (`pnpm test:security`) is still its only runner.
+#
+# Adding a file here is how one comes back. See ADR 0023.
 config :cucumber,
   features: [
     "features/corpus.feature",

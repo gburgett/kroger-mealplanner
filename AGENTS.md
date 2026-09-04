@@ -230,17 +230,34 @@ a real git repository, and the real `mealplan` binary. The only thing ever
 mocked is a third-party HTTP API — Kroger, Walmart and the exe.dev LLM gateway,
 and nothing else.
 
-**What that costs, stated plainly:** the Streamable HTTP transport and the OAuth
-authorisation server above the tool are no longer exercised by every scenario.
-They were, and the reason given here for driving a real request — that the
-transport is the part most likely to break for a real client — has not stopped
-being true. They need their own tests. ADR 0022 records the debt.
+**Some scenarios still go over a socket, and they are the ones that should**
+(ADR 0023). `mix test` runs the endpoint on 127.0.0.1, so:
+
+- **The screens** — the consent page and the `/kroger` flow — are walked with a
+  real HTTP client. The exe.dev gate, the redirects and the form posts are the
+  real ones, and a redirect is never followed, because where it goes IS the
+  assertion.
+- **`auth.feature` drives the whole client** — dynamic registration, PKCE,
+  consent, the token exchange, then `initialize` and `tools/call` over the real
+  Streamable HTTP transport. A command in those scenarios reaches the sandbox
+  through anubis_mcp and the bearer plug, exactly as a real client's would.
+
+That is what ADR 0022 said it had lost and would need to pay back. It is paid.
 
 **`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine that
 cannot build the sandbox image, such as a CI runner. Every `@security` scenario
 is EXCLUDED in that mode and `mix test` prints a banner saying so, because a
-green run that quietly skipped them would be the worst possible outcome. Before
-a release, run them for real:
+green run that quietly skipped them would be the worst possible outcome.
+
+That exclusion is currently wider than it needs to be, and knowing so is worth
+more than pretending otherwise: `mix test --include security` passes 22 of the
+23 `@security` scenarios in the ported files under host mode, because most of
+them are about the AUTHORISATION boundary, which host mode does not weaken.
+Only "History cannot be pushed anywhere" needs real confinement. Narrowing the
+rule needs a second tag and changes what a green run claims, so it has not been
+done — see ADR 0023.
+
+Before a release, run them for real:
 
 ```bash
 ./sandbox-image/build.sh && ./cli/build.sh && mix test   # bubblewrap, @security included
@@ -250,9 +267,9 @@ Rules of thumb:
 
 - **`Given` steps may write files directly** — that is setup. **`When` steps go
   through the tool handler**: `Mealplan.Mcp.Tools.call/4`, real sandbox, real
-  command. Never short-circuit the interface under test. The transport above it
-  is the one part this no longer covers, which is exactly why it needs its own
-  tests — see ADR 0022.
+  command. Never short-circuit the interface under test. Where the scenario is
+  about the transport or a screen, go one level further out and drive real
+  HTTP — `Mealplan.McpClient` and `Mealplan.Browser` — rather than the handler.
 - **Scenarios are deterministic**: fixed ISO dates, frozen clock, a fresh
   meal-plan folder per scenario.
 - **A bug gets a failing scenario before it gets a fix.**

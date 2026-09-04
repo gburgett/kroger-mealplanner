@@ -298,17 +298,57 @@ Two things inside that are worth keeping:
   like a test failure. Host-mode commands get a scratch `TMPDIR` per command
   now.
 
-**Ported and green:** `corpus`, `history`, `meals`, `migrations`, `pantry`,
-`preferences`, `recipes`, `shopping_list` — 119 scenarios, 0 failures.
+**Ported and green, at that point:** `corpus`, `history`, `meals`, `migrations`,
+`pantry`, `preferences`, `recipes`, `shopping_list` — 119 scenarios, 0 failures.
 
-**Not ported:** `auth`, `kroger_link`, `kroger_cart`, `walmart`,
-`consumable_recheck`. They need the OAuth handshake and the three mocked
-third-party HTTP APIs. `config/test.exs` names the ported files one by one
-rather than globbing, so adding one is how they come back.
+## 10. The five that were left, and what they cost to bring back
 
-**Not run in CI, on purpose:** `sandbox.feature`. 51 of its 69 scenarios are
-`@security` and are false under `host`; they belong to bubblewrap and to a
-person before a release.
+§9 left five feature files unported and recorded the reason: each needed the
+OAuth handshake, or one of three third-party HTTP APIs. ADR 0023 brought all
+five back. The two problems turned out to be one problem — a scenario that
+walks the consent page needs an HTTP server to walk it on, and a scenario that
+sends a cart needs Kroger to answer — so `mix test` runs the endpoint on
+127.0.0.1 and the three third parties are real listeners beside it.
+
+| | Scenarios | Wall clock | Per scenario |
+| --- | --- | --- | --- |
+| Estimated, Cucumber per-scenario process (§2) | 226 | 9–17 min of start-up alone | 2.5–4.5 s |
+| In process, host mode (§9) | 119 | ~35 s | ~0.29 s |
+| **All five files back (ADR 0023)** | **200** | **~50 s** | **~0.25 s** |
+
+Per scenario it got slightly CHEAPER while adding sockets, an endpoint and
+three listeners, which is the measurement worth keeping: the fixed cost §2
+found was the OS process, and nothing about HTTP on loopback brings it back.
+
+What the extra 81 scenarios buy is not only their own coverage. ADR 0022 had
+recorded a debt — the Streamable HTTP transport and the OAuth authorisation
+server were exercised by nothing — and `auth.feature` pays it directly: it
+registers a client, walks PKCE and consent, exchanges a code, and then calls
+`tools/call` over the real transport into the real sandbox.
+
+Two defects were found by doing it, and neither was a test-only defect:
+
+- **anubis_mcp starts its transport by sniffing the environment** (`PHX_SERVER`,
+  `:phoenix, :serve_endpoints`). Under `mix test` neither is set, so the session
+  config was never stored and every request to `/mcp` answered 500 from a
+  persistent-term miss. `Mealplan.Application` passes `start:` explicitly now.
+- **`Mealplan.Sandbox.open/3` can return a dead pid.** `terminate_child/2`
+  returns when the process is dead, but the `Registry` releases the name on the
+  DOWN message that follows, so re-opening inside that window hands back the pid
+  just killed. Only a test does that; the wait is in the harness.
+
+**Not ported:** `sandbox.feature`. 51 of its 69 scenarios are `@security` and
+are false under `host`; they belong to bubblewrap and to a person before a
+release. The TypeScript harness (`pnpm test:security`) is still its only runner,
+which is why `config/runtime.exs` keeps the `CUCUMBER` branch it needs.
+
+**Worth a decision:** `MEALPLAN_SANDBOX=host` excludes every `@security`
+scenario, and `mix test --include security` passes 22 of the 23 in the ported
+files. Most are about the authorisation boundary, which host mode does not
+weaken, so CI is not checking that a made-up bearer token is refused. A vacuous
+pass is worse than a skip for the ones that ARE about containment, so the fix is
+a second tag rather than dropping the rule — and that changes what `@security`
+promises. See ADR 0023.
 
 **Still open:** §7's judgement that the language of the harness was not the
 problem was right about the cause and wrong about the remedy — the port to
