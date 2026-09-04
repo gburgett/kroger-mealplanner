@@ -5,13 +5,17 @@ import Config
 # the adapter changed — `mix test` in a fresh checkout used to fail on a
 # database that was not up, which said nothing about the code under test.
 #
-# One file per partition. `mix test --partitions N` runs N BEAMs at once and
-# SQLite takes one writer per file, so a shared file would serialise them and
-# lose exactly what partitioning buys. The file is created by `ecto.create` and
-# left behind between runs; `mix ecto.reset` or `rm mealplan_test*.db` clears it.
+# One file, always. `mix test --partitions N` looked like the obvious way to
+# get N BEAMs running at once, and this file used to carry a MIX_TEST_PARTITION
+# suffix for it. It is gone: ADR 0025 measured that option and found it does
+# not divide the suite's work, because `Cucumber.compile_features!/1` runs
+# unconditionally in test_helper.exs and generates every scenario as an ExUnit
+# test regardless of which partition Mix thinks it is building — so N
+# partitions run the whole Cucumber suite N times, not once between them. The
+# suite runs as one process. The file is created by `ecto.create` and left
+# behind between runs; `mix ecto.reset` or `rm mealplan_test.db` clears it.
 config :mealplan, Mealplan.Repo,
-  database:
-    Path.expand("../mealplan_test#{System.get_env("MIX_TEST_PARTITION")}.db", __DIR__),
+  database: Path.expand("../mealplan_test.db", __DIR__),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 5,
   # A scenario holds one connection through a whole HTTP round trip, and the

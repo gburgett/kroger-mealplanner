@@ -4,7 +4,10 @@
 **Status:** acted on, and overtaken. §4 (parallel Cucumber workers) is built but
 was never run — it is superseded by ADR 0022, which removed the per-scenario
 process instead of dividing it. §6 is what ADR 0022 chose; §9 records what
-actually happened.
+actually happened. §11 finally ran the worker-parallelism idea §4 proposed —
+against `mix test --partitions`, its post-ADR-0022 form — and found it makes
+the suite slower, not faster. ADR 0025 records the decision; §4 and §6 are
+superseded by it.
 **Applies to:** the `elixir-migration` line, after commit 8d4ccb0 reworked
 `features/support/world.ts` to drive the Elixir app out-of-process.
 **Decides nothing about:** the sandbox, the security boundary, or what the
@@ -356,3 +359,44 @@ Elixir was worth doing, because it is what let the scenarios run in the same
 BEAM as the code. What §7 got right is that the Gherkin had to survive, and it
 did: not one `.feature` file changed except two scenario names in
 `pantry.feature` that were identical to each other.
+
+## 11. §4's idea, finally run — and rejected
+
+§4 proposed dividing the suite across workers. §5 could not run it. ADR 0022
+then removed the thing §4 was dividing — the per-scenario BEAM boot — which
+left the same idea in a new shape: `mix test --partitions N`, one SQLite file
+per partition, the shape ADR 0024 built `config/test.exs` to support. This
+section is that idea, finally run, on the branch that had just finished §10
+and ADR 0024.
+
+Measured (host sandbox mode, 183 non-`@security` scenarios plus two ExUnit
+files):
+
+| Run | Wall clock | Reported |
+| --- | --- | --- |
+| `mix test`, one process | 26.5 s | 183 tests, 0 failures |
+| `mix test --partitions 4`, four processes together | 76.8 s | all exit 0 |
+| — partition 1 alone | 71.3 s | 181 tests |
+| — partition 2 alone | 71.9 s | 173 tests |
+| — partitions 3 and 4, each alone | ~26 s of silent work | "There are no tests to run" |
+
+Four workers very nearly tripled the wall clock instead of quartering it, and
+two of the four produced no visible test output at all despite spending the
+full run doing something — provably something, because their logs show the
+mocked network tools raising mid-scenario.
+
+**Why:** `Mix.Tasks.Test` partitions the `*_test.exs` files it finds on disk
+before `test_helper.exs` loads. `Cucumber.compile_features!/1` runs *inside*
+`test_helper.exs` and defines every scenario as an ExUnit test at that point —
+invisible to the partition split, because it is not a file Mix ever looked at.
+Every worker compiles and runs the whole Cucumber suite regardless of
+`MIX_TEST_PARTITION`. This repository has exactly two plain `*_test.exs`
+files, so with four partitions two of them own none of the round-robin split;
+Mix's `test_files == []` branch still calls `ExUnit.run()` for `after_suite`
+hooks, with formatters silenced first — so those workers ran the entire suite
+with no output and reported success regardless of what actually happened
+inside it.
+
+**Decision:** ADR 0025. The suite runs as one process. §4 and §6 (this
+document's two worker-parallelism proposals) are superseded by it; §§1–3, §7,
+§9 and §10 are unaffected.

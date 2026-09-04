@@ -11,7 +11,6 @@
   "scripts": {
     "start": "node server.ts",
     "test": "MIX_ENV=test mix compile && cucumber-js --tags \"not @future\"",
-    "test:serial": "CUCUMBER_PARALLEL=0 pnpm test",
     "test:security": "cucumber-js --tags \"@security\"",
     "build:sandbox": "./sandbox-image/build.sh",
     "build:cli": "./cli/build.sh"

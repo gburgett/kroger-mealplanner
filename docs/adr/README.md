@@ -39,6 +39,7 @@ decision, write a new record. Give the old record the status
 | [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted |
 | [0023](0023-drive-the-screens-the-transport-and-the-third-parties-over-real-http-in-test.md) | Drive the screens, the transport and the third parties over real HTTP in test | accepted |
 | [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | accepted |
+| [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

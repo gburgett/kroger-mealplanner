@@ -218,32 +218,38 @@ Kroger account"; `POST /kroger/connect` → 302 to
 Nothing has been run against the Cucumber suite yet — see the harness section
 below.
 
-## Test harness rework (done, unrun) — and what it costs
+## Test harness rework (superseded — see ADR 0022 and ADR 0025)
 
-Commit 8d4ccb0 did it: `world.ts` spawns the Elixir app per scenario with
-`mix run --no-halt --no-compile`, passes folder + owner + clock + the three mock
-seams as env, and reads state back with host `git` and `psql`. No `.feature`
-changed and no `features/steps/*.ts` changed, as the plan required.
+Commit 8d4ccb0 did an out-of-process rework first: `world.ts` spawned the
+Elixir app per scenario with `mix run --no-halt --no-compile`, passing
+folder + owner + clock + the three mock seams as env, and reading state back
+with host `git` and `psql`. That design cost a whole BEAM boot, an Ecto
+migration sweep, ~35 sandbox round trips of scaffolding, an OAuth dance and a
+teardown for **each of 226 scenarios** — roughly 2.5–4.5 s of fixed cost
+apiece. `docs/test-suite-parallelisation-study.md` §§1–3 measures it.
 
-That design costs a whole BEAM boot, an Ecto migration sweep, ~35 sandbox round
-trips of scaffolding, an OAuth dance and a teardown for **each of 226
-scenarios** — roughly 2.5–4.5 s of fixed cost apiece, which is most of the
-suite's wall clock. `docs/test-suite-parallelisation-study.md` measures what it
-could and counts the rest.
+The study's first answer to that cost was dividing it across workers (§4):
+`cucumber-js --parallel`, a database per worker. **That was superseded before
+it was ever run.** ADR 0022 removed the per-scenario process instead of
+dividing it — the scenarios run in the test BEAM now, against
+`Mealplan.Mcp.Tools.call/4` — which the study's §9 measured at ~0.29 s/scenario,
+not the 2.5–4.5 s worker-parallelism was dividing. ADR 0023 brought the
+remaining five feature files back over real loopback HTTP; ADR 0024 moved the
+state to SQLite so a checkout needs nothing running to test itself.
 
-Acted on there: the suite now runs `cucumber-js --parallel`, with a database per
-worker (`MIX_TEST_PARTITION` from `CUCUMBER_WORKER_ID`) because a scenario clears
-its rows with `TRUNCATE`, plus a retry on the ephemeral-port race and a smaller
-Cucumber-only connection pool. Expected ~5–6× on an 8-core VM. **None of it has
-been run** — the environment it was written in could not build
-`sandbox-image/rootfs`, so timing the suite serially against in parallel is the
-first job on a machine that can.
+Worker-parallelism's idea did get run once, in its post-ADR-0022 shape
+(`mix test --partitions N`) — and lost: four partitions took 76.8 s against
+26.5 s for one process, because `Cucumber.compile_features!/1` runs outside
+what `--partitions` can see and every worker ran the whole suite regardless.
+ADR 0025 records it and rejects partitioning outright; the suite runs as one
+process. `docs/test-suite-parallelisation-study.md` §11 has the numbers.
 
-Proposed there, not built: one long-lived server per worker instead of one per
-scenario, which needs `tenants` to carry its own folder so `Sandbox.open(tenant)`
-stops reading `Mealplan.Config.folder()`. That is the `open(tenant)` seam ADR
-0008 kept, and it is worth about ten times what the parallelism is. It changes
-tenant resolution, so it needs an ADR first.
+Proposed in the study, not built: one long-lived server per worker instead of
+one per scenario, which needs `tenants` to carry its own folder so
+`Sandbox.open(tenant)` stops reading `Mealplan.Config.folder()`. That is the
+`open(tenant)` seam ADR 0008 kept. It changes tenant resolution, so it needs an
+ADR first, and it is a lever on top of ADR 0022's rework, not a replacement for
+the worker-parallelism idea ADR 0025 closed.
 
 ## Not started
 - **Phase 6 — Oban weekly recheck** inside the release; delete

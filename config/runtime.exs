@@ -161,10 +161,10 @@ end
 if config_env() == :test and System.get_env("CUCUMBER") do
   config :mealplan, MealplanWeb.Endpoint, server: true
 
-  # `cucumber-js --parallel N` has N of these servers up at once. Each gets its
-  # own database FILE — SQLite takes one writer per file, so sharing one would
-  # serialise the workers — and its own small pool. A scenario drives one client
-  # through one request at a time; it does not need ten connections to do it.
+  # One of these servers runs at a time (ADR 0025 — the suite is not
+  # partitioned across workers), against the one database file config/test.exs
+  # names. The pool stays small anyway: a scenario drives one client through
+  # one request at a time, and does not need ten connections to do it.
   config :mealplan, Mealplan.Repo,
     pool: DBConnection.ConnectionPool,
     pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4"),
@@ -181,11 +181,9 @@ end
 # The issuer must be the address the server actually answers on, because a
 # redirect_uri is built from it and Kroger's callback comes back to it.
 if config_env() == :test and is_nil(System.get_env("CUCUMBER")) do
-  test_port =
-    String.to_integer(
-      System.get_env("MEALPLAN_TEST_PORT") ||
-        Integer.to_string(4002 + String.to_integer(System.get_env("MIX_TEST_PARTITION") || "0"))
-    )
+  # A fixed port, not one derived from MIX_TEST_PARTITION: ADR 0025 rejected
+  # partitioning, so there is only ever one of these to bind.
+  test_port = String.to_integer(System.get_env("MEALPLAN_TEST_PORT") || "4002")
 
   config :mealplan, MealplanWeb.Endpoint,
     server: true,

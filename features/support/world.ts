@@ -56,23 +56,11 @@ const FROZEN_CLOCK_ISO = '2026-08-23T12:00:00Z';
 
 const TENANT_SLUG = 'scenario';
 
-/**
- * This worker's slice of the test database namespace.
- *
- * `cucumber-js --parallel N` starts N worker threads, each with its own
- * `process.env` carrying CUCUMBER_WORKER_ID "0".."N-1" (the threads are the
- * reason this is read once at module load: every worker loads its own copy of
- * this module). A scenario clears its tenant rows
- * with TRUNCATE, which is a whole-table statement: two workers sharing one
- * database would delete each other's rows mid-scenario. So each worker gets its
- * own database — `mealplan_test0`, `mealplan_test1`, … — through the same
- * MIX_TEST_PARTITION suffix `config/test.exs` already reads for `mix test`.
- *
- * A serial run (no --parallel) has no worker id and keeps plain `mealplan_test`,
- * so nothing about the single-worker case changes.
- */
-const PARTITION = process.env.MIX_TEST_PARTITION ?? process.env.CUCUMBER_WORKER_ID ?? '';
-
+// Scenarios run one at a time (ADR 0025 rejected worker-level parallelism
+// here, having measured the same idea cost more than it saved on the Mix
+// side), so there is exactly one test database and no per-worker suffix to
+// derive.
+//
 // config/test.exs points Ecto at mealplan_test with these credentials. The
 // harness talks to the same database directly for the two things a step needs
 // that are not HTTP: ageing a token out, and reading back what got stored.
@@ -80,7 +68,7 @@ const PG = {
   host: process.env.PGHOST ?? 'localhost',
   user: process.env.PGUSER ?? 'exedev',
   password: process.env.PGPASSWORD ?? 'mealplan_dev',
-  database: `mealplan_test${PARTITION}`,
+  database: 'mealplan_test',
 };
 
 // The tenant-scoped rows a scenario must not carry into the next. TRUNCATE from
@@ -169,21 +157,13 @@ function runHost(command: string, cwd: string, env?: Record<string, string>): Pr
 }
 
 /**
- * Compile the app and make sure this worker's test database is migrated. Runs
- * once per worker process; every scenario after the first reuses the warm
- * build.
- *
- * Under `--parallel` each worker runs this against its OWN database
- * (MIX_TEST_PARTITION), so `ecto.create` and `ecto.migrate` never race: they
- * touch different databases. `mix compile` DOES touch one shared `_build`, but
- * Mix takes a build lock, so concurrent workers queue rather than corrupt it —
- * and after the first one there is nothing left to compile. `pnpm test` runs a
- * compile up front anyway so that queue is empty by the time workers start.
+ * Compile the app and make sure the test database is migrated. Runs once per
+ * process; every scenario after the first reuses the warm build.
  */
 let toolchain: Promise<void> | undefined;
 function prepareToolchain(): Promise<void> {
   toolchain ??= (async () => {
-    const mixEnv = { ...process.env, MIX_ENV: 'test', MIX_TEST_PARTITION: PARTITION };
+    const mixEnv = { ...process.env, MIX_ENV: 'test' };
     const compile = await execFileAsync('mix', ['compile'], { cwd: REPO_ROOT, env: mixEnv });
     if (compile.exitCode !== 0) {
       throw new Error(`mix compile failed:\n${compile.stdout}\n${compile.stderr}`);
@@ -348,10 +328,6 @@ export class MealPlanWorld extends World {
       // Turns on the HTTP server and the ordinary connection pool. `mix test`
       // (ExUnit) leaves both off.
       CUCUMBER: '1',
-      // The worker's own database. config/test.exs appends this to
-      // "mealplan_test", so the server opens the same one the harness reads
-      // back with psql. Empty on a serial run.
-      MIX_TEST_PARTITION: PARTITION,
       PHX_SERVER: 'true',
       MEALPLAN_PORT: String(this.port),
       // The OAuth issuer and Kroger redirect base. Configuration, never a Host
@@ -555,7 +531,7 @@ export class MealPlanWorld extends World {
       ],
       {
         cwd: REPO_ROOT,
-        env: { ...process.env, MIX_ENV: 'test', MIX_TEST_PARTITION: PARTITION },
+        env: { ...process.env, MIX_ENV: 'test' },
       },
     );
     const marker = result.stdout.indexOf('<<<RECHECK>>>');
