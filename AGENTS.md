@@ -263,6 +263,61 @@ Before a release, run them for real:
 ./sandbox-image/build.sh && ./cli/build.sh && mix test   # bubblewrap, @security included
 ```
 
+### Running the suite
+
+```bash
+MEALPLAN_SANDBOX=host \
+MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release \
+  mix test
+```
+
+That is the command CI runs and the one to reach for while working. The two
+variables are not optional in a checkout with no sandbox image: `MEALPLAN_SANDBOX`
+defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
+command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
+find `mealplan`, which is staged into that image rather than installed on PATH.
+
+`mix test` runs `ecto.create` and `ecto.migrate` first, so PostgreSQL has to be
+up: `localhost`, `exedev` / `mealplan_dev`, overridable through `PGHOST`,
+`PGUSER` and `PGPASSWORD`. `** (Mix) The database for Mealplan.Repo couldn't be
+created` means the server is down, not that the suite is broken — start it and
+run again before changing anything.
+
+Narrowing a run:
+
+```bash
+mix test test/mealplan/sandbox/scratch_test.exs   # a unit test file
+mix test --only security                          # containment, needs bubblewrap
+mix test --include security                       # host mode: 22 of 23 pass, ADR 0023
+mix test --partitions 4                           # a database and a port per partition
+```
+
+Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
+in `test/test_helper.exs` compiles every feature in `config :cucumber, :features`
+whatever else is on the command line. Use tags to narrow scenarios.
+
+`features/sandbox.feature` is not in that list and does not run here. Its only
+runner is still the TypeScript harness — `pnpm test:security`, which spawns the
+app as an OS process. See ADR 0023.
+
+**A run leaves nothing behind, and that is asserted rather than assumed.** Each
+sandboxed command gets one directory under a root named for the OS process id;
+`Mealplan.Sandbox.Runner.run/2` removes it in an `after`, so no path out — a
+timeout, a raise, a non-zero exit — can leak it. The root itself goes at exit,
+and `sweep_stale/0` collects the roots of dead processes at the next start, which
+is what covers a SIGKILL. The root sits on `/dev/shm` when there is 64 MB free
+there; `MEALPLAN_TMPDIR` overrides. `test/mealplan/sandbox/scratch_test.exs`
+holds the regression tests, and they exist because the removal was once the last
+line of the function: a killed `yes | sort` left an 11 GB spill and filled the
+VM to 94%.
+
+After a run, both of these should print nothing:
+
+```bash
+ls /tmp /dev/shm | grep mealplan
+psql -h localhost -U exedev -d mealplan_test -c 'table oauth_clients'   # 0 rows
+```
+
 Rules of thumb:
 
 - **`Given` steps may write files directly** — that is setup. **`When` steps go
