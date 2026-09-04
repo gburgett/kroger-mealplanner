@@ -75,8 +75,7 @@ defmodule Mealplan.Features.CorpusSteps do
   # goes, the folder and the database stay. The scenarios that assert this are
   # about exactly what survives.
   step "the server restarts", context do
-    pid = Mealplan.Sandbox.whereis(context.tenant)
-    if pid, do: DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
+    Mealplan.Features.CorpusHooks.close_session(context.tenant)
 
     {:ok, session, _} =
       Mealplan.Boot.open_corpus(context.tenant, context.folder,

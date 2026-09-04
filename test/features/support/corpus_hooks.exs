@@ -73,6 +73,12 @@ defmodule Mealplan.Features.CorpusHooks do
   end
 
   before_scenario context, name: "open a meal-plan folder" do
+    # The suite is not async, so one shared connection for the scenario is
+    # enough and it reaches the processes that are not this one: the link desk
+    # is a GenServer, and a mock server answers on a Bandit process.
+    owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Mealplan.Repo, shared: true)
+    ExUnit.Callbacks.on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+
     tenant = "scenario-#{System.unique_integer([:positive])}"
     folder = Path.join(run_root(), tenant)
     File.mkdir_p!(folder)
@@ -90,6 +96,12 @@ defmodule Mealplan.Features.CorpusHooks do
     Application.put_env(:mealplan, :folder, folder)
     Application.put_env(:mealplan, :clock, @frozen_clock)
 
+    # The tools resolve a tenant row to reach the Kroger credential, and the
+    # real server bootstraps one at start-up. A scenario gets the same.
+    Mealplan.Accounts.bootstrap!(tenant, Mealplan.Config.owner())
+
+    kroger = start_kroger_mock()
+
     {:ok, session} = Mealplan.Sandbox.open(tenant, folder)
 
     {:ok,
@@ -99,9 +111,66 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:session, session)
      |> Map.put(:now, @frozen_clock)
      |> Map.put(:last, nil)
+     |> Map.put(:last_tool, nil)
+     |> Map.put(:kroger, kroger)
+     |> Map.put(:list_path, nil)
      # What the history held before the scenario did anything, for the steps
      # that assert a delta rather than a total.
      |> Map.put(:commits_before, commit_count(session))}
+  end
+
+  @doc """
+  Close the session for `tenant` and wait for it to let go of its name.
+
+  `DynamicSupervisor.terminate_child/2` returns as soon as the process is dead,
+  but the `Registry` gives up the name on the DOWN message, which arrives
+  afterwards. `Mealplan.Sandbox.open/3` looks the name up first, so re-opening
+  inside that window hands back the pid that was just killed, and the next call
+  to it exits with `:noproc`.
+
+  Production never terminates a session and re-opens it in the same breath —
+  only a scenario that restarts the server does — so the wait lives here rather
+  than in `Mealplan.Sandbox`.
+  """
+  def close_session(tenant, timeout \\ 2_000) do
+    case Mealplan.Sandbox.whereis(tenant) do
+      pid when is_pid(pid) ->
+        DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
+        await_deregistered(tenant, System.monotonic_time(:millisecond) + timeout)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp await_deregistered(tenant, deadline) do
+    cond do
+      Mealplan.Sandbox.whereis(tenant) == nil ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        raise "the session for #{tenant} did not give up its name"
+
+      true ->
+        Process.sleep(1)
+        await_deregistered(tenant, deadline)
+    end
+  end
+
+  # Kroger, stood in for, for EVERY scenario rather than only the ones that use
+  # it. Two reasons. It costs a listener socket and nothing else, so there is no
+  # saving worth the branch. And with `MEALPLAN_KROGER_API_BASE` always pointed
+  # at a mock on 127.0.0.1, no scenario can reach the real api.kroger.com even
+  # by mistake — which a lazily started mock would not guarantee.
+  defp start_kroger_mock do
+    mock = Mealplan.Mock.Kroger.start()
+    ExUnit.Callbacks.on_exit(fn -> Mealplan.Mock.Server.stop(mock) end)
+
+    Application.put_env(:mealplan, :kroger_api_base, mock.base)
+    Application.put_env(:mealplan, :kroger_client_id, Mealplan.Mock.Kroger.client_id())
+    Application.put_env(:mealplan, :kroger_client_secret, Mealplan.Mock.Kroger.client_secret())
+
+    mock
   end
 
   defp commit_count(session) do
@@ -166,13 +235,7 @@ defmodule Mealplan.Features.CorpusHooks do
 
     # Close the session the general hook opened and open the corpus again, so
     # the dated migrations run over the old shape exactly as they would at boot.
-    case Mealplan.Sandbox.whereis(context.tenant) do
-      pid when is_pid(pid) ->
-        DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
-
-      _ ->
-        :ok
-    end
+    close_session(context.tenant)
 
     {:ok, session, _} =
       Mealplan.Boot.open_corpus(context.tenant, folder,
@@ -184,13 +247,7 @@ defmodule Mealplan.Features.CorpusHooks do
   end
 
   after_scenario context do
-    case Mealplan.Sandbox.whereis(context[:tenant]) do
-      pid when is_pid(pid) ->
-        DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
-
-      _ ->
-        :ok
-    end
+    if context[:tenant], do: close_session(context[:tenant])
 
     # Best effort. after_all removes the run root either way, so a scenario that
     # failed before this ran does not strand its corpus.
