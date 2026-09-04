@@ -98,7 +98,89 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:folder, folder)
      |> Map.put(:session, session)
      |> Map.put(:now, @frozen_clock)
-     |> Map.put(:last, nil)}
+     |> Map.put(:last, nil)
+     # What the history held before the scenario did anything, for the steps
+     # that assert a delta rather than a total.
+     |> Map.put(:commits_before, commit_count(session))}
+  end
+
+  defp commit_count(session) do
+    case Integer.parse(
+           String.trim(Mealplan.Sandbox.Session.run(session, "git rev-list --count HEAD").stdout)
+         ) do
+      {n, _} -> n
+      :error -> 0
+    end
+  end
+
+  # A corpus in the shape a dated migration exists to change. The files are
+  # planted BEFORE the session opens over the folder, because the migration
+  # framework is what these scenarios are testing: the migration has to run at
+  # open, the way it does on a real folder that predates it.
+  before_scenario "@old-dinner-shape", context, name: "plant the one-dinner shape" do
+    # Not the template. The template was itself opened once, so it carries the
+    # migration commits in its git history and both migrations in its ledger.
+    # A folder that predates a migration has neither — that is the whole
+    # situation being tested — so this one is built from nothing.
+    folder = context.folder
+    File.rm_rf!(folder)
+    File.mkdir_p!(Path.join(folder, "recipes"))
+    File.mkdir_p!(Path.join(folder, "dinners"))
+
+    File.write!(
+      Path.join(folder, "recipes/chicken-tacos.md"),
+      Mealplan.Documents.recipe_document(name: "Chicken Tacos", servings: 4)
+    )
+
+    File.write!(Path.join(folder, "dinners/2026-08-25.md"), """
+    ---
+    date: 2026-08-25
+    servings: 4
+    ---
+
+    # Dinner for Tuesday, August 25, 2026
+
+    ## Recipes
+
+    - [Chicken Tacos](../recipes/chicken-tacos.md)
+
+    ## Notes
+
+    Family favorite.
+    """)
+
+    File.write!(Path.join(folder, "dinners/2026-08-26.md"), """
+    ---
+    date: 2026-08-26
+    servings: 4
+    ---
+
+    # Dinner for Wednesday, August 26, 2026
+
+    ## Recipes
+
+    ## Notes
+
+    Leftovers night.
+    """)
+
+    # Close the session the general hook opened and open the corpus again, so
+    # the dated migrations run over the old shape exactly as they would at boot.
+    case Mealplan.Sandbox.whereis(context.tenant) do
+      pid when is_pid(pid) ->
+        DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
+
+      _ ->
+        :ok
+    end
+
+    {:ok, session, _} =
+      Mealplan.Boot.open_corpus(context.tenant, folder,
+        now: @frozen_clock,
+        base_url: Mealplan.Config.public_url()
+      )
+
+    {:ok, Map.put(context, :session, session)}
   end
 
   after_scenario context do

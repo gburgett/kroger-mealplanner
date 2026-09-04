@@ -44,6 +44,14 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
+  # In process there is no socket to connect over: the scenarios that say this
+  # go on to assert what `tools/list` advertises, and Tools.list/0 is what the
+  # MCP server answers that with. The connection itself is covered by the
+  # transport's own tests, not by re-doing a handshake in 226 scenarios.
+  step "a client connects to the meal planner over MCP", context do
+    {:ok, context}
+  end
+
   # --- running commands -----------------------------------------------------
 
   step ~r/^I (?:have )?run "(.*)" with the message "(.*)"$/,
@@ -250,7 +258,25 @@ defmodule Mealplan.Features.CorpusSteps do
   step ~r/^the (?:dinner|meal "[^"]*") on "([^"]*)" serves (\d+)$/,
        %{args: [date, servings]} = context do
     document = read!(context, Documents.day_path(date))
-    assert Documents.meal_servings(document) == String.to_integer(servings)
+    wanted = String.to_integer(servings)
+
+    case Documents.meal_servings(document) do
+      nil ->
+        # "A meal with no servings of its own feeds what its recipes feed."
+        each =
+          document
+          |> Documents.linked_recipes()
+          |> Enum.map(fn {_name, target} ->
+            recipe = read!(context, String.replace_prefix(target, "../", ""))
+            to_integer(Documents.front_matter(recipe)["servings"], @default_servings)
+          end)
+
+        assert Enum.max(each) == wanted
+
+      declared ->
+        assert declared == wanted
+    end
+
     {:ok, context}
   end
 
@@ -353,14 +379,19 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
+  # Both sides sorted, as the TypeScript did: the step is about WHAT the command
+  # listed, not the order it came out in. `git log` prints newest first and a
+  # table reads oldest first, and neither is what the scenario is asserting.
   step "the output lists:", context do
-    wanted = Enum.map(context.datatable.raw, fn [cell | _] -> cell end)
+    wanted =
+      context.datatable.raw |> Enum.map(fn [cell | _] -> String.trim(cell) end) |> Enum.sort()
 
     got =
       last(context).stdout
       |> String.split("\n")
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
+      |> Enum.sort()
 
     assert got == wanted, "expected #{inspect(wanted)}, got #{inspect(got)}"
     {:ok, context}
@@ -400,78 +431,99 @@ defmodule Mealplan.Features.CorpusSteps do
 
   # --- what the mealplan command says when it complains ---------------------
 
+  # These are ports of features/steps/output.steps.ts, expression for
+  # expression. They were guesses at first, and the guesses were wrong: the
+  # validator says "The meal plan folder is valid: …", not "no problems".
   step "the output suggests the expected format", context do
-    assert String.contains?(output(context), "- <qty>"), output(context)
+    assert output(context) =~ ~r/<quantity>\s*\[unit\]\s*<item>/, output(context)
     {:ok, context}
   end
 
   step "the output suggests the expected servings format", context do
-    assert String.contains?(output(context), "servings:"), output(context)
+    assert output(context) =~ ~r/servings/i, output(context)
+    assert output(context) =~ ~r/whole number|for example/i, output(context)
+    {:ok, context}
+  end
+
+  step "the output describes the ingredient line format", context do
+    assert output(context) =~ ~r/-\s*<quantity>\s*\[unit\]\s*<item>/, output(context)
+    {:ok, context}
+  end
+
+  step "the output describes the {string} folder", %{args: [folder]} = context do
+    assert String.contains?(output(context), folder), "README.md never mentions #{folder}"
     {:ok, context}
   end
 
   step "the output says the filename and the date do not match", context do
-    text = output(context)
-    assert String.contains?(text, "filename") and String.contains?(text, "date"), text
+    assert output(context) =~ ~r/filename.*date|date.*filename/is, output(context)
     {:ok, context}
   end
 
   step "the output says the filename is not a date", context do
-    text = output(context)
-    assert String.contains?(text, "filename") or String.contains?(text, "YYYY-MM-DD"), text
+    assert output(context) =~ ~r/filename/i, output(context)
+    assert output(context) =~ ~r/YYYY-MM-DD|not a date/i, output(context)
     {:ok, context}
   end
 
   step "the output says the front matter is missing", context do
-    assert String.contains?(output(context), "front matter"), output(context)
+    assert output(context) =~ ~r/front matter/i, output(context)
     {:ok, context}
   end
 
   step "the output says the folder is valid", context do
-    assert String.contains?(output(context), "is valid"), output(context)
+    assert output(context) =~ ~r/\bvalid\b/i, output(context)
     {:ok, context}
   end
 
   step "the output says {string} is missing", %{args: [target]} = context do
     text = output(context)
-
-    assert String.contains?(text, target) and String.contains?(text, "missing"),
-           "expected a missing-#{target} complaint in:\n#{text}"
-
+    assert String.contains?(text, target), "the message never names #{target}:\n#{text}"
+    assert text =~ ~r/missing|not there|does not exist|no such/i, text
     {:ok, context}
   end
 
   step "the output says no meals are planned in that range", context do
-    assert String.contains?(output(context), "no meals"), output(context)
+    assert output(context) =~ ~r/no meals/i, output(context)
     {:ok, context}
   end
 
   step "the output says the end date is before the start date", context do
-    assert String.contains?(output(context), "before"), output(context)
+    assert output(context) =~ ~r/before the start|end date/i, output(context)
     {:ok, context}
   end
 
   step "the output says a date must be written as YYYY-MM-DD", context do
-    assert String.contains?(output(context), "YYYY-MM-DD"), output(context)
+    assert output(context) =~ ~r/YYYY-MM-DD/, output(context)
     {:ok, context}
   end
 
   step "the output says the folder was initialised", context do
-    assert String.contains?(String.downcase(output(context)), "initialise"), output(context)
+    assert output(context) =~ ~r/initialis|initializ/i, output(context)
     {:ok, context}
   end
 
-  step ~r/^the output says "([^"]*)" was left out as a pantry (staple|consumable)$/,
-       %{args: [item, kind]} = context do
+  step "the output says {string} was left out as a pantry staple",
+       %{args: [item]} = context do
     text = output(context)
-    assert String.contains?(text, item) and String.contains?(text, kind), text
+    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
+    assert text =~ ~r/stapl/i, text
+    {:ok, context}
+  end
+
+  step "the output says {string} was left out as a pantry consumable",
+       %{args: [item]} = context do
+    text = output(context)
+    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
+    assert text =~ ~r/consumable/i, text
     {:ok, context}
   end
 
   step "the output says to check with the household about {string}",
        %{args: [item]} = context do
     text = output(context)
-    assert String.contains?(text, item) and String.contains?(text, "check"), text
+    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
+    assert text =~ ~r/check/i, text
     {:ok, context}
   end
 
