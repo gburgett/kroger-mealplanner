@@ -9,6 +9,11 @@ defmodule Mealplan.Boot do
   server does not accept a request until the corpus is in a known shape. A
   failure here crashes the boot — a refusal for a person still looking at the
   journal, exactly as the TypeScript server exited non-zero.
+
+  The per-tenant half is `open_corpus/3`, separately callable. Production calls
+  it once, for the one household. The test suite calls it for each scenario's
+  own tenant and folder, which is how a scenario gets a corpus in the state a
+  real first boot leaves behind rather than a hand-built imitation of one.
   """
 
   use GenServer, restart: :transient
@@ -22,12 +27,58 @@ defmodule Mealplan.Boot do
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+  @doc """
+  Whether the supervision tree opens the household's corpus at application
+  start.
+
+  True everywhere the server serves. False under ExUnit, where there is no one
+  household: each test opens its own tenant over its own folder, and a boot that
+  insisted on `MEALPLAN_FOLDER` would open a session over the developer's real
+  meal plan — or, with no image built, refuse to start the application at all
+  and take every unit test down with it.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: Application.get_env(:mealplan, :boot_household, true)
+
+  @doc """
+  Open `tenant`'s corpus at `folder` and bring it to the shape a served request
+  can assume: a git repository, scaffolded, with the dated migrations run.
+
+  Returns `{:ok, session, scaffolded}` where `scaffolded` is the paths the
+  scaffold wrote — empty when the folder was already in shape.
+
+  `now` is the one instant the whole sequence uses. Production reads the wall
+  clock; a scenario pins it, so the first commit's date is deterministic.
+  """
+  @spec open_corpus(String.t(), String.t(), keyword()) ::
+          {:ok, pid(), [String.t()]}
+  def open_corpus(tenant, folder, opts \\ []) do
+    now = Keyword.get_lazy(opts, :now, &Mealplan.Clock.now/0)
+    base_url = Keyword.get_lazy(opts, :base_url, &Mealplan.Config.public_url/0)
+
+    {:ok, session} = Sandbox.open(tenant, folder)
+
+    # The folder first, then the repository, so the first commit holds the
+    # scaffold rather than an empty tree.
+    scaffolded = Scaffold.run(session, base_url)
+    :ok = Repository.ensure_repository(session, now)
+
+    # Scaffolding an EXISTING folder has to commit itself.
+    if scaffolded != [] do
+      _ = Session.commit_if_changed(session, "scaffold #{Enum.join(scaffolded, ", ")}", now)
+    end
+
+    # Migrations, oldest first, each committed under its own name.
+    _ = Migrations.run(session, now)
+
+    {:ok, session, scaffolded}
+  end
+
   @impl true
   def init(_opts) do
     tenant_slug = Mealplan.Config.tenant()
     folder = Mealplan.Config.folder()
     owner = Mealplan.Config.owner()
-    base_url = Mealplan.Config.public_url()
 
     # Server state on PostgreSQL. The database is outside the corpus by
     # construction — that is what replaced the two `assertOutsideFolder` guards.
@@ -41,32 +92,10 @@ defmodule Mealplan.Boot do
     Logger.info("meal-plan folder: #{folder}")
     Logger.info("the household is #{owner}")
 
-    {:ok, session} = Sandbox.open(tenant_slug, folder)
-    # One instant for the whole boot. Production reads the wall clock; a
-    # scenario pins it through MEALPLAN_CLOCK so the first commit's date is
-    # deterministic. Mirrors `startServer`, which threaded one `now` through
-    # ensureRepository, the scaffold commit and the migrations.
-    now = Mealplan.Clock.now()
-
-    # The folder first, then the repository, so the first commit holds the
-    # scaffold rather than an empty tree.
-    scaffolded = Scaffold.run(session, base_url)
-    :ok = Repository.ensure_repository(session, now)
-
-    # Scaffolding an EXISTING folder has to commit itself.
-    if scaffolded != [] do
-      _ =
-        Session.commit_if_changed(
-          session,
-          "scaffold #{Enum.join(scaffolded, ", ")}",
-          now
-        )
-    end
-
-    # Migrations, oldest first, each committed under its own name.
-    _ = Migrations.run(session, now)
+    {:ok, session, _scaffolded} = open_corpus(tenant_slug, folder)
 
     Logger.info("tree at open:\n" <> Tree.render(session))
+    Logger.info("sandbox: " <> sandbox_status())
     Logger.info("kroger: " <> kroger_status())
     Logger.info("walmart: " <> walmart_status())
 
@@ -79,6 +108,19 @@ defmodule Mealplan.Boot do
     )
 
     {:ok, %{session: session}}
+  end
+
+  # Named in the health check because a server running unconfined must never be
+  # something a person has to infer. See ADR 0022.
+  defp sandbox_status do
+    case Sandbox.mode() do
+      :bubblewrap ->
+        "bubblewrap, image #{Sandbox.default_image_root()}"
+
+      :host ->
+        "HOST — NOT SANDBOXED. Commands run unconfined as this user, with the " <>
+          "host filesystem and network reachable. MEALPLAN_SANDBOX=host is set."
+    end
   end
 
   defp kroger_status do

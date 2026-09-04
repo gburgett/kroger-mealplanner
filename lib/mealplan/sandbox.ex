@@ -57,6 +57,29 @@ defmodule Mealplan.Sandbox do
     end
   end
 
+  # --- how a command is confined --------------------------------------------
+
+  @doc """
+  Which confinement a command runs under: `:bubblewrap` or `:host`.
+
+  `:bubblewrap` is the product. It is the default, it is what production and a
+  developer's machine run, and it is the security boundary ADR 0008 chose.
+
+  `:host` runs the same command with the same limits and the same scripts but
+  **no sandbox at all** — see `Mealplan.Sandbox.HostShell`. It exists so the
+  application logic can be tested where no sandbox image can be built, and it is
+  selected only by setting `MEALPLAN_SANDBOX=host` on purpose. Nothing infers
+  it: a missing image is an error in `:bubblewrap` mode, never a silent
+  downgrade, because a boundary that disappears when a file is missing is worse
+  than one that is absent on purpose.
+  """
+  @spec mode() :: :bubblewrap | :host
+  def mode, do: config()[:mode] || :bubblewrap
+
+  @doc "True when commands are really confined. False under `:host`."
+  @spec confined?() :: boolean()
+  def confined?, do: mode() == :bubblewrap
+
   # --- image / filter / wrapper locations -----------------------------------
 
   def default_image_root do

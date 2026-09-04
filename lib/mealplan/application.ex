@@ -17,7 +17,8 @@ defmodule Mealplan.Application do
       {Registry, keys: :unique, name: Mealplan.Sandbox.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Mealplan.Sandbox.DynamicSupervisor},
       # Opens the household's session, scaffolds the corpus, runs migrations,
-      # and prints the start-up health check.
+      # and prints the start-up health check. Left out under ExUnit, where each
+      # test opens its own tenant over its own folder — see Mealplan.Boot.
       Mealplan.Boot,
       # HTTP pool for the outbound API calls (Kroger, Walmart, the LLM gateway).
       {Finch, name: Mealplan.Finch},
@@ -40,6 +41,8 @@ defmodule Mealplan.Application do
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
+    children = if Mealplan.Boot.enabled?(), do: children, else: children -- [Mealplan.Boot]
+
     opts = [strategy: :one_for_one, name: Mealplan.Supervisor]
     Supervisor.start_link(children, opts)
   end

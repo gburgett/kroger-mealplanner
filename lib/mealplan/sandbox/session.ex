@@ -26,6 +26,7 @@ defmodule Mealplan.Sandbox.Session do
   defstruct [
     :tenant,
     :folder,
+    :mode,
     :image_root,
     :seccomp_filter,
     :limits,
@@ -86,22 +87,30 @@ defmodule Mealplan.Sandbox.Session do
     folder = Keyword.fetch!(opts, :folder)
     File.mkdir_p!(folder)
 
+    mode = Keyword.get(opts, :mode) || Mealplan.Sandbox.mode()
+
     image_root = Keyword.get(opts, :image_root) || Mealplan.Sandbox.default_image_root()
 
     seccomp_filter =
       Keyword.get(opts, :seccomp_filter) || Mealplan.Sandbox.default_seccomp_filter()
 
-    unless File.exists?(Path.join([image_root, "usr", "bin", "bash"])) do
-      raise "no sandbox image at #{image_root}. Build it with ./sandbox-image/build.sh"
-    end
+    # A missing image is an error, never a quiet fall back to :host. The
+    # boundary has to be absent on purpose or not at all — see
+    # `Mealplan.Sandbox.mode/0`.
+    if mode == :bubblewrap do
+      unless File.exists?(Path.join([image_root, "usr", "bin", "bash"])) do
+        raise "no sandbox image at #{image_root}. Build it with ./sandbox-image/build.sh"
+      end
 
-    unless File.exists?(seccomp_filter) do
-      raise "no seccomp filter at #{seccomp_filter}. Build it with ./sandbox-image/build.sh"
+      unless File.exists?(seccomp_filter) do
+        raise "no seccomp filter at #{seccomp_filter}. Build it with ./sandbox-image/build.sh"
+      end
     end
 
     state = %__MODULE__{
       tenant: Keyword.fetch!(opts, :tenant),
       folder: folder,
+      mode: mode,
       image_root: image_root,
       seccomp_filter: seccomp_filter,
       limits: Keyword.get(opts, :limits) || Limits.default(),
@@ -184,6 +193,7 @@ defmodule Mealplan.Sandbox.Session do
 
   defp do_run(state, command, opts) do
     Runner.run(command,
+      mode: state.mode,
       image_root: state.image_root,
       seccomp_filter: state.seccomp_filter,
       workspace: state.folder,

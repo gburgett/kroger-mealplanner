@@ -9,6 +9,14 @@ defmodule Mealplan.Corpus.Paths do
   content travels on stdin. `realpath -m` canonicalises the requested path —
   including a symbolic link that dangles until its last existing ancestor — in
   the same namespace an agent would plant one in.
+
+  The folder root travels the same way, as `MEALPLAN_WORKSPACE`, and for the
+  same reason: it is data, not command text. Under bubblewrap it is always
+  `/workspace`, the mount point. Under `MEALPLAN_SANDBOX=host` there is no
+  mount and it is the folder's real path, so these scripts are the ONE thing
+  both modes share unchanged — the containment check below is the same string
+  either way, and only the namespace under it differs. `Mealplan.Sandbox.Runner`
+  sets it; nothing else may.
   """
 
   # Bash's own exit code for "the shell itself failed to start the command".
@@ -24,14 +32,15 @@ defmodule Mealplan.Corpus.Paths do
   end
 
   @resolve """
+  workspace=$(realpath -m -- "$MEALPLAN_WORKSPACE")
   target="$MEALPLAN_PATH"
   case "$target" in
     /*) : ;;
-    *) target="/workspace/$target" ;;
+    *) target="$workspace/$target" ;;
   esac
   resolved=$(realpath -m -- "$target") || exit #{@realpath_failed}
   case "$resolved" in
-    /workspace|/workspace/*) : ;;
+    "$workspace"|"$workspace"/*) : ;;
     *) exit #{@outside_folder} ;;
   esac
   """
@@ -53,15 +62,16 @@ defmodule Mealplan.Corpus.Paths do
     quoted = dirs |> Enum.map(&shell_quote/1) |> Enum.join(" ")
 
     """
-    for f in /workspace/*; do
+    w="$MEALPLAN_WORKSPACE"
+    for f in "$w"/*; do
       [ -f "$f" ] || continue
       b=$(basename -- "$f")
       case "$b" in .*) continue ;; esac
       printf 'ROOT\\t%s\\n' "$b"
     done
     for d in #{quoted}; do
-      [ -d "/workspace/$d" ] || continue
-      for f in "/workspace/$d"/*; do
+      [ -d "$w/$d" ] || continue
+      for f in "$w/$d"/*; do
         [ -e "$f" ] || continue
         b=$(basename -- "$f")
         case "$b" in .*|.gitkeep) continue ;; esac

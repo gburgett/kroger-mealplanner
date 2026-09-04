@@ -59,7 +59,7 @@ Feature: Leaving out what we already have
     And the shopping list includes "2 eggs"
     And the shopping list does not include "salt"
 
-  Scenario: I can see what was left out and why
+  Scenario: I can see what was left out as a staple, and why
     Given the pantry staples are "salt"
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the output says "salt" was left out as a pantry staple
@@ -126,7 +126,7 @@ Feature: Leaving out what we already have
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the output says to check with the household about "eggs"
 
-  Scenario: I can see what was left out and why
+  Scenario: I can see what was left out as a consumable, and why
     Given the pantry consumable "eggs" is "stocked"
     When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
     Then the output says "eggs" was left out as a pantry consumable

@@ -59,7 +59,22 @@ config :mealplan,
   walmart_publisher_id: System.get_env("WALMART_PUBLISHER_ID"),
   llm_base: System.get_env("MEALPLAN_LLM_BASE")
 
+# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
+# default; "host" runs commands unconfined and is for testing application logic
+# where no sandbox image can be built. Anything else is a typo, and a typo that
+# silently disabled the security boundary would be the worst possible failure,
+# so it raises. See ADR 0022 and Mealplan.Sandbox.mode/0.
+sandbox_mode =
+  case System.get_env("MEALPLAN_SANDBOX") do
+    nil -> :bubblewrap
+    "" -> :bubblewrap
+    "bubblewrap" -> :bubblewrap
+    "host" -> :host
+    other -> raise "MEALPLAN_SANDBOX must be \"bubblewrap\" or \"host\", got #{inspect(other)}"
+  end
+
 config :mealplan, Mealplan.Sandbox,
+  mode: sandbox_mode,
   image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
   seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER")
 

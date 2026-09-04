@@ -14,7 +14,7 @@ defmodule Mealplan.Sandbox.Runner do
   carries the fd and splits the streams into two files this module reads back.
   """
 
-  alias Mealplan.Sandbox.{Bubblewrap, Limits}
+  alias Mealplan.Sandbox.{Bubblewrap, HostShell, Limits}
 
   require Logger
 
@@ -76,30 +76,54 @@ defmodule Mealplan.Sandbox.Runner do
     unit_name =
       "mealplan-#{sanitise_unit(tenant)}-#{:os.getpid()}-#{System.unique_integer([:positive])}.scope"
 
-    inner_bwrap =
-      ["bwrap"] ++
-        Bubblewrap.args(
-          image_root: image_root,
-          workspace: workspace,
-          command: command,
-          seccomp: seccomp_filter != nil,
-          env: env
-        )
+    mode = Keyword.get(opts, :mode, :bubblewrap)
 
-    argv = Limits.wrap(inner_bwrap, limits, use_user_scope: use_user_scope, unit_name: unit_name)
+    # The corpus scripts address the folder through MEALPLAN_WORKSPACE rather
+    # than a literal path, because the two modes mount it in different places:
+    # bubblewrap binds it at /workspace, the host runs in it directly. See
+    # Mealplan.Corpus.Paths.
+    env = Map.put(env, "MEALPLAN_WORKSPACE", workspace_root(mode, workspace))
+
+    {inner, seccomp_arg, cwd} =
+      case mode do
+        :bubblewrap ->
+          bwrap =
+            ["bwrap"] ++
+              Bubblewrap.args(
+                image_root: image_root,
+                workspace: workspace,
+                command: command,
+                seccomp: seccomp_filter != nil,
+                env: env
+              )
+
+          # bubblewrap does its own --chdir /workspace, so the port needs no cwd.
+          {bwrap, seccomp_filter || "-", nil}
+
+        :host ->
+          shell = HostShell.args(workspace: workspace, command: command, env: env)
+          # No image, so no filter to open, and the working directory is the
+          # folder itself rather than a mount point inside a namespace.
+          {shell, "-", workspace}
+      end
+
+    argv = Limits.wrap(inner, limits, use_user_scope: use_user_scope, unit_name: unit_name)
 
     wrapper_args =
-      ["-w", @wrapper, out_path, err_path, seccomp_filter || "-", input_path, "--"] ++ argv
+      ["-w", @wrapper, out_path, err_path, seccomp_arg, input_path, "--"] ++ argv
 
     port =
-      Port.open({:spawn_executable, System.find_executable("setsid")}, [
-        :exit_status,
-        :binary,
-        :hide,
-        :stderr_to_stdout,
-        args: wrapper_args,
-        env: port_env(use_user_scope)
-      ])
+      Port.open(
+        {:spawn_executable, System.find_executable("setsid")},
+        [
+          :exit_status,
+          :binary,
+          :hide,
+          :stderr_to_stdout,
+          args: wrapper_args,
+          env: port_env(use_user_scope)
+        ] ++ if(cwd, do: [cd: cwd], else: [])
+      )
 
     timer = Process.send_after(self(), {:sandbox_timeout, port}, timeout_ms)
     {exit_code, timed_out} = await(port, unit_name, use_user_scope, false)
@@ -194,6 +218,11 @@ defmodule Mealplan.Sandbox.Runner do
   rescue
     _ -> :ok
   end
+
+  # Where the meal-plan folder appears to the command. Bubblewrap binds it at a
+  # fixed mount point; the host has no mount and uses the real path.
+  defp workspace_root(:bubblewrap, _workspace), do: "/workspace"
+  defp workspace_root(:host, workspace), do: workspace
 
   # Only systemd-run gets anything, and only what it needs to find the user bus.
   # `env -i` inside the limits chain stops even that reaching bubblewrap.

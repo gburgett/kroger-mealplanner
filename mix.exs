@@ -54,7 +54,12 @@ defmodule Mealplan.MixProject do
       # see docs/plans/0005-progress.md. The OAuth authorisation server, the
       # bearer plug and the eight tool handlers stay our own code.
       {:anubis_mcp, "~> 2.0"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      # The scenarios in features/ are run by this, in process. It is
+      # CCK-compliant (the official Cucumber Compatibility Kit runs against it),
+      # which is what a hand-rolled Gherkin reader was never going to be. Test
+      # only: it never ships in the release that holds tenant credentials.
+      {:cucumber, "~> 1.0", only: [:dev, :test]}
     ]
   end
 
