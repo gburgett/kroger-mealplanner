@@ -7,6 +7,13 @@ defmodule Mealplan.Application do
 
   @impl true
   def start(_type, _args) do
+    # Collect what a previous run was killed before it could. A sandboxed
+    # command's scratch files are removed in an `after`, which covers every
+    # ordinary exit and no signal at all; the leftovers of a process that was
+    # killed can only be found later, by someone who can tell that its owner is
+    # gone. This is that someone. See Mealplan.Sandbox.Scratch.
+    Mealplan.Sandbox.Scratch.sweep_stale()
+
     children = [
       MealplanWeb.Telemetry,
       Mealplan.Repo,
@@ -57,6 +64,15 @@ defmodule Mealplan.Application do
     :mealplan
     |> Application.get_env(MealplanWeb.Endpoint, [])
     |> Keyword.get(:server, false)
+  end
+
+  # An ordinary exit removes this process's scratch root, so the normal path
+  # leaves nothing behind at all. A kill still leaves it, and the sweep above
+  # collects it on the next start — that is the belt the braces are for.
+  @impl true
+  def stop(_state) do
+    Mealplan.Sandbox.Scratch.release()
+    :ok
   end
 
   # Tell Phoenix to update the endpoint configuration

@@ -25,17 +25,19 @@ defmodule Mealplan.Features.CorpusHooks do
   with a `.git` in each, to fill the disk and take PostgreSQL down with it. The
   root makes cleanup independent of whether any individual scenario got that
   far.
+
+  It sits inside this OS process's sandbox scratch root, so the run's corpora
+  and the commands' scratch files have one owner and one name between them. That
+  is what makes them collectable after a kill, and it is why there is no
+  wildcard sweep here: `mix test --partitions` has several of these running at
+  once, and a wildcard cannot tell a partition that is still working from a run
+  that died. `Mealplan.Sandbox.Scratch.sweep_stale/0` can, and the application
+  calls it at start.
   """
   def run_root, do: :persistent_term.get({__MODULE__, :root})
 
   before_all context, name: "scaffold the template corpus" do
-    # Sweep anything a previous run left behind — a run killed part-way through
-    # never reaches its after_all.
-    for stale <- Path.wildcard(Path.join(System.tmp_dir!(), "mealplan-run-*")) do
-      File.rm_rf(stale)
-    end
-
-    root = Path.join(System.tmp_dir!(), "mealplan-run-#{System.unique_integer([:positive])}")
+    root = Path.join(Mealplan.Sandbox.Scratch.root(), "features")
     File.mkdir_p!(root)
     :persistent_term.put({__MODULE__, :root}, root)
 
@@ -63,6 +65,10 @@ defmodule Mealplan.Features.CorpusHooks do
     {:ok, context}
   end
 
+  # Removes this run's corpora. It does NOT run when the run is killed — ^C, the
+  # OOM killer, a CI step timeout — which is what the scratch root above is for:
+  # the next application start collects the whole tree, corpora and command
+  # scratch together, once its owning process is gone.
   after_all _context do
     case :persistent_term.get({__MODULE__, :root}, nil) do
       nil -> :ok
@@ -285,12 +291,19 @@ defmodule Mealplan.Features.CorpusHooks do
     {:ok, Map.put(context, :session, session)}
   end
 
+  # This DOES run for a scenario that failed: `Cucumber.Runtime` wraps the
+  # steps in a try and runs the after hooks before it re-raises. So the folder
+  # of a failing scenario goes here, not at the end of the run — which matters,
+  # because a failing run is exactly when a hundred corpora would otherwise pile
+  # up. The `after` covers the one way this hook can still leave one behind:
+  # `close_session/1` raises when a session will not give up its name.
   after_scenario context do
-    if context[:tenant], do: close_session(context[:tenant])
+    try do
+      if context[:tenant], do: close_session(context[:tenant])
+    after
+      if context[:folder], do: File.rm_rf(context[:folder])
+    end
 
-    # Best effort. after_all removes the run root either way, so a scenario that
-    # failed before this ran does not strand its corpus.
-    if context[:folder], do: File.rm_rf(context[:folder])
     :ok
   end
 end

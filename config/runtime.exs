@@ -78,6 +78,56 @@ config :mealplan, Mealplan.Sandbox,
   image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
   seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER")
 
+# Where the sandbox puts a command's stream files and its TMPDIR, and where the
+# scenarios put their corpora. `Mealplan.Sandbox.Scratch` explains the layout;
+# this only picks the ground it sits on.
+#
+# MEALPLAN_TMPDIR wins wherever it is set. It is read here rather than in the
+# module because the sweep of stale roots runs at application start, and a base
+# chosen after that would leave the sweep looking in the wrong place.
+if dir = System.get_env("MEALPLAN_TMPDIR") do
+  config :mealplan, :tmp_base, dir
+end
+
+# Both test runners — `mix test` and the TypeScript harness that still runs
+# features/sandbox.feature — get a tmpfs when the machine has one. Not only the
+# ExUnit one: the 11 GB of `sort` spill was left by the TypeScript harness in
+# host mode, which is the combination with no bounded /tmp of its own.
+if config_env() == :test do
+  # A test run is much happier on a tmpfs, and it is measurably faster: the
+  # suite copies a git repository per scenario and 200 scenarios of that came
+  # down from 56.4 s to 50.1 s on this VM, about 11%.
+  #
+  # It is also the safer ground. A tmpfs is bounded, so a command that runs
+  # away — `yes | sort`, the memory-limit scenario — hits ENOSPC in RAM instead
+  # of filling the disk PostgreSQL is on. That is not hypothetical: it happened
+  # here, 11 GB of `sort` spill, the disk at 94%.
+  #
+  # Only when the machine actually has one with room to spare. Docker gives a
+  # container 64 MB of /dev/shm by default and PostgreSQL shares it, so the
+  # check is for free space rather than for the mount, and anything short falls
+  # back to the ordinary temporary directory. A run needs well under a
+  # megabyte — the whole tree peaked at 508 KB — so 64 MB is a hundredfold
+  # margin, chosen to fail towards the disk rather than towards ENOSPC.
+  unless System.get_env("MEALPLAN_TMPDIR") do
+    free_kb = fn dir ->
+      with true <- File.dir?(dir),
+           exe when is_binary(exe) <- System.find_executable("df"),
+           {out, 0} <- System.cmd(exe, ["-Pk", dir], stderr_to_stdout: true),
+           [_header, line | _] <- String.split(out, "\n"),
+           [_fs, _blocks, _used, avail | _] <- String.split(line, ~r/\s+/) do
+        String.to_integer(avail)
+      else
+        _ -> 0
+      end
+    end
+
+    if free_kb.("/dev/shm") >= 64 * 1024 do
+      config :mealplan, :tmp_base, "/dev/shm"
+    end
+  end
+end
+
 # The frozen clock. The Cucumber suite runs the release as its own OS process
 # and cannot inject a `now` function, so it pins the instant through
 # MEALPLAN_CLOCK (ISO 8601). `Mealplan.Clock` reads it back. Mirrors the

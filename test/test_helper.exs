@@ -1,6 +1,17 @@
 ExUnit.start()
 Ecto.Adapters.SQL.Sandbox.mode(Mealplan.Repo, :manual)
 
+# `mix test` ends the BEAM with `System.halt/1`, which does not run application
+# stop callbacks, so `Mealplan.Application.stop/1` never fires here and the
+# run's scratch root would be left behind empty. One directory, collected at the
+# next start by `sweep_stale/0` because its pid is gone — but a run that cleans
+# up after itself is worth the two lines, and it keeps a developer's /tmp free
+# of a directory per interrupted run.
+ExUnit.after_suite(fn _ ->
+  Mealplan.Sandbox.Scratch.release()
+  :ok
+end)
+
 # The scenarios under features/ are the specification (AGENTS.md), and they run
 # here, in this process, against the real tool handlers. `compile_features!`
 # turns each one into an ExUnit test.

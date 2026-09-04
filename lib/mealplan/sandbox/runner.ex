@@ -14,7 +14,7 @@ defmodule Mealplan.Sandbox.Runner do
   carries the fd and splits the streams into two files this module reads back.
   """
 
-  alias Mealplan.Sandbox.{Bubblewrap, HostShell, Limits}
+  alias Mealplan.Sandbox.{Bubblewrap, HostShell, Limits, Scratch}
 
   require Logger
 
@@ -56,11 +56,55 @@ defmodule Mealplan.Sandbox.Runner do
     cap = Keyword.get(opts, :max_output_bytes, 64 * 1024)
     env = Keyword.get(opts, :env, %{})
     input = Keyword.get(opts, :input)
+    mode = Keyword.get(opts, :mode, :bubblewrap)
 
     started = System.monotonic_time(:microsecond)
 
-    {:ok, out_path} = tmp("out")
-    {:ok, err_path} = tmp("err")
+    # One directory holds everything this command needs and nothing outside it
+    # wants: the two stream files, its stdin, and the TMPDIR it writes to
+    # itself. The `after` below removes the lot, so no path out of this function
+    # — including a raise — can leak them. See Mealplan.Sandbox.Scratch for what
+    # happens when there is no path out at all.
+    dir = Scratch.command_dir!()
+
+    try do
+      do_run(dir, command, %{
+        image_root: image_root,
+        seccomp_filter: seccomp_filter,
+        workspace: workspace,
+        tenant: tenant,
+        use_user_scope: use_user_scope,
+        limits: limits,
+        timeout_ms: timeout_ms,
+        cap: cap,
+        env: env,
+        input: input,
+        mode: mode,
+        started: started
+      })
+    after
+      File.rm_rf(dir)
+    end
+  end
+
+  defp do_run(dir, command, o) do
+    %{
+      image_root: image_root,
+      seccomp_filter: seccomp_filter,
+      workspace: workspace,
+      tenant: tenant,
+      use_user_scope: use_user_scope,
+      limits: limits,
+      timeout_ms: timeout_ms,
+      cap: cap,
+      env: env,
+      input: input,
+      mode: mode,
+      started: started
+    } = o
+
+    out_path = touch!(Path.join(dir, "out"))
+    err_path = touch!(Path.join(dir, "err"))
 
     input_path =
       case input do
@@ -68,15 +112,13 @@ defmodule Mealplan.Sandbox.Runner do
           "-"
 
         content ->
-          {:ok, p} = tmp("in")
-          File.write!(p, content)
-          p
+          path = Path.join(dir, "in")
+          File.write!(path, content)
+          path
       end
 
     unit_name =
       "mealplan-#{sanitise_unit(tenant)}-#{:os.getpid()}-#{System.unique_integer([:positive])}.scope"
-
-    mode = Keyword.get(opts, :mode, :bubblewrap)
 
     # The corpus scripts address the folder through MEALPLAN_WORKSPACE rather
     # than a literal path, because the two modes mount it in different places:
@@ -84,7 +126,7 @@ defmodule Mealplan.Sandbox.Runner do
     # Mealplan.Corpus.Paths.
     env = Map.put(env, "MEALPLAN_WORKSPACE", workspace_root(mode, workspace))
 
-    {inner, seccomp_arg, cwd, scratch} =
+    {inner, seccomp_arg, cwd} =
       case mode do
         :bubblewrap ->
           bwrap =
@@ -99,29 +141,29 @@ defmodule Mealplan.Sandbox.Runner do
 
           # bubblewrap does its own --chdir /workspace, so the port needs no cwd,
           # and its --tmpfs /tmp is the command's scratch space.
-          {bwrap, seccomp_filter || "-", nil, nil}
+          {bwrap, seccomp_filter || "-", nil}
 
         :host ->
           # Bubblewrap gives the command a `--tmpfs /tmp` that is discarded with
           # the sandbox. Nothing does that on the host, so a command that spills
           # to /tmp — `sort` does, and the shopping list sorts — leaves the file
           # behind when it is killed. Unnoticed, that filled a disk with 112,000
-          # `sort*` files and took PostgreSQL down with it. A scratch directory
-          # per command, removed with the stream files below, is the same
-          # lifetime by other means.
-          dir = Path.join(System.tmp_dir!(), "mealplan-scratch-#{unique()}")
-          File.mkdir_p!(dir)
+          # `sort*` files and took PostgreSQL down with it. A TMPDIR inside this
+          # command's directory is the same lifetime by other means: it goes
+          # when the directory goes, and the directory goes in an `after`.
+          tmpdir = Path.join(dir, "tmp")
+          File.mkdir_p!(tmpdir)
 
           shell =
             HostShell.args(
               workspace: workspace,
               command: command,
-              env: Map.put(env, "TMPDIR", dir)
+              env: Map.put(env, "TMPDIR", tmpdir)
             )
 
           # No image, so no filter to open, and the working directory is the
           # folder itself rather than a mount point inside a namespace.
-          {shell, "-", workspace, dir}
+          {shell, "-", workspace}
       end
 
     argv = Limits.wrap(inner, limits, use_user_scope: use_user_scope, unit_name: unit_name)
@@ -151,9 +193,6 @@ defmodule Mealplan.Sandbox.Runner do
 
     {stdout, out_trunc} = read_capped(out_path, cap)
     {stderr, err_trunc} = read_capped(err_path, cap)
-
-    for p <- [out_path, err_path, input_path], p != "-", do: File.rm(p)
-    if scratch, do: File.rm_rf(scratch)
 
     stderr =
       if timed_out do
@@ -279,13 +318,11 @@ defmodule Mealplan.Sandbox.Runner do
     end
   end
 
-  defp tmp(kind) do
-    path = Path.join(System.tmp_dir!(), "mealplan-#{kind}-#{unique()}")
+  # The wrapper redirects onto these, so they have to exist before it runs.
+  defp touch!(path) do
     :ok = File.write(path, "")
-    {:ok, path}
+    path
   end
-
-  defp unique, do: "#{System.unique_integer([:positive])}-#{:erlang.phash2(make_ref())}"
 
   defp sanitise_unit(tenant) do
     tenant

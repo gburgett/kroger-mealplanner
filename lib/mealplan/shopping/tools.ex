@@ -171,8 +171,13 @@ defmodule Mealplan.Shopping.Tools do
 
           if List.kroger_upc?(chosen.product_id) do
             {sending ++
-               [%{upc: chosen.product_id, quantity: chosen.count, description: chosen.description}],
-             lines ++ [item.text], skipped}
+               [
+                 %{
+                   upc: chosen.product_id,
+                   quantity: chosen.count,
+                   description: chosen.description
+                 }
+               ], lines ++ [item.text], skipped}
           else
             {sending, lines,
              skipped ++
@@ -224,7 +229,7 @@ defmodule Mealplan.Shopping.Tools do
     {sending, lines, []}
   end
 
-  defp guard_against_repeat(_list, _sending, only, _requested) when not (only in [nil, []]), do: :ok
+  defp guard_against_repeat(_list, _sending, only, _requested) when only not in [nil, []], do: :ok
 
   defp guard_against_repeat(list, sending, _only, requested) do
     already = Map.new(list.sent, fn entry -> {entry.upc, entry} end)
@@ -476,9 +481,21 @@ defmodule Mealplan.Shopping.Tools do
             )
     end
 
+    # Via a file rather than straight down stdout, because the exit status has to
+    # survive and a shell pipeline would lose it.
+    #
+    # `${TMPDIR:-/tmp}`, never a literal `/tmp`. Under bubblewrap the two are the
+    # same thing — a private `--tmpfs /tmp` that goes when the sandbox goes — but
+    # in host mode a literal `/tmp` is the machine's real one, shared with every
+    # other command on it. That wrote one fixed path, `/tmp/mealplan-list.json`,
+    # which two runs at once would read out of each other's hands, and which
+    # nothing ever removed. TMPDIR is this command's own directory in host mode
+    # (Mealplan.Sandbox.Scratch), so the file is private and goes with it; `$$`
+    # keeps two commands in one sandbox apart as well.
     command =
-      "mealplan shopping-list --from #{from} --to #{to} --json > /tmp/mealplan-list.json 2>&1; " <>
-        "status=$?; cat /tmp/mealplan-list.json; exit $status"
+      ~s(f="${TMPDIR:-/tmp}/mealplan-list-$$.json"; ) <>
+        "mealplan shopping-list --from #{from} --to #{to} --json > \"$f\" 2>&1; " <>
+        ~s(status=$?; cat "$f"; rm -f "$f"; exit $status)
 
     result = Session.run(session, command)
 

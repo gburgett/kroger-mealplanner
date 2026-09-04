@@ -82,4 +82,12 @@ Before(async function (this: MealPlanWorld) {
 After(async function (this: MealPlanWorld) {
   delete process.env.KROGER_CLIENT_SECRET;
   await this.stop();
+  // Truncating before each scenario gives THIS runner a clean start and leaves
+  // the last scenario's rows sitting in the database afterwards. That database
+  // is `mealplan_test`, which `mix test` uses too: two runners, one database,
+  // and only one of them inside a transaction that rolls back. The residue is
+  // harmless today — ExUnit's scenarios use tenants of their own — but it is
+  // harmless by luck, and a scenario that counted rows would find somebody
+  // else's. Leave the database as it was found.
+  this.resetDatabase();
 });
