@@ -1,7 +1,8 @@
 name: test
 
 # The scenarios under features/ run in host mode: no sandbox image to build, and
-# nothing spawned per scenario. See ADR 0022.
+# nothing spawned per scenario. See ADR 0022. The database is a SQLite file in
+# the checkout (ADR 0024), so this job starts no service at all.
 #
 # The tool scenarios run in the test BEAM against the handlers. The ones about
 # the screens and the transport go over a real socket to an endpoint this same
@@ -35,19 +36,9 @@ jobs:
     name: application logic (host mode)
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: exedev
-          POSTGRES_PASSWORD: mealplan_dev
-          POSTGRES_DB: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No `services:` block. The database is one SQLite file (ADR 0024), created
+    # by `mix ecto.create` in the checkout, so there is nothing to start and
+    # nothing to wait for a health check on.
 
     steps:
       - uses: actions/checkout@v4
@@ -93,9 +84,6 @@ jobs:
         env:
           MEALPLAN_SANDBOX: host
           MEALPLAN_CLI_PATH: cli/target/x86_64-unknown-linux-musl/release
-          PGHOST: localhost
-          PGUSER: exedev
-          PGPASSWORD: mealplan_dev
         run: mix test
 
   # Not wired to run yet: it needs a runner that can build the sandbox image

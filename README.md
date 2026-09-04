@@ -19,7 +19,7 @@ Elixir/Phoenix (ADR 0020), and the test suite has moved there already (ADR 0022)
 
 | For | You need |
 | --- | --- |
-| The Elixir app and its test suite | Elixir 1.19 / OTP 28, and PostgreSQL reachable on `localhost:5432` |
+| The Elixir app and its test suite | Elixir 1.19 / OTP 28. No database server — the state is one SQLite file (ADR 0024) |
 | The `mealplan` CLI | Rust, with the `x86_64-unknown-linux-musl` target added |
 | The TypeScript server and `features/sandbox.feature` | Node 24 and pnpm (via corepack) |
 | The `@security` scenarios | bubblewrap, and unprivileged user namespaces |
@@ -62,9 +62,9 @@ with no sandbox image can do — a CI runner, or a checkout where you have not r
 A green run in host mode says the application logic works. It says nothing about
 containment.
 
-`mix test` creates and migrates `mealplan_test` for you. It expects PostgreSQL
-on `localhost` as `exedev` / `mealplan_dev`; override with the usual `PGHOST`,
-`PGUSER` and `PGPASSWORD`.
+`mix test` creates and migrates `mealplan_test<partition>.db` for you, in the
+checkout. Nothing has to be running — no server, no user, no password, no port
+(ADR 0024). `rm mealplan_test*.db` is the reset.
 
 ### The real thing, before a release
 
@@ -109,8 +109,8 @@ sweeps at start if a previous run was killed before it could.
 
 By default that root goes on tmpfs (`/dev/shm`) when there is at least 64 MB
 free there, which is both faster and bounded: a runaway command hits ENOSPC in
-RAM rather than filling the disk PostgreSQL is on. Set `MEALPLAN_TMPDIR` to put
-it somewhere else.
+RAM rather than filling the disk the database and the corpora are on. Set
+`MEALPLAN_TMPDIR` to put it somewhere else.
 
 After a run, `ls /tmp /dev/shm | grep mealplan` should print nothing.
 

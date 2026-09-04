@@ -111,7 +111,13 @@ and the tests already assert that a hostile client name renders as text.
 
 ## Phase 2 — PostgreSQL state, with tenancy from the first migration
 
-Add Ecto, Postgrex and the migrations from spike 4. Port `AuthStore` and
+**The engine changed after this phase was written: it is SQLite, not
+PostgreSQL — ADR 0024.** Everything else below stands, `tenant_id` on every
+credential-bearing row included, and the start-up check two paragraphs down is
+now load-bearing rather than belt-and-braces: a file has a path, so "outside
+the corpus" stopped being true by construction.
+
+Add Ecto, the adapter and the migrations from spike 4. Port `AuthStore` and
 `KrogerStore` onto Ecto repos with the same hashing, TTLs and rotation — but
 seed the schema with `tenants`, `users` and `memberships` first, and put
 a `tenant_id` on every credential-bearing row from the start. Keep

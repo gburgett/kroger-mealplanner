@@ -1,10 +1,17 @@
 defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
   @moduledoc """
-  Plan 0005 Phase 2: PostgreSQL state, with tenancy from the first migration.
+  Plan 0005 Phase 2: server state, with tenancy from the first migration.
 
-  PostgreSQL holds SERVER STATE ONLY — registered OAuth clients, codes in
+  The database holds SERVER STATE ONLY — registered OAuth clients, codes in
   flight, access and refresh tokens, and the household's Kroger tokens. It
   never holds the corpus.
+
+  It is SQLite (ADR 0024), which changes what two column types mean rather than
+  what they are called: `:map` and `{:array, :string}` are JSON in a TEXT
+  column instead of `jsonb` and a native array, and every integer type is
+  SQLite's 64-bit INTEGER, so `:bigint` and `:id` are the same storage class.
+  Neither is queried by content — the arrays are read back whole and the client
+  document is read back whole — so nothing here needed rewriting for the move.
 
   Every credential-bearing row carries a `tenant_id` from the start (ADR 0020),
   even though the sandbox boundary stays single-tenant until ADR 0008's
@@ -48,7 +55,7 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
     create unique_index(:memberships, [:tenant_id, :user_id])
 
     # Registered OAuth clients. The whole OAuthClientInformationFull document is
-    # kept as jsonb, keyed by client_id — the TypeScript store was
+    # kept as JSON, keyed by client_id — the TypeScript store was
     # `Record<client_id, client>`. client_secret CANNOT be hashed: the SDK
     # compares plaintext, which is why the store file was 0600 and this row is
     # behind the same access controls.

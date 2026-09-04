@@ -1,14 +1,15 @@
 defmodule Mealplan.Auth.Store do
   @moduledoc """
   Where the OAuth state lives: registered clients, codes in flight, and the
-  tokens that have been issued. Ported from `src/auth/store.ts`, now on Ecto /
-  PostgreSQL (ADR 0020).
+  tokens that have been issued. Ported from `src/auth/store.ts`, now on Ecto
+  (ADR 0020) over SQLite (ADR 0024).
 
   Access and refresh tokens are kept as SHA-256 hashes, so the row holds
   nothing replayable if the database leaks. Client secrets CANNOT be hashed —
-  the SDK compares plaintext — so the whole client document is stored as jsonb,
-  behind the database's access controls, the same position the 0600 JSON file
-  was in.
+  the SDK compares plaintext — so the whole client document is stored as JSON,
+  behind the file's own permissions, the same position the 0600 JSON file was
+  in. That file lives outside the meal-plan folder, and `Mealplan.Boot` refuses
+  to start if it does not.
 
   "One code, one exchange" is now an atomic `DELETE ... RETURNING` instead of a
   read-then-write on a JSON string.

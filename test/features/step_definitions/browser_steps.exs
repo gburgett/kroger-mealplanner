@@ -366,10 +366,17 @@ defmodule Mealplan.Features.BrowserSteps do
   # --- where the tokens live -------------------------------------------------
 
   step "the token store is outside the meal-plan folder", context do
-    # The tokens are database rows now (ADR 0020), not a JSON file, so there is
-    # no path under the folder to compare against. What the scenario is after is
-    # that the folder the agent can write to holds nothing that buys access, and
-    # that is what this looks for.
+    # The tokens are database rows (ADR 0020) in a SQLite file (ADR 0024), so
+    # there is a path to compare against again — and it is the first thing to
+    # check, because a database inside the mount would hand the agent the
+    # household's Kroger credential whatever the rows look like.
+    database = Path.expand(Mealplan.Config.database())
+    folder = Path.expand(context.folder)
+
+    refute database == folder or String.starts_with?(database, folder <> "/"),
+           "the state database is inside the meal-plan folder:\n#{database}"
+
+    # And the folder the agent can write to holds nothing that buys access.
     client = client!(context)
     {client, result} = McpClient.run(client, "grep -rl #{quote_for_shell(client.access_token)} . 2>/dev/null || true")
 
@@ -380,18 +387,22 @@ defmodule Mealplan.Features.BrowserSteps do
   end
 
   step "the client tries to read the token store through the bash tool", context do
-    # The store was a JSON file when this scenario was written, and the step
-    # read it by path. It is a database row now (ADR 0020), so "knowing the
-    # path" means knowing the table and where Postgres listens. Reaching it
-    # needs a client and a socket, and the sandbox has neither — which is why
-    # this scenario is @security and cannot pass under MEALPLAN_SANDBOX=host,
-    # where the host's psql and the host's loopback are both right there.
+    # The store was a JSON file when this scenario was written, and the step read
+    # it by path. It is a SQLite file now (ADR 0024), so the path is a path
+    # again — and this step uses the REAL one, read from the running repo's own
+    # configuration rather than guessed, so the scenario cannot pass by looking
+    # in the wrong place.
+    #
+    # `cat`, not `sqlite3`: the sandbox image carries no database client
+    # (ADR 0006), and it does not need one. A SQLite file is not encrypted, so
+    # reading the bytes is enough to lift a token out of it. What stops this is
+    # that the path is not inside the mount, which is why the scenario is
+    # @security and cannot pass under MEALPLAN_SANDBOX=host, where the file is
+    # right there on the host filesystem.
+    database = Mealplan.Config.database()
+
     {client, result} =
-      McpClient.run(
-        client!(context),
-        "psql -h 127.0.0.1 -U #{System.get_env("PGUSER", "postgres")} " <>
-          "-c 'select access_token from oauth_access_tokens'"
-      )
+      McpClient.run(client!(context), "cat #{quote_for_shell(Path.expand(database))}")
 
     {:ok, context |> Map.put(:client, client) |> Map.put(:last, result)}
   end

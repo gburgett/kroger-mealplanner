@@ -34,3 +34,10 @@ erl_crash.dump
 
 # Ignore package tarball (built via "mix hex.build").
 mealplan-*.tar
+
+# The state database (ADR 0024). One SQLite file, plus the -wal and -shm files
+# it opens beside it. `mealplan_dev.db` for the dev server, one
+# `mealplan_test<partition>.db` per test partition.
+*.db
+*.db-shm
+*.db-wal

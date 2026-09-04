@@ -1,17 +1,27 @@
 import Config
 
-# Configure your database
+# The database is one SQLite file (ADR 0024), so a test run needs NOTHING
+# running: no server, no user, no password, no port. That is the whole reason
+# the adapter changed — `mix test` in a fresh checkout used to fail on a
+# database that was not up, which said nothing about the code under test.
 #
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+# One file per partition. `mix test --partitions N` runs N BEAMs at once and
+# SQLite takes one writer per file, so a shared file would serialise them and
+# lose exactly what partitioning buys. The file is created by `ecto.create` and
+# left behind between runs; `mix ecto.reset` or `rm mealplan_test*.db` clears it.
 config :mealplan, Mealplan.Repo,
-  username: System.get_env("PGUSER", "exedev"),
-  password: System.get_env("PGPASSWORD", "mealplan_dev"),
-  hostname: System.get_env("PGHOST", "localhost"),
-  database: "mealplan_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database:
+    Path.expand("../mealplan_test#{System.get_env("MIX_TEST_PARTITION")}.db", __DIR__),
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: 5,
+  # A scenario holds one connection through a whole HTTP round trip, and the
+  # endpoint answers on another process. Five seconds of waiting for the write
+  # lock is generous next to that, and it turns a lost race into a wait rather
+  # than an "database is busy" that reads like a product bug.
+  busy_timeout: 5_000,
+  # Readers do not block the writer. The scenarios drive the endpoint while
+  # holding the sandbox connection, which is exactly the shape WAL is for.
+  journal_mode: :wal
 
 # The server IS run during test, and `config/runtime.exs` turns it on: the
 # scenarios that walk the consent page and the /kroger screens drive it over

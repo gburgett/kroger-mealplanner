@@ -9,10 +9,11 @@ defmodule MealplanWeb.ConnCase do
 
   Finally, if the test case interacts with the database,
   we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use MealplanWeb.ConnCase, async: true`, although
-  this option is not recommended for other databases.
+  are reverted at the end of every test.
+
+  Do NOT set `async: true` here. The database is SQLite (ADR 0024) and takes
+  one writer at a time, and the suite is single-tenant by construction anyway —
+  a scenario points `Mealplan.Config` at its own folder while it runs (ADR 0022).
   """
 
   use ExUnit.CaseTemplate

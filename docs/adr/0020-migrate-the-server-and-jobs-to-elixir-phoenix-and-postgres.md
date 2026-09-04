@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: proposed; PostgreSQL superseded by ADR-0024
 date: 2026-08-29
 decision-makers: gburgett
 consulted: ADR 0002, ADR 0004, ADR 0006, ADR 0007, ADR 0008, ADR 0009, ADR 0010, ADR 0017, ADR 0018, ADR 0021

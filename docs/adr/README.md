@@ -34,10 +34,11 @@ decision, write a new record. Give the old record the status
 | [0017](0017-shop-at-walmart-through-the-affiliate-api-with-a-link-for-the-cart.md) | Shop at Walmart through the affiliate API, with a link for the cart | accepted |
 | [0018](0018-run-a-weekly-llm-job-to-recheck-consumables.md) | Run a weekly LLM job to recheck consumables | proposed |
 | [0019](0019-import-pinterest-boards-as-a-pins-and-links-ledger.md) | Import Pinterest boards as a pins-and-links ledger the agent converts | proposed |
-| [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021 |
+| [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021; PostgreSQL superseded by ADR-0024 |
 | [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | accepted |
 | [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted |
 | [0023](0023-drive-the-screens-the-transport-and-the-third-parties-over-real-http-in-test.md) | Drive the screens, the transport and the third parties over real HTTP in test | accepted |
+| [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

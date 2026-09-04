@@ -168,6 +168,15 @@ code to the attacker's token endpoint.
 | `WALMART_API_BASE` | `https://developer.api.walmart.com` | the Walmart mock seam, for the API host. Leave it alone in production |
 | `WALMART_CART_BASE` | `https://www.walmart.com` | the second Walmart seam, for the add-to-cart link host. Leave it alone in production |
 
+**On the Elixir server, `MEALPLAN_STATE` names a SQLite file, not `auth.json`,**
+and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024). That one
+file holds what `auth.json` and `kroger.json` held between them, so
+`MEALPLAN_KROGER_STATE` is gone with no replacement. The rule is unchanged and
+now enforced at start-up: the file must be outside `MEALPLAN_FOLDER`, and the
+server refuses to start rather than serve with the household's Kroger
+credential inside the folder the sandbox mounts. There is no `DATABASE_URL`,
+no user and no password — the file's own permissions are the access control.
+
 ## Registering with Kroger
 
 Make an application at <https://developer.kroger.com>. It needs the

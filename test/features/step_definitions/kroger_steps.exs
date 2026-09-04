@@ -591,10 +591,17 @@ defmodule Mealplan.Features.KrogerSteps do
   end
 
   step "the Kroger token store is outside the meal-plan folder", context do
-    # It is a database row, not a file: there is no path under the folder for it
-    # to be at, and the sandbox has no client, no socket and no credential to
-    # reach Postgres with. The assertion is that the folder holds nothing that
+    # It is a database row, in the SQLite file the server state lives in
+    # (ADR 0024). This credential is held IN THE CLEAR — it is replayed to
+    # Kroger, so it cannot be hashed — which makes where the file sits the whole
+    # defence. Check the path first, then that the folder holds nothing that
     # looks like the credential.
+    database = Path.expand(Mealplan.Config.database())
+    folder = Path.expand(context.folder)
+
+    refute database == folder or String.starts_with?(database, folder <> "/"),
+           "the state database is inside the meal-plan folder:\n#{database}"
+
     held = Store.tokens(tenant_id(context))
     assert held, "no Kroger token is held, so this scenario proves nothing"
 

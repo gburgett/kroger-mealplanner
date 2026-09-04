@@ -85,6 +85,7 @@ sandbox.
 | MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
 | Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
+| Server state | one household, one writer, and a test run that needs nothing running | SQLite in one file, through Ecto | ADR 0024 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, built-in `fetch`, no package | ADR 0010 |
@@ -277,11 +278,10 @@ defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
 command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
 find `mealplan`, which is staged into that image rather than installed on PATH.
 
-`mix test` runs `ecto.create` and `ecto.migrate` first, so PostgreSQL has to be
-up: `localhost`, `exedev` / `mealplan_dev`, overridable through `PGHOST`,
-`PGUSER` and `PGPASSWORD`. `** (Mix) The database for Mealplan.Repo couldn't be
-created` means the server is down, not that the suite is broken — start it and
-run again before changing anything.
+**Nothing else has to be running.** The database is one SQLite file (ADR 0024):
+`mix test` runs `ecto.create` and `ecto.migrate` first and they write
+`mealplan_test<partition>.db` in the checkout. There is no server to start, no
+user, no password and no port. `rm mealplan_test*.db` is the reset.
 
 Narrowing a run:
 
@@ -289,8 +289,12 @@ Narrowing a run:
 mix test test/mealplan/sandbox/scratch_test.exs   # a unit test file
 mix test --only security                          # containment, needs bubblewrap
 mix test --include security                       # host mode: 22 of 23 pass, ADR 0023
-mix test --partitions 4                           # a database and a port per partition
+mix test --partitions 4                           # a database FILE and a port per partition
 ```
+
+One file per partition is not an optimisation: SQLite takes one writer per
+file, so partitions sharing one would queue behind each other and lose exactly
+what partitioning buys.
 
 Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
 in `test/test_helper.exs` compiles every feature in `config :cucumber, :features`
@@ -315,8 +319,13 @@ After a run, both of these should print nothing:
 
 ```bash
 ls /tmp /dev/shm | grep mealplan
-psql -h localhost -U exedev -d mealplan_test -c 'table oauth_clients'   # 0 rows
+sqlite3 mealplan_test.db 'select count(*) from oauth_clients'   # 0
 ```
+
+The database file itself DOES stay behind, on purpose: `ecto.create` made it and
+the next run reuses it. What must not stay behind is rows — the Ecto sandbox
+rolls every scenario back, so a count of anything but zero means a write escaped
+the sandbox connection.
 
 Rules of thumb:
 

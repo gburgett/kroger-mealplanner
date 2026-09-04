@@ -1,7 +1,7 @@
 defmodule Mealplan.Kroger.Store do
   @moduledoc """
   Where the household's Kroger credential lives. Ported from `src/kroger/store.ts`,
-  now a tenant-scoped row (ADR 0020).
+  now a tenant-scoped row (ADR 0020) in the SQLite state file (ADR 0024).
 
   IN THE CLEAR, unlike our own tokens: it is replayed to Kroger, and a hash
   cannot go in an Authorization header. Outside the corpus by construction is

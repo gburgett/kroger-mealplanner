@@ -1,14 +1,17 @@
 import Config
 
-# Configure your database
+# Server state, in one SQLite file (ADR 0024). Beside the checkout rather than
+# in ~/.local/state, so `rm mealplan_dev.db` is the whole reset and a developer
+# never wonders which database they are looking at. MEALPLAN_STATE overrides it,
+# the same variable the deployed server reads.
+#
+# It must not be inside the meal-plan folder: the sandbox mounts that folder and
+# the agent reads every byte of it. `Mealplan.Boot` refuses to start if it is.
 config :mealplan, Mealplan.Repo,
-  username: System.get_env("PGUSER", "exedev"),
-  password: System.get_env("PGPASSWORD", "mealplan_dev"),
-  hostname: System.get_env("PGHOST", "localhost"),
-  database: System.get_env("PGDATABASE", "mealplan_dev"),
+  database: System.get_env("MEALPLAN_STATE") || Path.expand("../mealplan_dev.db", __DIR__),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  pool_size: 5
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

@@ -17,6 +17,20 @@ defmodule Mealplan.Config do
   def tenant, do: get(:tenant) || "household"
 
   @doc """
+  The SQLite file holding the server state (ADR 0024).
+
+  Read from the repo's own configuration rather than from a `MEALPLAN_*` key of
+  our own, so there is exactly one answer to "which database is open" and it is
+  the one Ecto actually connected to. `Mealplan.Boot` checks it is outside the
+  meal-plan folder before it writes a row.
+  """
+  def database do
+    Application.get_env(:mealplan, Mealplan.Repo, [])
+    |> Keyword.get(:database)
+    |> to_string()
+  end
+
+  @doc """
   The OAuth issuer, and the address clients reach this server at.
 
   NEVER derived from Host or X-Forwarded-Host. `config/runtime.exs` synthesises
