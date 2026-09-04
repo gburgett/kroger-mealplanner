@@ -1,9 +1,10 @@
 # Study: why the Cucumber suite takes so long, and what parallelising it buys
 
 **Date:** 2026-09-03
-**Status:** partly acted on. §4 is built on
-`claude/elixir-test-parallelization-yez5iw`, but has not been run — see §5 and
-§8. §6 is a proposal and needs an ADR before anybody writes it.
+**Status:** acted on, and overtaken. §4 (parallel Cucumber workers) is built but
+was never run — it is superseded by ADR 0022, which removed the per-scenario
+process instead of dividing it. §6 is what ADR 0022 chose; §9 records what
+actually happened.
 **Applies to:** the `elixir-migration` line, after commit 8d4ccb0 reworked
 `features/support/world.ts` to drive the Elixir app out-of-process.
 **Decides nothing about:** the sandbox, the security boundary, or what the
@@ -267,3 +268,51 @@ Not verified:
 
 The first thing to do on a machine that can run the suite is therefore to time
 `pnpm test:serial` against `pnpm test` and put both numbers in this section.
+
+## 9. What was actually built, and what it measured
+
+§4 was the first answer and it is not the one that shipped. Parallelism divides
+the cost in §2; ADR 0022 removed it. The scenarios now run **in the test BEAM**
+against `Mealplan.Mcp.Tools.call/4`, with no OS process, no socket and no OAuth
+handshake per scenario, and with a `MEALPLAN_SANDBOX=host` confinement so a
+runner that cannot build the sandbox image can still run them.
+
+Measured, on the same 4-vCPU container:
+
+| | Scenarios | Wall clock | Per scenario |
+| --- | --- | --- | --- |
+| Estimated, Cucumber per-scenario process (§2) | 226 | 9–17 min of start-up alone | 2.5–4.5 s |
+| **In process, host mode** | **119** | **~35 s** | **~0.29 s** |
+
+Two things inside that are worth keeping:
+
+- **The template corpus.** Scaffolding is ~35 sandbox round trips to arrive at a
+  byte-identical folder, because the clock is frozen and the scaffold is
+  deterministic. Building it once and copying it took the run from 17.1 s to
+  4.3 s on the first feature file — a 4× cut, and the single biggest win after
+  removing the process.
+- **`sort` has to have somewhere to spill.** Bubblewrap gives a command
+  `--tmpfs /tmp` that dies with the sandbox; host mode had no equivalent, so a
+  killed `sort` left its spill file behind. A few runs left 112,000 files and
+  28 GB, filled the disk and took PostgreSQL down twice — each time looking
+  like a test failure. Host-mode commands get a scratch `TMPDIR` per command
+  now.
+
+**Ported and green:** `corpus`, `history`, `meals`, `migrations`, `pantry`,
+`preferences`, `recipes`, `shopping_list` — 119 scenarios, 0 failures.
+
+**Not ported:** `auth`, `kroger_link`, `kroger_cart`, `walmart`,
+`consumable_recheck`. They need the OAuth handshake and the three mocked
+third-party HTTP APIs. `config/test.exs` names the ported files one by one
+rather than globbing, so adding one is how they come back.
+
+**Not run in CI, on purpose:** `sandbox.feature`. 51 of its 69 scenarios are
+`@security` and are false under `host`; they belong to bubblewrap and to a
+person before a release.
+
+**Still open:** §7's judgement that the language of the harness was not the
+problem was right about the cause and wrong about the remedy — the port to
+Elixir was worth doing, because it is what let the scenarios run in the same
+BEAM as the code. What §7 got right is that the Gherkin had to survive, and it
+did: not one `.feature` file changed except two scenario names in
+`pantry.feature` that were identical to each other.

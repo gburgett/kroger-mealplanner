@@ -36,8 +36,9 @@ decision, write a new record. Give the old record the status
 | [0019](0019-import-pinterest-boards-as-a-pins-and-links-ledger.md) | Import Pinterest boards as a pins-and-links ledger the agent converts | proposed |
 | [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021 |
 | [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | accepted |
+| [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
-and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md` and
-`../bubblewrap-lockdown-study.md`. Plans that follow from a decision live in
+and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
+`../bubblewrap-lockdown-study.md` and `../test-suite-parallelisation-study.md`. Plans that follow from a decision live in
 `../plans/`.
