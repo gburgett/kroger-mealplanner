@@ -61,7 +61,8 @@ config :cucumber,
     "features/pantry.feature",
     "features/preferences.feature",
     "features/recipes.feature",
-    "features/shopping_list.feature"
+    "features/shopping_list.feature",
+    "features/kroger_cart.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

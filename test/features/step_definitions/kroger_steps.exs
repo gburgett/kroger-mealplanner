@@ -1,0 +1,561 @@
+defmodule Mealplan.Features.KrogerSteps do
+  @moduledoc """
+  Kroger: the two tools. A port of the tool half of `features/steps/kroger.steps.ts`.
+
+  One thing is stood in for here, and only one: Kroger itself, which is the one
+  third-party API this project mocks — see `Mealplan.Mock.Kroger`.
+
+  EVERYTHING ELSE IS REAL. A `When` that finds products goes through the real
+  tool handler, which runs `mealplan shopping-list --json` in the real sandbox,
+  makes a real HTTP request over a real socket, and commits the result to the
+  real git repository. A `Then` reads the file that ended up on disk, or the
+  mock's record of what was sent — which is the only record there can be,
+  because Kroger's cart cannot be read back.
+  """
+
+  use Cucumber.StepDefinition
+
+  import ExUnit.Assertions
+
+  alias Mealplan.Kroger.{Config, Store}
+  alias Mealplan.Mcp.Tools
+  alias Mealplan.Mock.Kroger
+
+  @list "shopping-lists/2026-08-25--2026-08-31.md"
+
+  # --- the account and the store --------------------------------------------
+
+  # Setup writes the credential straight into the store. The long way round —
+  # the consent page, Kroger's sign-in, the store picker — is what
+  # features/kroger_link.feature does.
+  step "my Kroger account is connected", context do
+    tokens = Kroger.issue_household_tokens(context.kroger)
+
+    :ok =
+      Store.save(tenant_id(context), %{
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: System.system_time(:second) + tokens.expires_in,
+        scope: "cart.basic:write"
+      })
+
+    {:ok, context}
+  end
+
+  step ~r/^I shop at "([^"]*)" for (\w+)$/, %{args: [name, modality]} = context do
+    store = Kroger.store_named(name)
+
+    # The address is passed because the real store picker passes it. A setup
+    # step that wrote a document the server would never write would prove
+    # something about a file that does not exist in production.
+    {:ok,
+     write_file(
+       context,
+       Config.path(),
+       Config.document(
+         %{
+           location_id: store.location_id,
+           name: store.name,
+           address: store.address,
+           modality: modality
+         },
+         Mealplan.Config.public_url()
+       )
+     )}
+  end
+
+  step "Kroger sells at my store:", context do
+    for row <- context.datatable.maps do
+      Kroger.sell(context.kroger, row["search"], %{
+        upc: row["upc"],
+        description: row["description"],
+        size: row["size"],
+        price: to_number(row["price"])
+      })
+    end
+
+    {:ok, context}
+  end
+
+  step "Kroger answers every product search with {int}", %{args: [status]} = context do
+    Kroger.product_search_status(context.kroger, status)
+    {:ok, context}
+  end
+
+  step "my Kroger access token has expired", context do
+    :ok = Store.expire_access_token(tenant_id(context))
+    {:ok, context}
+  end
+
+  # --- the list --------------------------------------------------------------
+
+  step "the shopping list for {string} to {string} has been written",
+       %{args: [from, to]} = context do
+    {:ok, write_list(context, from, to)}
+  end
+
+  step "the shopping list for {string} to {string} has been matched against Kroger",
+       %{args: [from, to]} = context do
+    context = write_list(context, from, to)
+    context = find_products(context, context.list_path)
+
+    refute error_of(context),
+           "finding products failed:\n#{text_of(context)}"
+
+    {:ok, context}
+  end
+
+  step "the shopping list has been sent to my Kroger cart", context do
+    context = send_to_cart(context, list_path(context))
+    refute error_of(context), "sending failed:\n#{text_of(context)}"
+    {:ok, context}
+  end
+
+  # --- finding products ------------------------------------------------------
+
+  step "I ask Kroger for the products on the shopping list", context do
+    {:ok, find_products(context, list_path(context))}
+  end
+
+  step "I ask Kroger for the products on the list {string}", %{args: [target]} = context do
+    {:ok, context |> Map.put(:list_path, target) |> find_products(target)}
+  end
+
+  # Choosing is deleting, and it goes through the real write_file tool.
+  #
+  # That is exactly what an agent does: read the document, take out the lines it
+  # does not want, write it back. There is no "choose" call, and there should
+  # not be one — the file IS the interface.
+  step "I keep only the candidate {string} for {string}", %{args: [upc, item]} = context do
+    target = list_path(context)
+
+    {kept, _} =
+      context
+      |> list_text()
+      |> String.split("\n")
+      |> Enum.map_reduce(false, fn line, beneath ->
+        beneath = if Regex.match?(~r/^-\s/, line), do: String.contains?(line, item), else: beneath
+
+        if beneath and Regex.match?(~r/^\s+-\s/, line) and
+             not String.contains?(line, "`#{upc}`") do
+          {nil, beneath}
+        else
+          {line, beneath}
+        end
+      end)
+
+    {:ok, write_file(context, target, kept |> Enum.reject(&is_nil/1) |> Enum.join("\n"))}
+  end
+
+  # --- sending ---------------------------------------------------------------
+
+  step "I send the shopping list to my Kroger cart", context do
+    {:ok, send_to_cart(context, list_path(context))}
+  end
+
+  step "I send the product {string} from the shopping list to my Kroger cart",
+       %{args: [upc]} = context do
+    target = list_path(context)
+
+    {:ok,
+     call_tool(context, "kroger_send_to_cart", %{
+       "path" => target,
+       "items" => [%{"upc" => upc, "quantity" => 1}],
+       "message" => "kroger_send_to_cart #{target} #{upc}"
+     })}
+  end
+
+  step "I try to read the Kroger token store through the bash tool", context do
+    # Knowing the path is not the protection. The store is a database row that
+    # the sandbox has no client, no socket and no credential to reach — three
+    # independent reasons before the mount namespace is counted.
+    {:ok, run_bash(context, "cat #{Store.__schema__(:source)} 2>&1 || true")}
+  end
+
+  # --- what the list says ----------------------------------------------------
+
+  step ~r/^the shopping list (?:file )?contains the line "(.*)"$/,
+       %{args: [line]} = context do
+    document = list_text(context)
+    lines = document |> String.split("\n") |> Enum.map(&String.trim/1)
+    assert String.trim(line) in lines, ~s(no line "#{line}" in:\n#{document})
+    {:ok, context}
+  end
+
+  step ~r/^the shopping list front matter says the (\w+) is "(.*)"$/,
+       %{args: [field, value]} = context do
+    document = list_text(context)
+
+    case Regex.run(~r/^---\n(.*?)\n---/s, document) do
+      [_, front] ->
+        assert Enum.any?(String.split(front, "\n"), &(String.trim(&1) == "#{field}: #{value}")),
+               ~s(the front matter does not say "#{field}: #{value}":\n#{front})
+
+      _ ->
+        flunk("the list has no front matter:\n#{document}")
+    end
+
+    {:ok, context}
+  end
+
+  step ~r/^the shopping list has (\d+) candidates? for "(.*)"$/,
+       %{args: [count, item]} = context do
+    found = candidates_for(context, item)
+
+    assert length(found) == String.to_integer(count),
+           "the candidates were:\n#{Enum.join(found, "\n")}"
+
+    {:ok, context}
+  end
+
+  step "the shopping list has no candidates for {string}", %{args: [item]} = context do
+    assert candidates_for(context, item) == [],
+           ~s("#{item}" was given candidates it should not have)
+
+    {:ok, context}
+  end
+
+  step "the shopping list has the candidate {string} for {string}",
+       %{args: [upc, item]} = context do
+    found = candidates_for(context, item)
+
+    assert Enum.any?(found, &String.contains?(&1, "`#{upc}`")),
+           ~s(#{upc} is not under "#{item}":\n#{Enum.join(found, "\n")})
+
+    {:ok, context}
+  end
+
+  step "every candidate on the shopping list is written as a count of 1", context do
+    candidates =
+      context |> list_text() |> String.split("\n") |> Enum.filter(&Regex.match?(~r/^\s+-\s/, &1))
+
+    assert candidates != [], "there are no candidates on the list at all"
+
+    for line <- candidates do
+      assert Regex.match?(~r/^\s+-\s1\s+`/, line),
+             "this candidate was written with a count the meal planner chose:\n#{line}"
+    end
+
+    {:ok, context}
+  end
+
+  step "every UPC on the shopping list is a 13-character string", context do
+    quoted =
+      ~r/`([^`]+)`/
+      |> Regex.scan(list_text(context))
+      |> Enum.map(fn [_, upc] -> upc end)
+
+    assert quoted != [], "there are no UPCs on the list at all"
+
+    for upc <- quoted do
+      assert Regex.match?(~r/^[0-9]{13}$/, upc),
+             ~s("#{upc}" is not a 13-character zero-padded UPC)
+    end
+
+    {:ok, context}
+  end
+
+  step "every product Kroger offered for {string} is still on the shopping list",
+       %{args: [term]} = context do
+    document = list_text(context)
+    offered = Map.get(Mealplan.Mock.Server.state(context.kroger).catalogue, String.downcase(term), [])
+
+    assert length(offered) > 1,
+           ~s("#{term}" has only #{length(offered)} product, so nothing is being chosen between)
+
+    for product <- offered do
+      assert String.contains?(document, product.upc),
+             "#{product.upc} was dropped, so something chose for the household:\n#{document}"
+    end
+
+    {:ok, context}
+  end
+
+  step "the shopping list lists {string} as not found at this store",
+       %{args: [item]} = context do
+    after_heading = section(context, "## Not found at this store")
+    assert String.contains?(after_heading, item), ~s("#{item}" is not listed there:\n#{after_heading})
+    {:ok, context}
+  end
+
+  step "the shopping list records what was sent", context do
+    sent = section(context, "## Sent")
+
+    for item <- Kroger.sent_items(context.kroger) do
+      assert String.contains?(sent, item.upc), "#{item.upc} was sent but not recorded:\n#{sent}"
+    end
+
+    # The record must say what it is NOT, or an agent reading it a week later
+    # will tell the household what is in a cart nobody can read.
+    assert Regex.match?(~r/cannot be read back/i, sent)
+    {:ok, context}
+  end
+
+  # --- what reached Kroger ---------------------------------------------------
+
+  step "my Kroger cart was sent nothing", context do
+    assert Kroger.sent_items(context.kroger) == [],
+           "something reached the Kroger cart, and a cart add cannot be walked back"
+
+    {:ok, context}
+  end
+
+  step "my Kroger cart was sent:", context do
+    assert simple(Kroger.sent_items(context.kroger)) == wanted_items(context)
+    {:ok, context}
+  end
+
+  step "the last thing sent to my Kroger cart was:", context do
+    adds = Kroger.cart_adds(context.kroger)
+    assert adds != [], "nothing has been sent to the cart at all"
+    assert simple(List.last(adds).items) == wanted_items(context)
+    {:ok, context}
+  end
+
+  step ~r/^my Kroger cart was sent (\d+) requests?$/, %{args: [count]} = context do
+    assert length(Kroger.cart_adds(context.kroger)) == String.to_integer(count)
+    {:ok, context}
+  end
+
+  # The one assertion that reads a cart, and the only one there will ever be.
+  #
+  # In production there is no such assertion, because `PUT /v1/cart/add` is the
+  # whole public cart surface. This reads the mock's model of a cart, and it
+  # exists for one question: did a repeated send double the shopping? Kroger
+  # adds rather than replaces — measured 2026-08-26, ADR 0012 — so that question
+  # has teeth. Use it for nothing else.
+  step ~r/^my Kroger cart holds (\d+) of "(.*)"$/, %{args: [quantity, upc]} = context do
+    assert Map.get(Kroger.cart_quantities(context.kroger), upc) == String.to_integer(quantity)
+    {:ok, context}
+  end
+
+  step "Kroger was asked for a new access token", context do
+    assert Enum.any?(Kroger.token_grants(context.kroger), &(&1.grant_type == "refresh_token")),
+           "the token was never refreshed, so the expired one must have been sent"
+
+    {:ok, context}
+  end
+
+  step "the household was not asked to approve anything", context do
+    assert Kroger.authorize_requests(context.kroger) == [],
+           "the household was sent back to Kroger to sign in again"
+
+    {:ok, context}
+  end
+
+  step "the meal planner says the cart cannot be read back", context do
+    said = text_of(context)
+    assert Regex.match?(~r/cannot be read/i, said)
+    # And it must be clear that nothing has been bought.
+    assert Regex.match?(~r/did not place an order|no money moves/i, said)
+    {:ok, context}
+  end
+
+  # --- refusals --------------------------------------------------------------
+
+  step "the meal planner refuses, and names the line {string}", %{args: [line]} = context do
+    assert String.contains?(refusal(context), line),
+           "the refusal does not name the line:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the meal planner refuses, and names the path {string}", %{args: [target]} = context do
+    assert String.contains?(refusal(context), target),
+           "the refusal does not name the path:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the meal planner refuses, and names the UPC {string}", %{args: [upc]} = context do
+    assert String.contains?(refusal(context), upc),
+           "the refusal does not name the UPC:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the meal planner refuses, and names the Kroger endpoint and the status", context do
+    why = refusal(context)
+    assert Regex.match?(~r{/v1/products}, why), "the refusal names no endpoint:\n#{why}"
+    assert Regex.match?(~r/answered 500/, why), "the refusal names no status:\n#{why}"
+    {:ok, context}
+  end
+
+  step "the meal planner refuses, and says to open {string} in a browser",
+       %{args: [where]} = context do
+    assert String.contains?(refusal(context), where),
+           "the refusal does not say where to go:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the meal planner refuses, and says the list has been sent already", context do
+    said = refusal(context)
+    assert Regex.match?(~r/already been sent|sent already/i, said)
+
+    # "Error messages are the documentation": a refusal that does not name the
+    # product it is warning about leaves the household to guess.
+    assert Regex.match?(~r/0001111050158/, said),
+           "the refusal does not name what was already sent:\n#{said}"
+
+    {:ok, context}
+  end
+
+  step "the output does not contain the Kroger access token", context do
+    held = Store.tokens(tenant_id(context))
+    assert held, "no Kroger token is held, so this scenario proves nothing"
+
+    refute String.contains?(output(context), held.access_token),
+           "the Kroger access token is readable from the sandbox"
+
+    if held.refresh_token do
+      refute String.contains?(output(context), held.refresh_token),
+             "the Kroger refresh token is readable from the sandbox"
+    end
+
+    {:ok, context}
+  end
+
+  step "the output does not contain the Kroger client secret", context do
+    refute String.contains?(output(context), Kroger.client_secret()),
+           "the Kroger client secret is readable from inside the sandbox"
+
+    refute String.contains?(output(context), "KROGER_CLIENT_SECRET"), "even the name leaked in"
+    {:ok, context}
+  end
+
+  # --- the tools -------------------------------------------------------------
+
+  defp find_products(context, target) do
+    call_tool(context, "kroger_find_products", %{
+      "path" => target,
+      "message" => "kroger_find_products #{target}"
+    })
+  end
+
+  defp send_to_cart(context, target) do
+    call_tool(context, "kroger_send_to_cart", %{
+      "path" => target,
+      "message" => "kroger_send_to_cart #{target}"
+    })
+  end
+
+  defp call_tool(context, name, args) do
+    {:ok, response} = Tools.call(name, args, context.tenant, context.now)
+    text = response |> Map.get("content", []) |> Enum.map_join("\n", &Map.get(&1, "text", ""))
+
+    Map.put(context, :last_tool, %{
+      text: text,
+      error: if(response["isError"], do: text, else: nil)
+    })
+  end
+
+  defp run_bash(context, command) do
+    {:ok, response} =
+      Tools.call(
+        "bash",
+        %{"command" => command, "message" => "bash #{command}"},
+        context.tenant,
+        context.now
+      )
+
+    structured = response["structuredContent"] || %{}
+
+    Map.put(context, :last, %{
+      stdout: Map.get(structured, "stdout", ""),
+      stderr: Map.get(structured, "stderr", ""),
+      exit_code: Map.get(structured, "exitCode", 0),
+      text: response |> Map.get("content", []) |> Enum.map_join("\n", &Map.get(&1, "text", ""))
+    })
+  end
+
+  defp write_file(context, path, content) do
+    {:ok, response} =
+      Tools.call(
+        "write_file",
+        %{"path" => path, "content" => content, "message" => "write_file #{path}"},
+        context.tenant,
+        context.now
+      )
+
+    refute response["isError"], "write_file #{path} failed"
+    context
+  end
+
+  defp write_list(context, from, to) do
+    target = "shopping-lists/#{from}--#{to}.md"
+
+    context =
+      run_bash(context, "mealplan shopping-list --from #{from} --to #{to} --out #{target}")
+
+    assert context.last.exit_code == 0,
+           "writing the list failed:\n#{context.last.stdout}#{context.last.stderr}"
+
+    Map.put(context, :list_path, target)
+  end
+
+  # --- reading it back -------------------------------------------------------
+
+  defp list_path(context), do: context[:list_path] || @list
+
+  defp list_text(context), do: File.read!(Path.join(context.folder, list_path(context)))
+
+  defp section(context, heading) do
+    document = list_text(context)
+
+    case :binary.match(document, heading) do
+      {at, _} -> binary_part(document, at, byte_size(document) - at)
+      :nomatch -> flunk(~s(there is no "#{heading}" section:\n#{document}))
+    end
+  end
+
+  defp candidates_for(context, item) do
+    context
+    |> list_text()
+    |> String.split("\n")
+    |> Enum.reduce({[], false}, fn line, {found, beneath} ->
+      cond do
+        Regex.match?(~r/^-\s/, line) -> {found, String.contains?(line, item)}
+        beneath and Regex.match?(~r/^\s+-\s/, line) -> {[line | found], beneath}
+        Regex.match?(~r/^#/, line) -> {found, false}
+        true -> {found, beneath}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp wanted_items(context) do
+    Enum.map(context.datatable.maps, &%{upc: &1["upc"], quantity: String.to_integer(&1["quantity"])})
+  end
+
+  defp simple(items), do: Enum.map(items, &%{upc: &1.upc, quantity: &1.quantity})
+
+  defp refusal(context) do
+    case context[:last_tool] do
+      %{error: error} when is_binary(error) -> error
+      %{text: text} -> flunk("the meal planner did not refuse. It said:\n#{text}")
+      _ -> flunk("no tool has been called in this scenario yet")
+    end
+  end
+
+  defp text_of(context), do: (context[:last_tool] || %{})[:text] || ""
+  defp error_of(context), do: (context[:last_tool] || %{})[:error]
+
+  defp output(context) do
+    last = context[:last] || %{}
+    Map.get(last, :stdout, "") <> Map.get(last, :stderr, "") <> text_of(context)
+  end
+
+  defp tenant_id(context) do
+    %{id: id} = Mealplan.Accounts.get_tenant_by_slug(context.tenant)
+    id
+  end
+
+  defp to_number(text) do
+    case Float.parse(to_string(text)) do
+      {n, _} -> n
+      :error -> 0.0
+    end
+  end
+end
