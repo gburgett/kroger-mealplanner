@@ -101,6 +101,7 @@ defmodule Mealplan.Features.CorpusHooks do
     Mealplan.Accounts.bootstrap!(tenant, Mealplan.Config.owner())
 
     kroger = start_kroger_mock()
+    {walmart, walmart_key_path} = start_walmart_mock(root_of(folder))
 
     {:ok, session} = Mealplan.Sandbox.open(tenant, folder)
 
@@ -113,6 +114,8 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:last, nil)
      |> Map.put(:last_tool, nil)
      |> Map.put(:kroger, kroger)
+     |> Map.put(:walmart, walmart)
+     |> Map.put(:walmart_key_path, walmart_key_path)
      |> Map.put(:list_path, nil)
      # What the history held before the scenario did anything, for the steps
      # that assert a delta rather than a total.
@@ -172,6 +175,31 @@ defmodule Mealplan.Features.CorpusHooks do
 
     mock
   end
+
+  # Walmart, stood in for, on the same terms as Kroger and for the same reasons.
+  # The private key is written OUTSIDE the meal-plan folder, because where it
+  # lives is the point of one of the scenarios: the agent can write anywhere in
+  # the folder and must not be able to reach the key.
+  defp start_walmart_mock(outside) do
+    mock = Mealplan.Mock.Walmart.start()
+    ExUnit.Callbacks.on_exit(fn -> Mealplan.Mock.Server.stop(mock) end)
+
+    keys = Mealplan.Mock.Walmart.keys()
+    key_path = Path.join(outside, "walmart-key.pem")
+    File.write!(key_path, keys.private_pem)
+    File.chmod!(key_path, 0o600)
+
+    Application.put_env(:mealplan, :walmart_api_base, mock.base)
+    Application.put_env(:mealplan, :walmart_cart_base, mock.base)
+    Application.put_env(:mealplan, :walmart_consumer_id, Mealplan.Mock.Walmart.consumer_id())
+    Application.put_env(:mealplan, :walmart_private_key, keys.private_pem)
+    Application.put_env(:mealplan, :walmart_key_version, Mealplan.Mock.Walmart.key_version())
+
+    {mock, key_path}
+  end
+
+  # The run root, which is the folder's parent — outside every scenario's corpus.
+  defp root_of(_folder), do: run_root()
 
   defp commit_count(session) do
     case Integer.parse(

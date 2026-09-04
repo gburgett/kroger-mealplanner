@@ -63,7 +63,8 @@ config :cucumber,
     "features/shopping_list.feature",
     "features/kroger_cart.feature",
     "features/kroger_link.feature",
-    "features/auth.feature"
+    "features/auth.feature",
+    "features/walmart.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]
