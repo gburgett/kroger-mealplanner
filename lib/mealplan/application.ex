@@ -34,7 +34,13 @@ defmodule Mealplan.Application do
       # The MCP server: anubis_mcp owns the Streamable HTTP transport and the
       # protocol; MealplanWeb.Router forwards /mcp to its plug. Tools and OAuth
       # are our own code. See Mealplan.Mcp.Server.
-      {Mealplan.Mcp.Server, transport: :streamable_http},
+      #
+      # `start:` is passed rather than left to anubis, which otherwise decides
+      # by sniffing PHX_SERVER and :phoenix/:serve_endpoints. The condition it
+      # is really after is this one: the transport belongs up exactly when the
+      # endpoint that forwards /mcp to it is up. Sniffed, it stayed down under
+      # `mix test` and every request to /mcp answered 500.
+      {Mealplan.Mcp.Server, transport: {:streamable_http, start: endpoint_serving?()}},
       # Start to serve requests, typically the last entry
       MealplanWeb.Endpoint
     ]
@@ -45,6 +51,12 @@ defmodule Mealplan.Application do
 
     opts = [strategy: :one_for_one, name: Mealplan.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp endpoint_serving? do
+    :mealplan
+    |> Application.get_env(MealplanWeb.Endpoint, [])
+    |> Keyword.get(:server, false)
   end
 
   # Tell Phoenix to update the endpoint configuration

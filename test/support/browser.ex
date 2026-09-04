@@ -72,7 +72,10 @@ defmodule Mealplan.Browser do
     %{
       status: response.status,
       body: to_string(response.body),
-      location: response |> Req.Response.get_header("location") |> List.first()
+      location: response |> Req.Response.get_header("location") |> List.first(),
+      session_id: response |> Req.Response.get_header("mcp-session-id") |> List.first(),
+      www_authenticate:
+        response |> Req.Response.get_header("www-authenticate") |> List.first()
     }
   end
 

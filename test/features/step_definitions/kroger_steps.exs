@@ -665,13 +665,6 @@ defmodule Mealplan.Features.KrogerSteps do
     {:ok, context}
   end
 
-  step "the refusal names {string}", %{args: [what]} = context do
-    assert String.contains?(refusal(context), what),
-           "the refusal does not name #{what}:\n#{refusal(context)}"
-
-    {:ok, context}
-  end
-
   # The four beats a person has to walk, wherever the text is found.
   defp says_how_to_change_shops(text, where) do
     for beat <- [~r/postcode/i, ~r/find stores/i, ~r/pickup or delivery/i, ~r{config/kroger\.md}] do
