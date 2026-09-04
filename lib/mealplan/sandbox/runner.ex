@@ -84,7 +84,7 @@ defmodule Mealplan.Sandbox.Runner do
     # Mealplan.Corpus.Paths.
     env = Map.put(env, "MEALPLAN_WORKSPACE", workspace_root(mode, workspace))
 
-    {inner, seccomp_arg, cwd} =
+    {inner, seccomp_arg, cwd, scratch} =
       case mode do
         :bubblewrap ->
           bwrap =
@@ -97,14 +97,31 @@ defmodule Mealplan.Sandbox.Runner do
                 env: env
               )
 
-          # bubblewrap does its own --chdir /workspace, so the port needs no cwd.
-          {bwrap, seccomp_filter || "-", nil}
+          # bubblewrap does its own --chdir /workspace, so the port needs no cwd,
+          # and its --tmpfs /tmp is the command's scratch space.
+          {bwrap, seccomp_filter || "-", nil, nil}
 
         :host ->
-          shell = HostShell.args(workspace: workspace, command: command, env: env)
+          # Bubblewrap gives the command a `--tmpfs /tmp` that is discarded with
+          # the sandbox. Nothing does that on the host, so a command that spills
+          # to /tmp — `sort` does, and the shopping list sorts — leaves the file
+          # behind when it is killed. Unnoticed, that filled a disk with 112,000
+          # `sort*` files and took PostgreSQL down with it. A scratch directory
+          # per command, removed with the stream files below, is the same
+          # lifetime by other means.
+          dir = Path.join(System.tmp_dir!(), "mealplan-scratch-#{unique()}")
+          File.mkdir_p!(dir)
+
+          shell =
+            HostShell.args(
+              workspace: workspace,
+              command: command,
+              env: Map.put(env, "TMPDIR", dir)
+            )
+
           # No image, so no filter to open, and the working directory is the
           # folder itself rather than a mount point inside a namespace.
-          {shell, "-", workspace}
+          {shell, "-", workspace, dir}
       end
 
     argv = Limits.wrap(inner, limits, use_user_scope: use_user_scope, unit_name: unit_name)
@@ -136,6 +153,7 @@ defmodule Mealplan.Sandbox.Runner do
     {stderr, err_trunc} = read_capped(err_path, cap)
 
     for p <- [out_path, err_path, input_path], p != "-", do: File.rm(p)
+    if scratch, do: File.rm_rf(scratch)
 
     stderr =
       if timed_out do
@@ -262,12 +280,12 @@ defmodule Mealplan.Sandbox.Runner do
   end
 
   defp tmp(kind) do
-    dir = System.tmp_dir!()
-    name = "mealplan-#{kind}-#{System.unique_integer([:positive])}-#{:erlang.phash2(make_ref())}"
-    path = Path.join(dir, name)
+    path = Path.join(System.tmp_dir!(), "mealplan-#{kind}-#{unique()}")
     :ok = File.write(path, "")
     {:ok, path}
   end
+
+  defp unique, do: "#{System.unique_integer([:positive])}-#{:erlang.phash2(make_ref())}"
 
   defp sanitise_unit(tenant) do
     tenant
