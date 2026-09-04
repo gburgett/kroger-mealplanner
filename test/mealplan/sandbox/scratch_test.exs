@@ -99,43 +99,46 @@ defmodule Mealplan.Sandbox.ScratchTest do
   end
 
   describe "Runner.run/2 cleanup" do
+    # These measure the DELTA, not the whole root. The root belongs to the OS
+    # process, and the suite shares it: a session GenServer or a Bandit request
+    # handler from another test can hold a command directory of its own while
+    # these run, and that is not this function's business. Asserting the root
+    # was empty made these three tests fail for other tests' work.
+    setup do
+      {:ok, before: command_dirs()}
+    end
+
     # The regression test for the 11 GB. A command that is stopped by the
     # wall-clock timeout used to leave its TMPDIR — and everything the command
     # had written into it — behind, because the removal was the last line of a
     # function the timeout path reached but the killed command's spill outlived.
-    test "a command that times out leaves nothing behind" do
-      root = Scratch.root()
-
+    test "a command that times out leaves nothing behind", %{before: before} do
       result = run_in_sandbox("sleep 5", timeout_ms: 300)
 
       assert result.timed_out
-      assert command_dirs(root) == []
+      assert command_dirs() -- before == []
     end
 
-    test "a command that fails leaves nothing behind" do
-      root = Scratch.root()
-
+    test "a command that fails leaves nothing behind", %{before: before} do
       result = run_in_sandbox("exit 3")
 
       assert result.exit_code == 3
-      assert command_dirs(root) == []
+      assert command_dirs() -- before == []
     end
 
-    test "a command that writes to TMPDIR leaves nothing behind" do
-      root = Scratch.root()
-
+    test "a command that writes to TMPDIR leaves nothing behind", %{before: before} do
       # What `sort` does when it spills, and what the shopping list does for its
       # JSON: writes a file next to the command rather than into the corpus.
       result = run_in_sandbox(~s(echo spill > "${TMPDIR:-/tmp}/spill"; ls "${TMPDIR:-/tmp}"))
 
       assert result.exit_code == 0
       assert result.stdout =~ "spill"
-      assert command_dirs(root) == []
+      assert command_dirs() -- before == []
     end
   end
 
-  defp command_dirs(root) do
-    root |> Path.join("cmd-*") |> Path.wildcard()
+  defp command_dirs do
+    Scratch.root() |> Path.join("cmd-*") |> Path.wildcard()
   end
 
   defp run_in_sandbox(command, opts \\ []) do
