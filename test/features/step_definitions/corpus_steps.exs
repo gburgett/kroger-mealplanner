@@ -682,13 +682,6 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, Map.put(context, :now, Mealplan.Features.CorpusHooks.frozen_clock())}
   end
 
-  step "the last commit to the meal-plan folder was made on {string}",
-       %{args: [date]} = context do
-    result = Session.run(context.session, "git log -1 --format=%cd --date=short")
-    assert String.trim(result.stdout) == date
-    {:ok, context}
-  end
-
   # --- the tool descriptions an agent reads ---------------------------------
 
   step "the {string} tool description says to read the preferences",

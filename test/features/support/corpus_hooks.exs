@@ -102,6 +102,7 @@ defmodule Mealplan.Features.CorpusHooks do
 
     kroger = start_kroger_mock()
     {walmart, walmart_key_path} = start_walmart_mock(root_of(folder))
+    llm = start_llm_mock()
 
     {:ok, session} = Mealplan.Sandbox.open(tenant, folder)
 
@@ -116,6 +117,7 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:kroger, kroger)
      |> Map.put(:walmart, walmart)
      |> Map.put(:walmart_key_path, walmart_key_path)
+     |> Map.put(:llm, llm)
      |> Map.put(:list_path, nil)
      # What the history held before the scenario did anything, for the steps
      # that assert a delta rather than a total.
@@ -196,6 +198,15 @@ defmodule Mealplan.Features.CorpusHooks do
     Application.put_env(:mealplan, :walmart_key_version, Mealplan.Mock.Walmart.key_version())
 
     {mock, key_path}
+  end
+
+  # The exe.dev LLM gateway, stood in for. The third and last mock; there are no
+  # more seams. The weekly recheck job is the only caller.
+  defp start_llm_mock do
+    mock = Mealplan.Mock.Llm.start()
+    ExUnit.Callbacks.on_exit(fn -> Mealplan.Mock.Server.stop(mock) end)
+    Application.put_env(:mealplan, :llm_base, mock.base)
+    mock
   end
 
   # The run root, which is the folder's parent — outside every scenario's corpus.

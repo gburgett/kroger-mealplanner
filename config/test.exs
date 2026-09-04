@@ -64,7 +64,8 @@ config :cucumber,
     "features/kroger_cart.feature",
     "features/kroger_link.feature",
     "features/auth.feature",
-    "features/walmart.feature"
+    "features/walmart.feature",
+    "features/consumable_recheck.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

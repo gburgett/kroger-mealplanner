@@ -64,10 +64,11 @@ defmodule Mealplan.Recheck do
     * `:max_turns` — the loop ceiling (default #{@default_max_turns})
     * `:image_root`, `:seccomp_filter` — passed through to the session
 
-  Returns a map mirroring `RecheckResult` in `src/jobs/recheck.ts`, with
-  string-friendly keys ready for `Jason.encode!/1`:
-  `ran`, `skipped_reason`, `exit_code`, `turns_used`, `gave_up`, `tool_calls`
-  (each `%{name:, input:, result_text:, is_error:}`), `log_lines`.
+  Returns a map mirroring `RecheckResult` in `src/jobs/recheck.ts`, keyed by
+  STRINGS in camelCase and ready for `Jason.encode!/1` as it stands:
+  `"ran"`, `"skippedReason"`, `"exitCode"`, `"turnsUsed"`, `"gaveUp"`,
+  `"toolCalls"` (each `%{"name", "input", "resultText", "isError"}`) and
+  `"logLines"`.
   """
   def run(opts) do
     folder = Keyword.fetch!(opts, :folder)
