@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contact &mdash; MealPlanAgent</title>
+  <style>
+    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input, textarea { width: 100%; padding: 0.5rem; font: inherit; box-sizing: border-box; }
+    button { margin-top: 1.25rem; padding: 0.6rem 1.4rem; font: inherit; cursor: pointer; }
+    .hp { position: absolute; left: -9999px; }
+    footer { margin-top: 3rem; border-top: 1px solid #ddd; padding-top: 1rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Contact MealPlanAgent</h1>
+
+  <p>
+    Questions about the service, these documents, or a privacy request &mdash;
+    send them here. Messages go to the operator by email.
+  </p>
+
+  <!--
+    This form posts directly from the visitor's browser to Web3Forms; the
+    server is not involved. Replace the access_key value below with the key
+    from https://web3forms.com (Create Access Key). The key is meant to be
+    public and can safely live in this file.
+  -->
+  <form action="https://api.web3forms.com/submit" method="POST">
+    <input type="hidden" name="access_key" value="REPLACE_WITH_WEB3FORMS_ACCESS_KEY">
+    <input type="hidden" name="subject" value="New MealPlanAgent contact message">
+    <input type="hidden" name="from_name" value="MealPlanAgent contact form">
+
+    <!-- honeypot: bots fill this, people never see it -->
+    <input type="checkbox" name="botcheck" class="hp" tabindex="-1" autocomplete="off">
+
+    <label for="name">Your name</label>
+    <input type="text" id="name" name="name" required>
+
+    <label for="email">Your email</label>
+    <input type="email" id="email" name="email" required>
+
+    <label for="message">Message</label>
+    <textarea id="message" name="message" rows="6" required></textarea>
+
+    <button type="submit">Send</button>
+  </form>
+
+  <footer>
+    <p>
+      <a href="/">Home</a> &middot;
+      <a href="/terms.html">Terms of Service</a> &middot;
+      <a href="/privacy.html">Privacy Policy</a>
+    </p>
+  </footer>
+</body>
+</html>

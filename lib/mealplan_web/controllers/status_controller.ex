@@ -21,46 +21,8 @@ defmodule MealplanWeb.StatusController do
   def index(conn, _params) do
     mcp_url = String.replace(Mealplan.Config.public_url(), ~r{/+$}, "") <> "/mcp"
 
-    text(conn, """
-    Kroger meal planner
-
-    This server plans meals for one household through an MCP connector. Add
-    it in ChatGPT or Claude, then ask it about dinner.
-
-    MCP address: #{mcp_url}
-
-    == Adding this connector in ChatGPT ==
-
-    1. Turn on Developer Mode: Settings -> Apps & Connectors -> Advanced ->
-       Developer mode.
-       Developer Mode needs a Business, Enterprise or Edu workspace. A Free
-       or Plus/Pro account cannot add a custom connector, and cannot use
-       write_file or bash here even if one is added by someone else on the
-       workspace.
-    2. Settings -> Connectors -> Create, paste the MCP address above, and
-       finish the sign-in this server's consent page asks for.
-
-    == Adding this connector in Claude ==
-
-    1. On claude.ai web or the desktop app: Settings -> Customize -> Connectors
-       -> Add custom connector, paste the MCP address above, and finish the
-       sign-in this server's consent page asks for.
-       Claude's mobile app cannot add a new connector by itself. Add it on
-       the web or desktop app first; the mobile app can then use a connector
-       already added there.
-
-    == If you are an assistant reading this page for someone ==
-
-    Tell them plainly what you are about to do, then:
-
-    1. Open the connector settings path above for whichever app you are
-       running in.
-    2. Paste this exact address into the connector's URL field:
-       #{mcp_url}
-    3. Follow the sign-in this server's consent page asks for. It is a
-       real login, not something you can do without the household present.
-
-    Once connected, the first tool call answers with what to do next.
-    """)
+    conn
+    |> put_resp_header("content-type", "text/html; charset=utf-8")
+    |> send_resp(200, MealplanWeb.SitePages.landing(mcp_url))
   end
 end

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terms of Service &mdash; MealPlanAgent</title>
+  <style>
+    body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    h2 { margin-top: 2.25rem; }
+    ol.toc { font-size: 0.95rem; }
+    footer { margin-top: 3rem; border-top: 1px solid #ddd; padding-top: 1rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Terms of Service</h1>
+  <p><strong>Last updated:</strong> September 5, 2026</p>
+
+  <p>
+    These Terms of Service ("Terms") are a binding agreement between you and
+    MealPlanAgent ("MealPlanAgent", "we", "us", or "our") governing your access
+    to and use of the MealPlanAgent software, server, connector, and related
+    services (together, the "Services"). By adding the connector, signing in to
+    the consent screen, or otherwise using the Services, you agree to these
+    Terms. If you do not agree, do not use the Services.
+  </p>
+
+  <h2>1. Our Services</h2>
+  <p>
+    MealPlanAgent is a meal-planning tool for a single household. It stores your
+    recipes and meal plans as plain-text files in a private folder, derives a
+    consolidated shopping list from those files on demand, and can send that
+    list to a third-party grocery cart (currently Kroger and Walmart). You reach
+    the Services through a Model Context Protocol ("MCP") connector that you add
+    to a compatible AI assistant, such as ChatGPT or Claude. The assistant runs
+    commands and edits files inside a restricted sandbox on your behalf.
+  </p>
+  <p>
+    MealPlanAgent is not a grocery retailer, a delivery service, or a payment
+    processor. We do not sell groceries, set prices, guarantee product
+    availability, place orders, or complete any purchase. Any transaction with a
+    grocery retailer is solely between you and that retailer, under that
+    retailer's own terms.
+  </p>
+  <p>
+    The Services are provided for personal, household use. They are not designed
+    for, and must not be relied on for, medical, dietary, allergen, or
+    nutritional decision-making. Ingredient data, quantities, and substitutions
+    are generated automatically and may be wrong. You are responsible for
+    checking anything that matters, including allergen and dietary safety, before
+    you rely on it.
+  </p>
+
+  <h2>2. Eligibility</h2>
+  <p>
+    You must be at least 18 years old and able to form a binding contract to use
+    the Services. By using the Services you represent that you meet these
+    requirements and that all registration and account information you provide is
+    accurate and kept current.
+  </p>
+
+  <h2>3. Accounts, Connectors, and Credentials</h2>
+  <p>
+    Access to the Services requires an authorized connection. When you connect an
+    AI assistant, our server issues credentials (for example, OAuth client
+    registrations and bearer tokens) that let that assistant act on your behalf.
+    You are responsible for keeping these credentials, and any grocery-retailer
+    sign-in you complete, confidential. You are responsible for all activity that
+    occurs through your connection, whether or not you authorized each individual
+    action.
+  </p>
+  <p>
+    You may revoke a connection at any time through your assistant's connector
+    settings or by contacting us. Revoking a connection does not undo actions
+    already taken, including items already added to a grocery cart.
+  </p>
+
+  <h2>4. AI and Automated Processing</h2>
+  <p>
+    The Services are operated through an AI assistant that you choose and
+    control. That assistant decides which commands to run, which files to write,
+    which products to propose, and what to send to a grocery cart, based on your
+    instructions to it. MealPlanAgent executes those commands inside the sandbox;
+    it does not independently review them for correctness or intent.
+  </p>
+  <p>
+    You are responsible for the instructions you give your assistant and for the
+    results. Review proposed changes, shopping lists, and cart contents before
+    you act on them. Automated output is informational only and is not
+    professional advice of any kind.
+  </p>
+
+  <h2>5. Third-Party Grocery Services</h2>
+  <p>
+    Features that connect to Kroger, Walmart, or any other retailer depend on
+    that retailer's APIs and accounts, which we do not control and which may
+    change or stop working at any time. When you use these features:
+  </p>
+  <ul>
+    <li>
+      You authorize MealPlanAgent to submit product searches and cart additions
+      to that retailer using the access you granted.
+    </li>
+    <li>
+      A cart addition is attempted at most once and is never retried. If any
+      line item is ambiguous, the entire send stops rather than partially
+      completing.
+    </li>
+    <li>
+      MealPlanAgent cannot read, modify, or delete the contents of a retailer
+      cart. It can report only what it attempted to send.
+    </li>
+    <li>
+      Prices, substitutions, availability, fulfillment, delivery, returns, and
+      checkout are governed entirely by the retailer and its terms and privacy
+      policy.
+    </li>
+  </ul>
+
+  <h2>6. Your Content and Data</h2>
+  <p>
+    Your recipes, meal plans, preferences, notes, and other files (your
+    "Content") remain yours. You grant us a limited license to store, process,
+    copy, and transmit your Content only as needed to operate the Services for
+    you &mdash; for example, to run commands against the folder, keep version
+    history, derive a shopping list, and send that list to a retailer you chose.
+  </p>
+  <p>
+    You are solely responsible for your Content and for keeping your own backups.
+    The folder is a version-controlled set of Markdown files and can be exported
+    at any time in a standard, machine-readable form. We are not liable for loss,
+    corruption, or unauthorized access to Content except to the extent required
+    by law.
+  </p>
+
+  <h2>7. Acceptable Use</h2>
+  <p>You agree not to:</p>
+  <ul>
+    <li>use the Services for anything other than lawful, personal household meal planning;</li>
+    <li>attempt to escape, disable, or probe the sandbox, or to reach the network, host filesystem, or other systems from inside it;</li>
+    <li>attempt to gain unauthorized access to the server, other accounts, or any credential, token, or environment value the server holds;</li>
+    <li>interfere with or overload the Services, or circumvent rate limits, quotas, or security controls;</li>
+    <li>scrape, resell, or redistribute the Services, or use them to build a competing product;</li>
+    <li>use the Services to violate a grocery retailer's terms, or to place orders you are not authorized to place;</li>
+    <li>upload content that is unlawful, infringing, or malicious.</li>
+  </ul>
+
+  <h2>8. Fees</h2>
+  <p>
+    If a paid plan applies to your use of the Services, the price, billing
+    period, and renewal terms will be presented to you before you are charged.
+    Unless stated otherwise, fees are billed in advance, recur automatically
+    until cancelled, and are non-refundable except where required by law. You
+    authorize us to charge your payment method for all applicable fees. You may
+    cancel at any time; cancellation takes effect at the end of the current
+    billing period, and you keep access until then.
+  </p>
+
+  <h2>9. Intellectual Property</h2>
+  <p>
+    The Services, including the server software, the command-line tools, the
+    document conventions, and all associated marks and text, are owned by
+    MealPlanAgent or its licensors and are protected by intellectual property
+    law. We grant you a limited, revocable, non-exclusive, non-transferable
+    license to use the Services for their intended purpose. All rights not
+    expressly granted are reserved. This does not restrict any separate
+    open-source license under which parts of the software may also be
+    distributed.
+  </p>
+
+  <h2>10. Service Changes and Availability</h2>
+  <p>
+    We may modify, suspend, or discontinue any part of the Services at any time,
+    with or without notice. The Services may be unavailable during maintenance,
+    upgrades, or failures, including failures of third-party providers. We are
+    not liable to you for any modification, suspension, or discontinuation of the
+    Services.
+  </p>
+
+  <h2>11. Termination</h2>
+  <p>
+    You may stop using the Services at any time. We may suspend or terminate your
+    access, with or without notice, if we reasonably believe you have violated
+    these Terms, if required by law, or if continuing to provide the Services
+    becomes impractical. On termination, your right to use the Services ends. You
+    may request an export of your Content before termination or within a
+    reasonable period afterward, unless prohibited by law.
+  </p>
+
+  <h2>12. Disclaimers</h2>
+  <p>
+    THE SERVICES ARE PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTIES OF
+    ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING IMPLIED
+    WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+    NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICES WILL BE UNINTERRUPTED,
+    ERROR-FREE, OR SECURE, THAT SHOPPING LISTS OR QUANTITIES WILL BE ACCURATE,
+    THAT PRODUCTS PROPOSED OR SENT TO A CART WILL BE CORRECT, AVAILABLE, OR
+    APPROPRIATE FOR ANY DIETARY OR ALLERGEN NEED, OR THAT ANY THIRD-PARTY
+    INTEGRATION WILL CONTINUE TO FUNCTION.
+  </p>
+
+  <h2>13. Limitation of Liability</h2>
+  <p>
+    TO THE MAXIMUM EXTENT PERMITTED BY LAW, MEALPLANAGENT AND ITS OWNERS,
+    OPERATORS, AND SUPPLIERS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+    SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS,
+    LOST DATA, OR THE COST OF SUBSTITUTE GOODS OR SERVICES, ARISING OUT OF OR
+    RELATED TO THE SERVICES, EVEN IF ADVISED OF THE POSSIBILITY. OUR TOTAL
+    LIABILITY FOR ALL CLAIMS RELATING TO THE SERVICES WILL NOT EXCEED THE GREATER
+    OF (A) THE AMOUNT YOU PAID US FOR THE SERVICES IN THE TWELVE MONTHS BEFORE
+    THE EVENT GIVING RISE TO THE CLAIM, OR (B) ONE HUNDRED U.S. DOLLARS
+    (US$100). SOME JURISDICTIONS DO NOT ALLOW CERTAIN LIMITATIONS, SO SOME OF
+    THE ABOVE MAY NOT APPLY TO YOU.
+  </p>
+
+  <h2>14. Indemnification</h2>
+  <p>
+    You agree to defend, indemnify, and hold harmless MealPlanAgent and its
+    owners and operators from any claim, loss, liability, or expense (including
+    reasonable legal fees) arising out of your use of the Services, your Content,
+    your instructions to an AI assistant, your use of a third-party grocery
+    account, or your violation of these Terms or of any law or third-party right.
+  </p>
+
+  <h2>15. Governing Law and Dispute Resolution</h2>
+  <p>
+    These Terms are governed by the laws of the State of Texas, without regard to
+    its conflict-of-laws rules. Before filing any claim, you agree to first
+    contact us and attempt to resolve the dispute informally for at least 30
+    days. If the dispute is not resolved, it will be settled by binding
+    arbitration on an individual basis under the rules of the American
+    Arbitration Association, seated in Texas. You and MealPlanAgent waive any
+    right to a jury trial and to participate in a class action. This section does
+    not prevent either party from seeking injunctive relief in court for
+    infringement or misuse of intellectual property, or from bringing an
+    individual claim in small-claims court.
+  </p>
+
+  <h2>16. Electronic Communications</h2>
+  <p>
+    By using the Services you consent to receive communications from us
+    electronically, and you agree that electronic agreements, notices, and
+    records satisfy any legal requirement that such communications be in writing.
+  </p>
+
+  <h2>17. Changes to These Terms</h2>
+  <p>
+    We may update these Terms from time to time. If we make material changes, we
+    will update the "Last updated" date and, where practical, provide additional
+    notice. Your continued use of the Services after changes take effect means
+    you accept the revised Terms.
+  </p>
+
+  <h2>18. Miscellaneous</h2>
+  <p>
+    If any provision of these Terms is held unenforceable, the rest remains in
+    effect. Our failure to enforce a provision is not a waiver of it. These Terms
+    are the entire agreement between you and us regarding the Services and
+    supersede any prior agreement on that subject. You may not assign these Terms
+    without our consent; we may assign them in connection with a merger,
+    acquisition, or sale of assets. Nothing in these Terms creates a partnership,
+    agency, or employment relationship between the parties.
+  </p>
+
+  <h2>19. Contact</h2>
+  <p>
+    Questions about these Terms: use the
+    <a href="/contact.html">contact form</a>.
+  </p>
+
+  <footer>
+    <p><a href="/">Home</a> &middot; <a href="/privacy.html">Privacy Policy</a> &middot; <a href="/contact.html">Contact</a></p>
+  </footer>
+</body>
+</html>

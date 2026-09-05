@@ -17,7 +17,13 @@ defmodule MealplanWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  # `terms.html`, `privacy.html` and `contact.html` are the public static site
+  # (ADR 0026 scoped the landing page; these sit beside it). They are flat files
+  # under `priv/static/`, served by `Plug.Static` in the endpoint. The landing
+  # page itself is `MealplanWeb.SitePages`, rendered by `StatusController`,
+  # because it interpolates this server's own MCP address.
+  def static_paths,
+    do: ~w(assets fonts images favicon.ico robots.txt terms.html privacy.html contact.html)
 
   def router do
     quote do
