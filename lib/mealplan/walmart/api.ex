@@ -51,6 +51,13 @@ defmodule Mealplan.Walmart.Api do
   def max_link_items, do: @max_link_items
 
   @doc """
+  Whether the server has a Walmart credential at all. `Mealplan.Mcp.Tools`
+  uses this to decide whether the three Walmart tools are worth listing —
+  see ADR 0033, written while affiliate approval is still pending.
+  """
+  def configured?, do: not is_nil(new())
+
+  @doc """
   Build the client, or nil when the server has no Walmart credential. Either
   half missing means not configured — the tools refuse by name and everything
   else works.

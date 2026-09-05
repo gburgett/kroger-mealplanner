@@ -69,15 +69,27 @@ defmodule Mealplan.Mcp.Server do
         "and \"which shop\". There is no tool for that question and there should " <>
         "not be one.",
       Mealplan.Kroger.Help.how_to(base_url),
+      walmart_instructions()
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  # Mentioning walmart_find_stores in the handshake when the tool is not even
+  # listed would send an agent looking for something that is not there. The
+  # three Walmart tools, and this text, come back together the moment the
+  # server has a Walmart credential — see ADR 0033.
+  defp walmart_instructions do
+    if Mealplan.Walmart.Api.configured?() do
       "WALMART. Which Walmart store cart links are built for lives in " <>
         "config/walmart.md, so \"cat config/walmart.md\" answers \"is a Walmart " <>
         "store set\". There is no sign-in and no browser flow: the affiliate API " <>
         "is the server's own, so finding a store and writing that file is work " <>
-        "YOU do — walmart_find_stores, then write_file.",
-      Mealplan.Walmart.Help.how_to()
-    ]
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
+        "YOU do — walmart_find_stores, then write_file.\n\n" <>
+        Mealplan.Walmart.Help.how_to()
+    else
+      ""
+    end
   end
 
   # Only these two methods are ours. Everything else — initialize, ping,

@@ -29,6 +29,28 @@ defmodule Mealplan.Features.WalmartSteps do
 
   @list "shopping-lists/2026-08-25--2026-08-31.md"
 
+  # --- whether the server is even configured ---------------------------------
+
+  # `corpus_hooks.exs` configures a Walmart credential for every scenario, on
+  # the same terms as Kroger's mock (ADR 0017's Background). This step undoes
+  # that for the one scenario that needs to see the server the way it looks
+  # before affiliate approval — see ADR 0033. `on_exit` puts the mock's values
+  # back so a later scenario in the same run never inherits the gap.
+  step "the server has no Walmart credential", context do
+    consumer_id = Application.get_env(:mealplan, :walmart_consumer_id)
+    private_key = Application.get_env(:mealplan, :walmart_private_key)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      Application.put_env(:mealplan, :walmart_consumer_id, consumer_id)
+      Application.put_env(:mealplan, :walmart_private_key, private_key)
+    end)
+
+    Application.put_env(:mealplan, :walmart_consumer_id, "")
+    Application.put_env(:mealplan, :walmart_private_key, nil)
+
+    {:ok, context}
+  end
+
   # --- the store -------------------------------------------------------------
 
   step "Walmart sells:", context do
@@ -268,6 +290,17 @@ defmodule Mealplan.Features.WalmartSteps do
 
     assert Regex.match?(~r/adds nothing|adds NOTHING/, instructions),
            "the instructions do not say building the link adds nothing"
+
+    {:ok, context}
+  end
+
+  step "the meal planner's instructions say nothing about Walmart", context do
+    instructions = Mealplan.Mcp.Server.server_instructions()
+
+    for beat <- [~r/walmart_find_stores/, ~r/WALMART\./, ~r/walmart_cart_link/] do
+      refute Regex.match?(beat, instructions),
+             "the handshake instructions still mention #{inspect(beat)}"
+    end
 
     {:ok, context}
   end
