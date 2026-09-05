@@ -42,3 +42,7 @@ mealplan-*.tar
 
 # The microsandbox session-layer image (ADR 0027); built by build.sh --microsandbox
 sandbox-image/oci.tar
+
+# Core dumps (msb/node has been seen to dump one when its guest agent is killed)
+core
+core.*
