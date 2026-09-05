@@ -30,6 +30,32 @@ defmodule Mealplan.Sandbox.Runner do
   @wrapper Application.app_dir(:mealplan, "priv/sandbox/run.sh")
 
   @doc """
+  Run `command` from a session handle map rather than loose options.
+
+  `Mealplan.Sandbox.Backend.Bubblewrap` and `.Host` build the map once in
+  `open/1` — everything `run/2` needs bar the per-call `command`, `env`,
+  `input` and `max_output_bytes` — and thread it through here.
+  """
+  @spec run(map(), String.t(), keyword()) :: result()
+  def run(%{} = handle, command, opts) when is_binary(command) do
+    run(command,
+      mode: Map.fetch!(handle, :mode),
+      image_root: Map.fetch!(handle, :image_root),
+      seccomp_filter: Map.fetch!(handle, :seccomp_filter),
+      workspace: Map.fetch!(handle, :workspace),
+      tenant: Map.fetch!(handle, :tenant),
+      use_user_scope: Map.fetch!(handle, :use_user_scope),
+      nproc_budget: Map.get(handle, :nproc_budget),
+      limits: Map.fetch!(handle, :limits),
+      timeout_ms: Map.fetch!(handle, :timeout_ms),
+      max_output_bytes:
+        Keyword.get(opts, :max_output_bytes, Map.fetch!(handle, :max_output_bytes)),
+      env: Keyword.get(opts, :env, %{}),
+      input: Keyword.get(opts, :input)
+    )
+  end
+
+  @doc """
   Run `command` in the sandbox.
 
   Options:
@@ -49,7 +75,7 @@ defmodule Mealplan.Sandbox.Runner do
     * `:input` — string piped to the command's stdin
   """
   @spec run(String.t(), keyword()) :: result()
-  def run(command, opts) do
+  def run(command, opts) when is_list(opts) do
     image_root = Keyword.fetch!(opts, :image_root)
     seccomp_filter = Keyword.fetch!(opts, :seccomp_filter)
     workspace = Keyword.fetch!(opts, :workspace)

@@ -76,9 +76,23 @@ defmodule Mealplan.Sandbox do
   @spec mode() :: :bubblewrap | :host
   def mode, do: config()[:mode] || :bubblewrap
 
+  @doc """
+  The `Mealplan.Sandbox.Backend` module for the configured `mode/0`.
+
+  One switch at boot picks the confinement mechanism; every `Session` resolves
+  it here and holds it for its life. See `Mealplan.Sandbox.Backend`.
+  """
+  @spec backend() :: module()
+  def backend do
+    case mode() do
+      :bubblewrap -> Mealplan.Sandbox.Backend.Bubblewrap
+      :host -> Mealplan.Sandbox.Backend.Host
+    end
+  end
+
   @doc "True when commands are really confined. False under `:host`."
   @spec confined?() :: boolean()
-  def confined?, do: mode() == :bubblewrap
+  def confined?, do: backend().confined?()
 
   # --- image / filter / wrapper locations -----------------------------------
 

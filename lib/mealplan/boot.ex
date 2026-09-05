@@ -146,16 +146,14 @@ defmodule Mealplan.Boot do
   end
 
   # Named in the health check because a server running unconfined must never be
-  # something a person has to infer. See ADR 0022.
+  # something a person has to infer. See ADR 0022. Each backend states its own
+  # mechanism — bubblewrap the image path, host the warning — through
+  # `Mealplan.Sandbox.Backend.status_line/1`.
   defp sandbox_status do
-    case Sandbox.mode() do
-      :bubblewrap ->
-        "bubblewrap, image #{Sandbox.default_image_root()}"
-
-      :host ->
-        "HOST — NOT SANDBOXED. Commands run unconfined as this user, with the " <>
-          "host filesystem and network reachable. MEALPLAN_SANDBOX=host is set."
-    end
+    Sandbox.backend().status_line(
+      image_root: Sandbox.default_image_root(),
+      seccomp_filter: Sandbox.default_seccomp_filter()
+    )
   end
 
   defp kroger_status do
