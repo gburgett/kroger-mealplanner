@@ -1,15 +1,19 @@
 name: test
 
 # The scenarios under features/ run in host mode: no sandbox image to build, and
-# nothing spawned per scenario. See ADR 0022. The database is a SQLite file in
-# the checkout (ADR 0024), so this job starts no service at all.
+# nothing spawned per scenario. See ADR 0022. The database is PostgreSQL again
+# (ADR 0028), so this job starts one service — that is the cost ADR 0024 had
+# bought and ADR 0028 spent, and it is spent because the SuperTokens core the
+# sign-in scenarios drive accepts no other database.
 #
 # The tool scenarios run in the test BEAM against the handlers. The ones about
 # the screens and the transport go over a real socket to an endpoint this same
-# BEAM is running, so the exe.dev gate, the OAuth handshake and anubis_mcp's
-# Streamable HTTP transport are all under test here too — ADR 0023. The three
-# third parties (Kroger, Walmart, the exe.dev LLM gateway) are real listeners on
-# 127.0.0.1, so nothing in this job can reach a real one.
+# BEAM is running, so the session gate, the sign-in screens, the OAuth handshake
+# and anubis_mcp's Streamable HTTP transport are all under test here too —
+# ADR 0023. The third parties (Kroger, Walmart, the exe.dev LLM gateway, and now
+# the SuperTokens core and the SMS provider) are real listeners on 127.0.0.1, so
+# nothing in this job can reach a real one — and nothing in it can send a real
+# text message.
 #
 # What this job does NOT prove is containment. Every @security scenario is
 # excluded in host mode, and mix test says so in a banner rather than reporting
@@ -36,9 +40,26 @@ jobs:
     name: application logic (host mode)
     runs-on: ubuntu-latest
 
-    # No `services:` block. The database is one SQLite file (ADR 0024), created
-    # by `mix ecto.create` in the checkout, so there is nothing to start and
-    # nothing to wait for a health check on.
+    # The state database (ADR 0028). The SuperTokens core is NOT here: it is a
+    # third-party HTTP API, which is the one kind of thing this suite mocks, and
+    # `Mealplan.Mock.SuperTokens` stands in for it and for the SMS provider on a
+    # port the operating system picks.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        # Without this the job races the server's first start and fails on a
+        # connection refused that reads like a code defect.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +105,13 @@ jobs:
         env:
           MEALPLAN_SANDBOX: host
           MEALPLAN_CLI_PATH: cli/target/x86_64-unknown-linux-musl/release
+          # config/test.exs reads these, and falls back to the same values. They
+          # are named here anyway so the connection this job uses is visible in
+          # the job rather than only in a config file.
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
         run: mix test
 
   # Not wired to run yet: it needs a runner that can build the sandbox image
