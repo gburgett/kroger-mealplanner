@@ -254,10 +254,18 @@ the worker-parallelism idea ADR 0025 closed.
 ## Not started
 - **Phase 6 — Oban weekly recheck** inside the release; delete
   `deploy/mealplan-recheck.{service,timer}`.
-- **Phase 8 — the static site at `/`.**
 - **Phase 9 — records + cleanup.** Mark ADR 0002 / 0018 superseded, update the
   index tables and `AGENTS.md`, remove `src/**`, `server.ts`, `recheck.ts`,
   `package.json`, `pnpm-*`.
+
+## Done, ahead of this plan's own ordering
+
+- **Phase 8 — the static site at `/`.** Landed with ADR 0026 (new-household
+  onboarding) rather than on its own, because the onboarding note's install
+  instructions needed somewhere to live. `MealplanWeb.StatusController` names
+  the MCP address and both apps' current connector steps, plus a block
+  addressed to an assistant fetching the page. `features/onboarding.feature`
+  covers it.
 
 ## Fidelity debts to settle against the suite
 
