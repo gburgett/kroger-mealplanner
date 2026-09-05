@@ -51,6 +51,7 @@ decision, write a new record. Give the old record the status
 | [0034](0034-reap-each-host-mode-command-process-group.md) | Reap each host-mode command's process group, and take the test default back from microsandbox | accepted |
 | [0035](0035-make-the-sandbox-session-explicit.md) | Make the sandbox session explicit: `open` and `close` tools, warm reuse, a ten-minute idle close | accepted |
 | [0036](0036-reduce-a-shopping-list-line-to-a-search-term-before-the-retailer-call.md) | Reduce a shopping-list line to a search term before the retailer call, and record it on the line | accepted |
+| [0037](0037-hide-the-walmart-tools-until-the-server-has-a-credential.md) | Hide the Walmart tools until the server has a credential | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
