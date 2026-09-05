@@ -104,6 +104,7 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the response status is 404
     And the response tells the client to reconnect
 
+  @security
   Scenario: Each command starts fresh at the workspace root
     Given I have run "cd recipes"
     When I run "pwd"
@@ -314,6 +315,7 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the command fails
     And the meal planner still answers the next command
 
+  @slow-timeout
   Scenario: A runaway command is stopped
     When I run "sleep 600"
     Then the command fails

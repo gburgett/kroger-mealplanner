@@ -56,7 +56,7 @@ defmodule Mealplan.Features.CorpusSteps do
 
   step ~r/^I (?:have )?run "(.*)" with the message "(.*)"$/,
        %{args: [command, message]} = context do
-    {:ok, run_bash(context, command, message)}
+    {:ok, run_bash(context, unescape(command), message)}
   end
 
   # The negative lookahead is the TypeScript's, verbatim, and it is load-bearing:
@@ -64,7 +64,7 @@ defmodule Mealplan.Features.CorpusSteps do
   # match. cucumber-js took the first; this runner calls it ambiguous, which is
   # the better behaviour and how the defect was found.
   step ~r/^I (?:have )?run (?!.*" with the message ")"(.*)"$/, %{args: [command]} = context do
-    {:ok, run_bash(context, command, "bash #{command}")}
+    {:ok, run_bash(context, unescape(command), "bash #{command}")}
   end
 
   step ~r/^I (?:have )?run:$/, context do
@@ -82,6 +82,18 @@ defmodule Mealplan.Features.CorpusSteps do
         now: context.now,
         base_url: Mealplan.Config.public_url()
       )
+
+    # A real restart forgets every MCP session this process was holding, not
+    # only the sandbox session above. Only "I remember the current MCP
+    # session" (features/sandbox.feature) ever populates this key, so every
+    # other scenario that restarts the server pays nothing extra here.
+    if client = context[:remembered_mcp_session] do
+      Anubis.Server.Supervisor.stop_session(
+        Mealplan.Mcp.Server,
+        Anubis.Server.Registry.Local,
+        client.session_id
+      )
+    end
 
     {:ok, Map.put(context, :session, session)}
   end
@@ -194,7 +206,12 @@ defmodule Mealplan.Features.CorpusSteps do
   # --- writing documents directly -------------------------------------------
 
   step "I write the file {string}:", %{args: [path]} = context do
-    {:ok, write_file(context, path, context.docstring <> "\n")}
+    content = context.docstring <> "\n"
+
+    {:ok,
+     context
+     |> write_file(path, content)
+     |> Map.put(:last_written, %{path: path, content: content})}
   end
 
   step "the file {string} contains:", %{args: [path]} = context do
@@ -418,6 +435,22 @@ defmodule Mealplan.Features.CorpusSteps do
   step "the error output mentions {string}", %{args: [text]} = context do
     assert String.contains?(last(context).stderr, text),
            "#{inspect(text)} is not in stderr:\n#{last(context).stderr}"
+
+    {:ok, context}
+  end
+
+  # A port of features/steps/output.steps.ts's step of the same name.
+  step "the error output explains that network access is not allowed", context do
+    stderr = last(context).stderr
+
+    assert stderr =~
+             ~r/could not resolve|couldn't resolve|name or service not known|network is unreachable|no route to host|temporary failure in name resolution|operation not permitted/i,
+           "the error does not read like a network failure:\n#{stderr}"
+
+    # A scenario that passes because a program is absent proves nothing about
+    # the network. See ADR 0006 and ADR 0008.
+    refute stderr =~ ~r/command not found|no such file or directory/i,
+           "this passed for the wrong reason — the program is simply missing:\n#{stderr}"
 
     {:ok, context}
   end
@@ -714,6 +747,8 @@ defmodule Mealplan.Features.CorpusSteps do
       stdout: Map.get(structured, "stdout", ""),
       stderr: Map.get(structured, "stderr", ""),
       exit_code: Map.get(structured, "exitCode", 0),
+      timed_out: Map.get(structured, "timedOut", false),
+      truncated: Map.get(structured, "truncated", false),
       text: text_of(response)
     })
   end
@@ -944,4 +979,10 @@ defmodule Mealplan.Features.CorpusSteps do
   end
 
   defp shell_quote(word), do: "'" <> String.replace(word, "'", "'\\''") <> "'"
+
+  # Gherkin's own quoting has no way to put a literal double quote inside a
+  # quoted step argument except escaping it, and bash must never see the
+  # backslash: "awk 'BEGIN { print \"x\" }'" has to reach the shell as
+  # "awk 'BEGIN { print "x" }'". Mirrors features/steps/mcp.steps.ts#unescape.
+  defp unescape(command), do: String.replace(command, ~S(\"), ~S("))
 end

@@ -51,16 +51,13 @@ config :phoenix,
 config :mealplan, boot_household: false
 
 # The scenarios stay in features/, where AGENTS.md puts them and where the
-# Cucumber suite read them from. Only the runner changed.
-#
-# Named one by one rather than globbed, because one feature file is NOT ported:
-#
-#   sandbox.feature   — 51 of its 69 scenarios are @security and belong to
-#                       bubblewrap mode, and the rest need step definitions
-#                       nobody has written yet. The TypeScript harness
-#                       (`pnpm test:security`) is still its only runner.
-#
-# Adding a file here is how one comes back. See ADR 0023.
+# Cucumber suite read them from. Only the runner changed. Named one by one
+# rather than globbed, so a new feature file has to be added here on purpose
+# (ADR 0023) — the last one, sandbox.feature, landed with its own step
+# definitions in test/features/step_definitions/sandbox_steps.exs. Its 51
+# @security scenarios only assert something real under bubblewrap mode, so
+# test_helper.exs excludes the :security tag rather than the file when
+# MEALPLAN_SANDBOX=host has no image to test against.
 config :cucumber,
   features: [
     "features/corpus.feature",
@@ -70,6 +67,7 @@ config :cucumber,
     "features/pantry.feature",
     "features/preferences.feature",
     "features/recipes.feature",
+    "features/sandbox.feature",
     "features/shopping_list.feature",
     "features/kroger_cart.feature",
     "features/kroger_link.feature",

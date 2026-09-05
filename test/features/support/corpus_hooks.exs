@@ -296,6 +296,16 @@ defmodule Mealplan.Features.CorpusHooks do
     {:ok, Map.put(context, :session, session)}
   end
 
+  # "A runaway command is stopped" is the one scenario that actually needs its
+  # command to hit the wall-clock timeout, and the default is 10 seconds —
+  # tolerable once, ruinous if every scenario paid it. Reopening with a short
+  # one keeps the scenario honest without taxing the other 225.
+  before_scenario "@slow-timeout", context, name: "shorten the command timeout" do
+    close_session(context.tenant)
+    {:ok, session} = Mealplan.Sandbox.open(context.tenant, context.folder, timeout_ms: 500)
+    {:ok, Map.put(context, :session, session)}
+  end
+
   # This DOES run for a scenario that failed: `Cucumber.Runtime` wraps the
   # steps in a try and runs the after hooks before it re-raises. So the folder
   # of a failing scenario goes here, not at the end of the run — which matters,
