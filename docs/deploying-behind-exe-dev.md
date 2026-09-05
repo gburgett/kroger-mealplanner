@@ -33,9 +33,20 @@ authorisation itself:
 
 | Path | Guarded by | Why |
 | --- | --- | --- |
-| `/.well-known/*`, `/register`, `/token`, `/revoke` | nothing at the proxy | an MCP client has no browser and cannot complete an exe.dev login |
-| `/authorize`, `/consent`, `/kroger/*` | exe.dev identity | the only pages a person opens |
+| `/.well-known/*`, `/register`, `/token`, `/revoke` | nothing | an MCP client has no browser and cannot complete a login |
+| `/login`, `/login/code` | nothing | a gate in front of the way in is a locked door with the key inside |
+| `/authorize`, `/consent`, `/kroger/*` | a session, after an SMS code | the pages a person opens |
 | `/mcp` | our bearer token | the shell |
+
+The middle row used to say "exe.dev identity". ADR 0027 changed it to a session
+this server issues after a code sent to the household's telephone, because a
+header only means something on a request that came through the proxy and this
+VM's port is reachable without one.
+
+`/login` is open, and it is not a hole: `Mealplan.Auth.Otp.start/1` refuses
+every number that is not `MEALPLAN_OWNER_PHONE`, **before** it calls the core.
+A stranger who finds the page costs no message, creates no user and cannot tell
+from the answer whether the number they typed was the right one.
 
 `/kroger/callback` is in the guarded group on purpose, even though Kroger is the
 one that redirects to it. Kroger redirects a top-level browser navigation, so the
@@ -64,6 +75,143 @@ ssh exe.dev share set-public gb-kroger-mealplanner
 ```
 
 To undo the last one: `ssh exe.dev share set-private gb-kroger-mealplanner`.
+
+## Does anything need a public HTTPS route? And does this need a reverse proxy?
+
+Two questions, and they have different answers.
+
+**The browser needs HTTPS routes, and it already has them.** Signing in is two
+screens — `/login` takes a telephone number, `/login/code` takes the code — and
+they are routes on the meal planner, on port 8000, behind the TLS exe.dev
+already terminates. Nothing new is published. The session cookie is `Secure`,
+which is another way of saying these routes only work over HTTPS, which they
+already are.
+
+**The SuperTokens core needs no public route at all, and must not have one.**
+It binds `127.0.0.1:3567`. Only the meal planner talks to it, from the same
+machine. SuperTokens' own documentation is blunt about why:
+
+> The core service is a trusted backend component. Deploy it on a private
+> network reachable only by your backend, and never expose it directly to the
+> public internet or to your frontend.
+
+Anything that reaches the core can act on every user. There is no per-user
+authorisation inside it.
+
+**So there is no reverse proxy here, and adding one would be a mistake.**
+The usual reason to put Caddy or nginx in front of two applications is to give
+them one public address and route by path. That reason is absent twice over:
+
+* exe.dev **is** the reverse proxy. It terminates TLS, it holds the certificate,
+  and it forwards one port. A second proxy behind it is a third hop that
+  terminates nothing and routes nothing.
+* There is no second application to route to. The core is loopback-only by
+  design, so there is no path that should ever reach it from outside. A proxy
+  in front of both would exist only to publish the thing that must not be
+  published.
+
+What a proxy would add is a place to get that wrong. `location /auth { proxy_pass
+http://127.0.0.1:3567; }` is one line, it looks reasonable, and it publishes the
+user store.
+
+**When a proxy would earn its place**, and it does not yet: if this ever leaves
+exe.dev and has to terminate TLS itself, Caddy is the one to reach for — one
+`Caddyfile` with a domain in it gets a certificate, renews it, and reverse
+proxies to `127.0.0.1:8000`, with the core still nowhere in the file. That is a
+change of hosting, not a change of design, and it belongs in a record of its own
+when somebody makes it.
+
+## The two other services
+
+`systemctl --user` addresses all three. They start in this order and stop in
+any.
+
+```bash
+systemctl --user status supertokens.service     # the sign-in codes (ADR 0027)
+systemctl --user status mealplan-elixir.service # the meal planner
+sudo systemctl status postgresql                # the state for both (ADR 0028)
+```
+
+### PostgreSQL, once
+
+Two databases in one server. They share a backup and no table.
+
+```bash
+sudo -u postgres createuser --pwprompt mealplan
+sudo -u postgres createdb --owner=mealplan mealplan
+
+sudo -u postgres createuser --pwprompt supertokens
+sudo -u postgres createdb --owner=supertokens supertokens
+```
+
+Then the two connection strings, each in the 0600 file its service reads:
+
+```bash
+# ~/kroger-mealplanner/.env          (the meal planner)
+DATABASE_URL=postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
+
+# ~/kroger-mealplanner/.env.supertokens   (the core)
+POSTGRESQL_CONNECTION_URI=postgresql://supertokens:PASSWORD@127.0.0.1:5432/supertokens
+SUPERTOKENS_API_KEY=<something long and random>
+```
+
+The scheme must be `postgresql://`. The core refuses `postgres://` at start-up,
+and says so.
+
+`SUPERTOKENS_API_KEY` goes in **both** files — the core checks it and the meal
+planner sends it. They have to match, and a mismatch shows up as every sign-in
+failing with "the sign-in service did not answer".
+
+### The SuperTokens core, once
+
+The core is a separate download; the unit starts it and does not install it.
+Take the **Binary** build for PostgreSQL from
+<https://supertokens.com/docs/deployment/self-host-supertokens>, then:
+
+```bash
+cd supertokens && sudo ./install
+cp deploy/supertokens.service ~/.config/systemd/user/supertokens.service
+systemctl --user daemon-reload
+systemctl --user enable --now supertokens.service
+
+curl -sS http://127.0.0.1:3567/hello     # "Hello" means the core AND its database
+```
+
+`/hello` returns 200 only when the core's database connection is good, which is
+why it is the check rather than `systemctl is-active`.
+
+**Check that it is not reachable from anywhere else.** This is the one command
+worth running after any change to that unit:
+
+```bash
+ss -ltnp | grep 3567        # must say 127.0.0.1:3567, never 0.0.0.0:3567
+```
+
+### The SMS provider
+
+Sign up with Twilio or with Telnyx, buy a number, and put the credentials in
+`.env`. Both are built; `MEALPLAN_SMS_PROVIDER` picks.
+
+```bash
+# Twilio
+MEALPLAN_SMS_PROVIDER=twilio
+MEALPLAN_SMS_FROM=+15095550100
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+
+# or Telnyx
+MEALPLAN_SMS_PROVIDER=telnyx
+MEALPLAN_SMS_FROM=+15095550100
+TELNYX_API_KEY=KEY...
+TELNYX_MESSAGING_PROFILE_ID=...        # only needed for an alphanumeric sender
+```
+
+`MEALPLAN_SMS_FROM` takes a Twilio Messaging Service SID as well as a number;
+Twilio accepts either in the same field.
+
+The journal line that begins `sign-in:` names the telephone (redacted to its
+last four digits), the core and the provider, and says which variable is missing
+when one is. Read it after a restart.
 
 ## Running it
 

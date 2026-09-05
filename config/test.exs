@@ -1,31 +1,43 @@
 import Config
 
-# The database is one SQLite file (ADR 0024), so a test run needs NOTHING
-# running: no server, no user, no password, no port. That is the whole reason
-# the adapter changed — `mix test` in a fresh checkout used to fail on a
-# database that was not up, which said nothing about the code under test.
+# The database is PostgreSQL (ADR 0028). A test run therefore needs a server
+# running, which is exactly what ADR 0024 had bought and what ADR 0028 spent.
+# It is spendable and not free: the SuperTokens core that `features/sms_otp.feature`
+# drives needs the same server, so a developer set up to run that feature is
+# already set up to run the suite. A fresh checkout needs one line first:
 #
-# One file, always. `mix test --partitions N` looked like the obvious way to
-# get N BEAMs running at once, and this file used to carry a MIX_TEST_PARTITION
-# suffix for it. It is gone: ADR 0025 measured that option and found it does
-# not divide the suite's work, because `Cucumber.compile_features!/1` runs
-# unconditionally in test_helper.exs and generates every scenario as an ExUnit
-# test regardless of which partition Mix thinks it is building — so N
-# partitions run the whole Cucumber suite N times, not once between them. The
-# suite runs as one process. The file is created by `ecto.create` and left
-# behind between runs; `mix ecto.reset` or `rm mealplan_test.db` clears it.
-config :mealplan, Mealplan.Repo,
-  database: Path.expand("../mealplan_test.db", __DIR__),
-  pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 5,
-  # A scenario holds one connection through a whole HTTP round trip, and the
-  # endpoint answers on another process. Five seconds of waiting for the write
-  # lock is generous next to that, and it turns a lost race into a wait rather
-  # than an "database is busy" that reads like a product bug.
-  busy_timeout: 5_000,
-  # Readers do not block the writer. The scenarios drive the endpoint while
-  # holding the sandbox connection, which is exactly the shape WAL is for.
-  journal_mode: :wal
+#     sudo systemctl start postgresql     # or: docker compose up -d db
+#
+# One database, always. `mix test --partitions N` looked like the obvious way
+# to get N BEAMs running at once, and this file used to carry a
+# MIX_TEST_PARTITION suffix for it. It is gone: ADR 0025 measured that option
+# and found it does not divide the suite's work, because
+# `Cucumber.compile_features!/1` runs unconditionally in test_helper.exs and
+# generates every scenario as an ExUnit test regardless of which partition Mix
+# thinks it is building — so N partitions run the whole Cucumber suite N times,
+# not once between them. The suite runs as one process.
+test_repo =
+  [
+    username: System.get_env("PGUSER") || "postgres",
+    password: System.get_env("PGPASSWORD") || "postgres",
+    hostname: System.get_env("PGHOST") || "127.0.0.1",
+    port: String.to_integer(System.get_env("PGPORT") || "5432"),
+    database: System.get_env("PGDATABASE") || "mealplan_test",
+    pool: Ecto.Adapters.SQL.Sandbox,
+    # A scenario holds one connection through a whole HTTP round trip, and the
+    # endpoint answers on another process. The pool has to be wide enough for
+    # both plus the checkout the sandbox owner holds.
+    pool_size: 10
+  ]
+  |> then(fn opts ->
+    case System.get_env("DATABASE_URL") do
+      nil -> opts
+      "" -> opts
+      url -> Keyword.put(opts, :url, url)
+    end
+  end)
+
+config :mealplan, Mealplan.Repo, test_repo
 
 # The server IS run during test, and `config/runtime.exs` turns it on: the
 # scenarios that walk the consent page and the /kroger screens drive it over
@@ -42,6 +54,13 @@ config :phoenix, :plug_init_mode, :runtime
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# The SuperTokens core and the SMS provider are third-party HTTP APIs, so they
+# are the one kind of thing this suite mocks (AGENTS.md). They are NOT set here:
+# each scenario starts its own `Mealplan.Mock.Server` on a port the operating
+# system picks, and puts the base into the application environment itself, the
+# same way the Kroger and Walmart mocks do. `MEALPLAN_OWNER_PHONE` travels with
+# them, from `Mealplan.Mock.SuperTokens`.
 
 # ExUnit does not open the one household's corpus at application start. There is
 # no one household under test: each scenario opens its own tenant over its own
@@ -74,7 +93,8 @@ config :cucumber,
     "features/auth.feature",
     "features/walmart.feature",
     "features/consumable_recheck.feature",
-    "features/onboarding.feature"
+    "features/onboarding.feature",
+    "features/sms_otp.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

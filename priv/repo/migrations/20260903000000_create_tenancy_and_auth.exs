@@ -6,12 +6,16 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
   flight, access and refresh tokens, and the household's Kroger tokens. It
   never holds the corpus.
 
-  It is SQLite (ADR 0024), which changes what two column types mean rather than
-  what they are called: `:map` and `{:array, :string}` are JSON in a TEXT
-  column instead of `jsonb` and a native array, and every integer type is
-  SQLite's 64-bit INTEGER, so `:bigint` and `:id` are the same storage class.
-  Neither is queried by content — the arrays are read back whole and the client
-  document is read back whole — so nothing here needed rewriting for the move.
+  It is PostgreSQL. ADR 0024 moved it to SQLite and ADR 0028 moved it back,
+  because the SuperTokens core (ADR 0027) accepts no other database. Two column
+  types went narrow for that trip and are wide again here: `:map` is `jsonb`
+  and `{:array, :string}` is a native array. Neither is queried by content — the
+  arrays are read back whole and the client document is read back whole — so
+  nothing in `lib/` changed in either direction.
+
+  A machine that ran the SQLite build restores from a dump rather than replaying
+  this file. There is one schema and one migration; the storage under it moved
+  twice.
 
   Every credential-bearing row carries a `tenant_id` from the start (ADR 0020),
   even though the sandbox boundary stays single-tenant until ADR 0008's
@@ -35,15 +39,21 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
     create unique_index(:tenants, [:slug])
 
     create table(:users) do
-      # The stable exe.dev user key (X-ExeDev-UserID). Email is kept for display
-      # and the sameEmail check, and can change.
-      add :exedev_user_id, :string
       add :email, :string, null: false
+      # The telephone that receives the one-time code, in E.164 (ADR 0027).
+      # Nullable: the bootstrap seeds the owner from MEALPLAN_OWNER before
+      # MEALPLAN_OWNER_PHONE has ever been used to sign in.
+      add :phone, :string
+      # The SuperTokens user id for this person. The core owns the passwordless
+      # credential; this column is the join back to it, and it is how a second
+      # login method could arrive later without a second users table.
+      add :supertokens_user_id, :string
       timestamps(type: :utc_datetime)
     end
 
     create unique_index(:users, [:email])
-    create unique_index(:users, [:exedev_user_id])
+    create unique_index(:users, [:phone])
+    create unique_index(:users, [:supertokens_user_id])
 
     create table(:memberships) do
       add :tenant_id, references(:tenants, on_delete: :delete_all), null: false

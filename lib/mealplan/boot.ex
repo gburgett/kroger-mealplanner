@@ -80,17 +80,12 @@ defmodule Mealplan.Boot do
     folder = Mealplan.Config.folder()
     owner = Mealplan.Config.owner()
 
-    # Server state in one SQLite file (ADR 0024). PostgreSQL put it outside the
-    # corpus by construction; a file does not, so the guard `src/auth/store.ts`
-    # made — `assertOutsideFolder` — comes back here, before the first row is
-    # written.
-    :ok = assert_database_outside_folder!(folder)
-
-    # SQLite creates the FILE on first open but not the directory above it, and
-    # the default is under ~/.local/state, which a fresh machine does not have.
-    # Without this the first start fails with "unable to open database file",
-    # which names neither the path nor the reason.
-    File.mkdir_p!(Path.dirname(Path.expand(Mealplan.Config.database())))
+    # No `assert_database_outside_folder!` any more. It existed because ADR 0024
+    # made the state a FILE, and a file has a path that can be inside the
+    # sandbox mount. ADR 0028 put the state back in PostgreSQL, where a
+    # connection string cannot name a path in that mount at all, so the property
+    # is back to holding by construction and the guard is deleted rather than
+    # maintained.
 
     {:ok, _, _} =
       Ecto.Migrator.with_repo(Mealplan.Repo, &Ecto.Migrator.run(&1, :up, all: true))
@@ -102,6 +97,7 @@ defmodule Mealplan.Boot do
     Logger.info("meal-plan folder: #{folder}")
     Logger.info("state database: #{Mealplan.Config.database()}")
     Logger.info("the household is #{owner}")
+    Logger.info("sign-in: " <> sign_in_status())
 
     {:ok, session, _scaffolded} = open_corpus(tenant_slug, folder)
 
@@ -121,28 +117,35 @@ defmodule Mealplan.Boot do
     {:ok, %{session: session}}
   end
 
-  # The agent can read every byte of the meal-plan folder — that is what the
-  # folder is for. The database holds the household's Kroger refresh token in
-  # the clear, because a hash cannot go in an Authorization header, so the file
-  # holding it must not be in there. Refuse to serve rather than serve with the
-  # credential inside the agent's reach.
-  defp assert_database_outside_folder!(folder) do
-    database = Mealplan.Config.database()
-    inside = Path.expand(database)
-    mount = Path.expand(folder)
+  # Named in the health check because a server nobody can sign in to is a
+  # server that looks healthy and is not. Says which telephone, which core and
+  # which SMS provider, and says what is missing when something is (ADR 0027).
+  defp sign_in_status do
+    phone = Mealplan.Config.owner_phone()
+    core = Mealplan.Config.supertokens_base()
 
-    if inside == mount or String.starts_with?(inside, mount <> "/") do
-      raise """
-      the state database is inside the meal-plan folder:
+    cond do
+      is_nil(phone) ->
+        "NOT CONFIGURED. Set MEALPLAN_OWNER_PHONE to the household's number in " <>
+          "E.164, or nobody can reach the consent page."
 
-          database: #{inside}
-          folder:   #{mount}
+      not Mealplan.Auth.Sms.configured?() ->
+        "telephone #{redact(phone)}, core #{core} — but the SMS provider is not " <>
+          "configured: #{Mealplan.Auth.Sms.why_not()}"
 
-      The sandbox mounts the folder, so an agent could read the household's       Kroger credential straight out of the file. Put the database somewhere       else, or set MEALPLAN_STATE to a path outside #{mount}.
-      """
+      true ->
+        "telephone #{redact(phone)}, core #{core}, messages by " <>
+          Mealplan.Config.sms_provider()
     end
+  end
 
-    :ok
+  # The journal is world-readable on this machine. The last four digits are
+  # enough to tell one number from another, and are not enough to send to.
+  defp redact(phone) do
+    case String.length(phone) do
+      n when n > 4 -> String.duplicate("*", n - 4) <> String.slice(phone, -4, 4)
+      _ -> "****"
+    end
   end
 
   # Named in the health check because a server running unconfined must never be

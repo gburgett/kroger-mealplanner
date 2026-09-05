@@ -1,17 +1,36 @@
 import Config
 
-# Server state, in one SQLite file (ADR 0024). Beside the checkout rather than
-# in ~/.local/state, so `rm mealplan_dev.db` is the whole reset and a developer
-# never wonders which database they are looking at. MEALPLAN_STATE overrides it,
-# the same variable the deployed server reads.
+# Server state, in PostgreSQL (ADR 0028). `mix ecto.reset` is the whole reset.
 #
-# It must not be inside the meal-plan folder: the sandbox mounts that folder and
-# the agent reads every byte of it. `Mealplan.Boot` refuses to start if it is.
-config :mealplan, Mealplan.Repo,
-  database: System.get_env("MEALPLAN_STATE") || Path.expand("../mealplan_dev.db", __DIR__),
-  stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 5
+# A local server has to be running — that is the cost ADR 0024 had bought and
+# ADR 0028 spent, and it is spendable because the SuperTokens core needs the
+# same server. DATABASE_URL overrides every field below, which is how a
+# developer points at a container instead.
+#
+# It cannot be inside the meal-plan folder, whatever anyone sets: a connection
+# string names a host and a database, not a path in the sandbox mount.
+# `url:` overrides the discrete fields, and Ecto rejects a nil one, so it is
+# added only when DATABASE_URL is set rather than passed as nil.
+dev_repo =
+  [
+    username: System.get_env("PGUSER") || "postgres",
+    password: System.get_env("PGPASSWORD") || "postgres",
+    hostname: System.get_env("PGHOST") || "127.0.0.1",
+    port: String.to_integer(System.get_env("PGPORT") || "5432"),
+    database: System.get_env("PGDATABASE") || "mealplan_dev",
+    stacktrace: true,
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10
+  ]
+  |> then(fn opts ->
+    case System.get_env("DATABASE_URL") do
+      nil -> opts
+      "" -> opts
+      url -> Keyword.put(opts, :url, url)
+    end
+  end)
+
+config :mealplan, Mealplan.Repo, dev_repo
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

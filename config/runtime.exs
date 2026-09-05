@@ -57,7 +57,28 @@ config :mealplan,
   walmart_cart_base: System.get_env("WALMART_CART_BASE"),
   walmart_key_version: get.("WALMART_KEY_VERSION", "1"),
   walmart_publisher_id: System.get_env("WALMART_PUBLISHER_ID"),
-  llm_base: System.get_env("MEALPLAN_LLM_BASE")
+  llm_base: System.get_env("MEALPLAN_LLM_BASE"),
+  # --- the household's sign-in (ADR 0027) --------------------------------
+  #
+  # The one telephone that may receive a code, in E.164. The same shape as
+  # MEALPLAN_OWNER: one household, one number. A request for any other number
+  # is refused BEFORE the core is called, so a stranger costs no message.
+  owner_phone: System.get_env("MEALPLAN_OWNER_PHONE"),
+  # The SuperTokens core. Loopback, always — anything that reaches it can act
+  # on every user, so it is never published and never proxied. See ADR 0027.
+  supertokens_base: get.("SUPERTOKENS_CONNECTION_URI", "http://127.0.0.1:3567"),
+  supertokens_api_key: System.get_env("SUPERTOKENS_API_KEY"),
+  # "twilio" or "telnyx". The core makes the code and hands it back; this
+  # server posts it. Neither provider is a package — one signed call each,
+  # through Req, the same as Kroger and Walmart.
+  sms_provider: get.("MEALPLAN_SMS_PROVIDER", "twilio"),
+  sms_from: System.get_env("MEALPLAN_SMS_FROM"),
+  twilio_account_sid: System.get_env("TWILIO_ACCOUNT_SID"),
+  twilio_auth_token: System.get_env("TWILIO_AUTH_TOKEN"),
+  twilio_api_base: System.get_env("TWILIO_API_BASE"),
+  telnyx_api_key: System.get_env("TELNYX_API_KEY"),
+  telnyx_messaging_profile_id: System.get_env("TELNYX_MESSAGING_PROFILE_ID"),
+  telnyx_api_base: System.get_env("TELNYX_API_BASE")
 
 # MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
 # default; "host" runs commands unconfined and is for testing application logic
@@ -153,23 +174,10 @@ if clock = System.get_env("MEALPLAN_CLOCK") do
   config :mealplan, :clock, clock
 end
 
-# Where the server state lives: one SQLite file (ADR 0024). MEALPLAN_STATE is
-# the same variable the TypeScript server read for `auth.json`, and it keeps the
-# same rule — the file must be OUTSIDE the meal-plan folder, because the sandbox
-# mounts that folder and the agent reads every byte of it. Under PostgreSQL that
-# was true by construction; with a file it is a check again, and
-# `Mealplan.Boot` makes it, refusing to start rather than serving with the
-# household's Kroger credential inside the agent's reach.
-#
-# Not in test. A developer who exports MEALPLAN_STATE for the dev server would
-# otherwise have `mix test` open it, and the Ecto sandbox would roll the
-# household's real clients and tokens back out from under the running server.
-# The test database is named in config/test.exs, one file per partition.
-if config_env() != :test do
-  if state = System.get_env("MEALPLAN_STATE") do
-    config :mealplan, Mealplan.Repo, database: state
-  end
-end
+# MEALPLAN_STATE is gone with ADR 0028. The state is a database in a server,
+# named by DATABASE_URL, and it is outside the meal-plan folder by construction
+# rather than by a check — a connection string cannot name a path in the
+# sandbox mount. `Mealplan.Boot` lost `assert_database_outside_folder!` with it.
 
 # The TypeScript harness (features/support/world.ts) is still the only runner for
 # features/sandbox.feature, and it spawns this app as an OS process on a port it
@@ -184,9 +192,7 @@ if config_env() == :test and System.get_env("CUCUMBER") do
   # one request at a time, and does not need ten connections to do it.
   config :mealplan, Mealplan.Repo,
     pool: DBConnection.ConnectionPool,
-    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4"),
-    busy_timeout: 5_000,
-    journal_mode: :wal
+    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4")
 end
 
 # The scenarios run in this BEAM (ADR 0022), and the ones that walk the consent
@@ -210,21 +216,27 @@ if config_env() == :test and is_nil(System.get_env("CUCUMBER")) do
 end
 
 if config_env() == :prod do
-  # No URL, no user, no port: the whole database is a path (ADR 0024). It has a
-  # default, unlike the PostgreSQL URL it replaces, because a server that will
-  # not start without a variable nobody set is a worse failure than one that
-  # opens a file in the state directory where the TypeScript server kept
-  # auth.json. `Mealplan.Boot` still refuses if that path is inside the
-  # meal-plan folder.
+  # The state database (ADR 0028). No default: a server that silently opens the
+  # wrong database is worse than one that refuses to start and names the
+  # variable. The SuperTokens core has its own URL and its own database in the
+  # same server; the two share no table.
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise """
+      environment variable DATABASE_URL is missing.
+      It names the meal planner's own database, for example:
+
+          postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
+
+      The SuperTokens core has its own, POSTGRESQL_CONNECTION_URI, in
+      deploy/supertokens.service. They are two databases in one server.
+      """
+
   config :mealplan, Mealplan.Repo,
-    database:
-      System.get_env("MEALPLAN_STATE") ||
-        Path.expand("~/.local/state/mealplan/mealplan.db"),
-    # One household, one writer. SQLite serialises writes whatever this says, and
-    # a large pool only buys more connections to queue behind the same lock.
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "5"),
-    busy_timeout: 5_000,
-    journal_mode: :wal
+    url: database_url,
+    # One household, one writer. A large pool buys nothing here.
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    socket_options: if(System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: [])
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

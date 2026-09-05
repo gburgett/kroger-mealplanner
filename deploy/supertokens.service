@@ -1,0 +1,105 @@
+[Unit]
+# The SuperTokens core: the authority for the household's sign-in code
+# (ADR 0027). It is NOT the meal planner. It answers only the meal planner, on
+# loopback, and it is the second service on this VM.
+#
+# THIS FILE IS THE ONE THAT IS INSTALLED, and it is a USER unit — the same
+# pattern as deploy/mealplan-elixir.service:
+#
+#     cp deploy/supertokens.service ~/.config/systemd/user/supertokens.service
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now supertokens.service
+#
+#     diff deploy/supertokens.service ~/.config/systemd/user/supertokens.service
+#
+# CONCRETE, NOT A TEMPLATE. Every path and address below is this machine's, the
+# same reasoning as the other units: one household, one machine (ADR 0008).
+#
+# ------------------------------------------------------------------------
+# IT MUST NEVER BE PUBLIC. Read this before changing ExecStart.
+# ------------------------------------------------------------------------
+#
+# SuperTokens' own documentation: "The core service is a trusted backend
+# component. Deploy it on a private network reachable only by your backend, and
+# never expose it directly to the public internet or to your frontend."
+#
+# Anything that can reach 127.0.0.1:3567 can act on every user — create them,
+# read them, delete them. There is no per-user authorisation inside the core.
+# So:
+#
+#   * `--host=127.0.0.1` below. NOT 0.0.0.0. The VM is on the public internet
+#     and its subnet is reachable by hosts nobody enumerated
+#     (docs/exedev-identity-header-study.md), so a bind to 0.0.0.0 publishes
+#     the user store.
+#   * `ssh exe.dev share port` names ONE port and it is 8000, the meal
+#     planner's. Never point it here.
+#   * The API key below is a second lock, not the first one. The bind is the
+#     first one.
+#
+# INSTALL THE CORE FIRST. This unit starts a binary it does not install:
+#
+#     # https://supertokens.com/docs/deployment/self-host-supertokens
+#     # Download the "Binary" build for PostgreSQL, then:
+#     cd supertokens && sudo ./install
+#
+# The Docker image (supertokens/supertokens-postgresql) works too, and then
+# ExecStart becomes a `docker run --network=host`. The binary is chosen here
+# for the same reason the rest of this product avoids containers on this VM:
+# one household, one machine, and one fewer moving part.
+Description=SuperTokens core (the household's sign-in codes)
+Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0027-authenticate-the-household-with-sms-otp.md
+Documentation=https://supertokens.com/docs/deployment/self-host-supertokens
+# It keeps its users in PostgreSQL (ADR 0028) and will not start without it.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/exedev
+
+# Loopback only. See the warning above; this is the security boundary.
+ExecStart=/usr/bin/supertokens start --host=127.0.0.1 --port=3567 --foreground
+ExecStop=/usr/bin/supertokens stop
+
+# The core's own database, in the same server as the meal planner's and in a
+# different database (ADR 0028). The password is NOT in this file: this unit is
+# world-readable and in git. It arrives through EnvironmentFile below, which is
+# 0600 and gitignored, as POSTGRESQL_CONNECTION_URI:
+#
+#     POSTGRESQL_CONNECTION_URI="postgresql://supertokens:PASSWORD@127.0.0.1:5432/supertokens"
+#
+# The scheme MUST be postgresql:// — the core refuses postgres:// at start-up.
+#
+# SUPERTOKENS_API_KEY travels the same way. The core has no key by default, and
+# the bind is what actually protects it, but a key means a process that gets
+# onto this machine still needs something it has to read from a 0600 file.
+# The meal planner reads the same value from SUPERTOKENS_API_KEY in its own
+# .env, and the two have to match.
+#
+# The leading "-" makes the file optional, the same as the meal planner's unit.
+# Without it the core starts on an in-memory database and loses every user at
+# the next restart, so read the journal after a start rather than trusting
+# "active (running)".
+EnvironmentFile=-/home/exedev/kroger-mealplanner/.env.supertokens
+
+# The core is a JVM. Give it a ceiling, because one household needs very little
+# and an unbounded heap on a small VM competes with the BEAM and with
+# PostgreSQL for the memory the sandbox scratch also wants.
+Environment=JAVA_OPTS=-Xmx256m
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Unlike the meal planner's unit, this one CAN be hardened: it holds no
+# bubblewrap child, so the namespace restrictions that would break the sandbox
+# are free here.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/exedev/.supertokens /var/log/supertokens
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

@@ -14,11 +14,13 @@ Feature: Only the household reaches the meal plan
   token. Nothing in that needs a human, which is the point: an MCP client cannot
   fill in a login form.
 
-  The human appears exactly once, at the consent page. That page is the only
-  thing in this product that exe.dev authentication guards, and it is guarded
-  because it is the only thing a person opens in a browser. exe.dev says which
-  email is at the keyboard; we decide whether that email is the household. No
-  password, no cookie and no user table lives in this repository.
+  The human appears exactly once, at the consent page. That page is guarded
+  because it is one of the few things a person opens in a browser. The guard is
+  a session, and the session comes from a code sent to the household's
+  telephone — see features/sms_otp.feature and ADR 0027. This repository holds
+  no password. It used to hold no cookie either, and it trusted an exe.dev
+  header instead; that header is gone, because a direct connection to the port
+  never passed the proxy that sets it.
 
   Background:
     Given the meal plan belongs to "gordon@gordonburgett.net"
@@ -40,7 +42,7 @@ Feature: Only the household reaches the meal plan
 
   Scenario: The household approves a client, and the client gets a token
     Given a client has registered itself
-    And "gordon@gordonburgett.net" is signed in to exe.dev
+    And "gordon@gordonburgett.net" is signed in
     When the client asks for authorisation
     Then the consent page names the client
     And the consent page names the meal-plan folder
@@ -100,14 +102,14 @@ Feature: Only the household reaches the meal plan
 
   @security
   Scenario: The consent page is not shown to a browser that is not signed in
-    Given nobody is signed in to exe.dev
+    Given nobody is signed in
     When a browser asks for the consent page
-    Then it is redirected to the exe.dev login
+    Then it is redirected to the login page
     And the login is told to come back to the consent page
 
   @security
-  Scenario: The consent page refuses an email that is not the household's
-    Given "burglar@example.com" is signed in to exe.dev
+  Scenario: The consent page refuses a session for somebody who is not the household
+    Given "burglar@example.com" holds a session this server issued
     When a browser asks for the consent page
     Then the request is refused as forbidden
     And the refusal names "burglar@example.com"
@@ -116,7 +118,7 @@ Feature: Only the household reaches the meal plan
   @security
   Scenario: A client cannot approve itself
     Given a client has registered itself
-    And "gordon@gordonburgett.net" is signed in to exe.dev
+    And "gordon@gordonburgett.net" is signed in
     When the client asks for authorisation
     And the client tries to collect a code without the household approving
     Then it is given no code

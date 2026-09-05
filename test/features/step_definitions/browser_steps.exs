@@ -4,8 +4,10 @@ defmodule Mealplan.Features.BrowserSteps do
   A port of the shared half of `features/steps/auth.steps.ts`.
 
   These steps drive the running endpoint over loopback with a real HTTP client
-  (`Mealplan.Browser`), so the exe.dev gate, the router, the authorisation
-  server and every redirect are the real ones. ADR 0022 moved the TOOL
+  (`Mealplan.Browser`), so the session gate, the router, the authorisation
+  server and every redirect are the real ones. "Signed in" is a real sign-in
+  since ADR 0027: the step below walks `/login` and `/login/code` and keeps the
+  cookie the server set. ADR 0022 moved the TOOL
   scenarios in process and recorded the authorisation server losing its
   coverage; the screens keep theirs here.
   """
@@ -25,12 +27,29 @@ defmodule Mealplan.Features.BrowserSteps do
 
   # --- who is at the keyboard ------------------------------------------------
 
-  step "{string} is signed in to exe.dev", %{args: [email]} = context do
-    {:ok, Map.put(context, :signed_in_as, email)}
+  # The sign-in happens HERE, once, rather than in `browser_headers/1`. That
+  # function is called for every request a scenario makes, and a real OTP round
+  # trip per request would spend a code per request — which the core would then
+  # refuse, correctly, as a code already used.
+  step "{string} is signed in", %{args: [email]} = context do
+    {:ok,
+     context
+     |> Map.put(:signed_in_as, email)
+     |> Map.put(:browser_headers, Browser.signed_in(email))}
   end
 
-  step "nobody is signed in to exe.dev", context do
-    {:ok, Map.put(context, :signed_in_as, nil)}
+  step "nobody is signed in", context do
+    {:ok,
+     context
+     |> Map.put(:signed_in_as, nil)
+     |> Map.put(:browser_headers, Browser.anonymous())}
+  end
+
+  step "{string} holds a session this server issued", %{args: [email]} = context do
+    {:ok,
+     context
+     |> Map.put(:signed_in_as, email)
+     |> Map.put(:browser_headers, Browser.signed_in_as_stranger(email))}
   end
 
   # --- a client with no browser ----------------------------------------------
@@ -63,12 +82,12 @@ defmodule Mealplan.Features.BrowserSteps do
 
   # --- what came back --------------------------------------------------------
 
-  step "it is redirected to the exe.dev login", context do
+  step "it is redirected to the login page", context do
     response = response(context)
     assert response.status == 302, "expected a redirect, got #{response.status}"
 
-    assert String.contains?(response.location || "", "/__exe.dev/login"),
-           "it was sent to #{response.location}, which is not the exe.dev login"
+    assert String.starts_with?(response.location || "", "/login"),
+           "it was sent to #{response.location}, which is not the login page"
 
     # The page itself must not have been rendered on the way past.
     refute String.contains?(response.body, "consent_id"),
@@ -148,7 +167,9 @@ defmodule Mealplan.Features.BrowserSteps do
     assert metadata["resource"] == "#{Mealplan.Config.public_url()}/mcp"
 
     servers =
-      metadata |> Map.get("authorization_servers", []) |> Enum.map(&String.replace(&1, ~r{/+$}, ""))
+      metadata
+      |> Map.get("authorization_servers", [])
+      |> Enum.map(&String.replace(&1, ~r{/+$}, ""))
 
     assert Mealplan.Config.public_url() in servers,
            "the metadata points at #{Enum.join(servers, ", ")}, not #{Mealplan.Config.public_url()}"
@@ -200,7 +221,9 @@ defmodule Mealplan.Features.BrowserSteps do
   # --- consent ---------------------------------------------------------------
 
   step "a browser asks for the consent page", context do
-    context = if context[:registered], do: context, else: register_client(context, "Test Assistant")
+    context =
+      if context[:registered], do: context, else: register_client(context, "Test Assistant")
+
     {_verifier, challenge} = pkce()
 
     query =
@@ -239,9 +262,14 @@ defmodule Mealplan.Features.BrowserSteps do
     location = response(context).location || ""
 
     redirect =
-      location |> URI.parse() |> Map.get(:query) |> to_string() |> URI.decode_query() |> Map.get("redirect")
+      location
+      |> URI.parse()
+      |> Map.get(:query)
+      |> to_string()
+      |> URI.decode_query()
+      |> Map.get("return_to")
 
-    assert redirect, "the login link carries no redirect: #{location}"
+    assert redirect, "the login link carries no return_to: #{location}"
 
     assert String.starts_with?(redirect, "/authorize"),
            "the login would come back to #{redirect}, not the page that was asked for"
@@ -378,7 +406,12 @@ defmodule Mealplan.Features.BrowserSteps do
 
     # And the folder the agent can write to holds nothing that buys access.
     client = client!(context)
-    {client, result} = McpClient.run(client, "grep -rl #{quote_for_shell(client.access_token)} . 2>/dev/null || true")
+
+    {client, result} =
+      McpClient.run(
+        client,
+        "grep -rl #{quote_for_shell(client.access_token)} . 2>/dev/null || true"
+      )
 
     assert String.trim(result.stdout) == "",
            "the access token is inside the meal-plan folder:\n#{result.stdout}"
@@ -435,13 +468,14 @@ defmodule Mealplan.Features.BrowserSteps do
 
   # --- the helpers other step files share ------------------------------------
 
-  @doc "The headers exe.dev would add for whoever this scenario signed in."
-  def browser_headers(context) do
-    case context[:signed_in_as] do
-      nil -> Browser.anonymous()
-      email -> Browser.signed_in(email)
-    end
-  end
+  @doc """
+  The cookie header for whoever this scenario signed in, or none.
+
+  Computed once, by the step that signs in, and only read here. It used to
+  build the exe.dev headers on every call, which was free; a real sign-in is
+  not, and doing one per request would spend a one-time code per request.
+  """
+  def browser_headers(context), do: context[:browser_headers] || Browser.anonymous()
 
   @doc "GET a path as the browser, and remember what came back."
   def visit(context, path) do

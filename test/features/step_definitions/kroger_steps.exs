@@ -482,7 +482,16 @@ defmodule Mealplan.Features.KrogerSteps do
   end
 
   step "I have connected my Kroger account through the consent page", context do
-    context = Map.put(context, :signed_in_as, Mealplan.Config.owner())
+    owner = Mealplan.Config.owner()
+
+    # A real sign-in, once, and the cookie is kept — the same thing the
+    # "{string} is signed in" step does. Since ADR 0027 the gate is a session,
+    # so setting :signed_in_as alone would leave every request that follows
+    # anonymous and every screen a redirect to /login.
+    context =
+      context
+      |> Map.put(:signed_in_as, owner)
+      |> Map.put(:browser_headers, Mealplan.Browser.signed_in(owner))
 
     {:ok,
      context
