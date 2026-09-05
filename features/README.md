@@ -20,7 +20,7 @@ one of them:
 
 | Layer | File | What it pins down |
 | --- | --- | --- |
-| The door | `auth.feature` · `kroger_link.feature` | Who gets in at all, who may approve them, and how a Kroger account is connected |
+| The door | `auth.feature` · `kroger_link.feature` · `onboarding.feature` | Who gets in at all, who may approve them, how a Kroger account is connected, and how a brand-new household's assistant gets started without a manual |
 | The sandbox | `sandbox.feature` | What commands can do, and what they must never do |
 | The corpus | `corpus.feature` · `history.feature` · `migrations.feature` | Folder layout, document shape, validation, git history, forward migrations |
 | The work | `recipes` · `meals` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
