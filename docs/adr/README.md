@@ -16,9 +16,9 @@ decision, write a new record. Give the old record the status
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-use-agentos-for-the-sandbox.md) | Use agentOS for the sandbox | superseded by ADR-0005 |
-| [0002](0002-use-typescript-for-the-mcp-server.md) | Use TypeScript on Node.js for the MCP server | accepted |
+| [0002](0002-use-typescript-for-the-mcp-server.md) | Use TypeScript on Node.js for the MCP server | superseded by ADR-0020 |
 | [0003](0003-use-rust-for-the-mealplan-cli.md) | Use Rust for the mealplan CLI | superseded by ADR-0007 |
-| [0004](0004-use-pnpm-for-node-dependencies.md) | Use pnpm for Node.js dependencies | accepted |
+| [0004](0004-use-pnpm-for-node-dependencies.md) | Use pnpm for Node.js dependencies | superseded by ADR-0020 |
 | [0005](0005-use-microsandbox-for-the-sandbox.md) | Use microsandbox for the sandbox | superseded by ADR-0008 |
 | [0006](0006-the-sandbox-has-no-interpreter-and-no-network-client.md) | The sandbox has no interpreter and no network client | accepted |
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |

@@ -9,11 +9,12 @@ meal-plan folder into a sandbox and exposes command execution over it. The
 folder is the database, markdown is the format, and git is the undo. There are
 no CRUD tools. `AGENTS.md` explains why, and `docs/adr/` records the decisions.
 
-Two languages, on purpose. The server is TypeScript on Node 24 with no build
-step; the `mealplan` CLI that parses the corpus and does the unit arithmetic is
-Rust, compiled to `x86_64-unknown-linux-musl` so it can be staged into a sandbox
-image that holds no interpreter. The application logic is being migrated to
-Elixir/Phoenix (ADR 0020), and the test suite has moved there already (ADR 0022).
+Two languages, on purpose. The server is Elixir/Phoenix, built as a `mix
+release` (ADR 0020); the `mealplan` CLI that parses the corpus and does the unit
+arithmetic is Rust, compiled to `x86_64-unknown-linux-musl` so it can be staged
+into a sandbox image that holds no interpreter. The migration from the original
+TypeScript-on-Node server is complete, and the test suite runs in the test BEAM
+(ADR 0022).
 
 ## Prerequisites
 
@@ -21,11 +22,11 @@ Elixir/Phoenix (ADR 0020), and the test suite has moved there already (ADR 0022)
 | --- | --- |
 | The Elixir app and its test suite | Elixir 1.19 / OTP 28. No database server — the state is one SQLite file (ADR 0024) |
 | The `mealplan` CLI | Rust, with the `x86_64-unknown-linux-musl` target added |
-| The TypeScript server and `features/sandbox.feature` | Node 24 and pnpm (via corepack) |
 | The `@security` scenarios | bubblewrap, and unprivileged user namespaces |
 
-Use `pnpm`, never `npm install` — `pnpm-workspace.yaml` blocks dependency build
-scripts and refuses packages published in the last seven days.
+Node 24 is needed only to regenerate the committed seccomp filter
+(`sandbox-image/seccomp/generate.ts`, run by `sandbox-image/build.sh`); nothing
+at run time or in the test suite uses it.
 
 ## First run
 
@@ -33,7 +34,6 @@ scripts and refuses packages published in the last seven days.
 mix deps.get
 ./cli/build.sh          # compiles the musl binary and stages it for the sandbox
 ./sandbox-image/build.sh # only needed for a real sandbox; skip it for host mode
-pnpm install --frozen-lockfile
 ```
 
 `sandbox-image/rootfs/` is gitignored, so a fresh checkout has to run both build
@@ -86,20 +86,6 @@ its own HTTP port (`4002 + N`), so partitions do not collide. Partitions are
 also safe to run beside each other's scratch directories: cleanup is keyed to
 the OS process id, never a wildcard.
 
-### The one file that is not ported
-
-`features/sandbox.feature` still runs under the TypeScript harness, which spawns
-the app as a separate OS process:
-
-```bash
-pnpm test:security      # the @security scenarios in sandbox.feature
-pnpm test               # the whole TypeScript suite
-pnpm test:serial        # the same, without cucumber-js parallelism
-```
-
-51 of its 69 scenarios are `@security`. Porting the rest needs step definitions
-nobody has written yet — see ADR 0023.
-
 ### Where the temporary files go
 
 Every sandboxed command gets one directory of its own, removed when the command
@@ -120,15 +106,25 @@ On the VM the server is a **user** systemd service. `sudo systemctl` addresses a
 different manager and will not find it.
 
 ```bash
-systemctl --user restart mealplan.service   # restarting IS the deploy
-systemctl --user status  mealplan.service
-journalctl --user -u mealplan.service -f
+systemctl --user restart mealplan-elixir.service
+systemctl --user status  mealplan-elixir.service
+journalctl --user -u mealplan-elixir.service -f
 ```
 
-There is no build step for the server, so `git pull` plus a restart is the whole
-procedure. A change to `cli/` needs `./cli/build.sh` and takes effect on the next
-command with no restart. A change to `deploy/mealplan.service` has to be copied
-to `~/.config/systemd/user/` and followed by `systemctl --user daemon-reload`.
+Deploy is `mix release` then a restart (ADR 0020) — `git pull` alone changes
+nothing, because the service runs the compiled release, not the source:
+
+```bash
+git pull
+MIX_ENV=prod mix deps.get --only prod
+MIX_ENV=prod mix release --overwrite
+systemctl --user restart mealplan-elixir.service
+```
+
+A change to `cli/` needs `./cli/build.sh` and takes effect on the next
+command with no restart. A change to `deploy/mealplan-elixir.service` has to be
+copied to `~/.config/systemd/user/` and followed by
+`systemctl --user daemon-reload`.
 
 The start-up lines in the journal are the health check: they name the folder, the
 household, the token store, and whether Kroger is configured and linked. Read
@@ -144,7 +140,7 @@ them after a restart rather than trusting `active (running)`.
 | `test/features/` | Step definitions and hooks for the Elixir runner |
 | `lib/mealplan/` | The Elixir application: MCP tools, sandbox, auth, Kroger |
 | `cli/` | The Rust `mealplan` binary — the only corpus parser |
-| `src/` | The TypeScript server, mid-migration |
+| `lib/mealplan_web/` | The Phoenix endpoint: the OAuth server, the consent and `/kroger` screens, the MCP route |
 | `docs/adr/` | Architecture decision records, and the wrong turns |
 | `sandbox-image/` | The image the sandbox binds, built and never borrowed |
 

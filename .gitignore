@@ -1,6 +1,4 @@
-# --- Node / pnpm (the TypeScript server, retired incrementally by plan 0005) ---
-node_modules/
-.pnpm-store/
+# --- Rust CLI and the sandbox image it is staged into ---
 target/
 *.wasm
 sandbox-image/rootfs/

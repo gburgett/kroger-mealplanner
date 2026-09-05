@@ -1,9 +1,10 @@
 # Plan 0005 — progress log
 
 Companion to `0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md`.
-Records what is built, what was decided along the way, and what is left. All work
-is on the branch **`elixir-migration`**; `main` is untouched and the Node
-`mealplan.service` still serves production on port 8000.
+Records what is built, what was decided along the way, and what is left. The work
+has landed on **`main`**: `mealplan-elixir.service` serves production on port
+8000 and the Node `mealplan.service` is stopped, disabled and — as of Phase 9 —
+deleted from the tree.
 
 ## Environment (done, on this VM)
 
@@ -25,8 +26,8 @@ from git. `.gitignore` merged (Node + Elixir sections). `README.md` kept empty.
 ## Phase 1 — Phoenix skeleton (done)
 
 `mix phx.new . --app mealplan --module Mealplan --no-mailer --no-gettext
---no-dashboard --no-assets --no-html`. Bandit, Ecto/Postgrex, Jason. Coexists
-with `src/**` — Phase 9 removes the TypeScript once the suite is green.
+--no-dashboard --no-assets --no-html`. Bandit, Ecto/Postgrex, Jason. Coexisted
+with `src/**` until Phase 9 removed the TypeScript once the suite was green.
 
 Router has one placeholder route: `GET /` → `MealplanWeb.StatusController`
 (plain text; Phase 8 makes it the real static site).
@@ -84,10 +85,11 @@ corpus by construction.
 ## Running as a systemd service (done — the milestone)
 
 `deploy/mealplan-elixir.service` (user unit, concrete for this machine). During
-the migration it runs **alongside** the Node service: port **8001**, folder
-**`/home/exedev/meal-plan-elixir`**, so the two servers never commit to one git
-repo at once. Phase 9 collapses it back to port 8000 / `/home/exedev/meal-plan`
-and retires `deploy/mealplan.service` + the recheck units.
+the migration it ran **alongside** the Node service: port **8001**, folder
+**`/home/exedev/meal-plan-elixir`**, so the two servers never committed to one
+git repo at once. The cutover (commit `ce6e688`) collapsed it back to port 8000
+/ `/home/exedev/meal-plan`; Phase 9 deleted `deploy/mealplan.service` and the
+recheck units.
 
 - `rel/env.sh.eex` forces `+fnu` / `C.UTF-8` into every `bin/mealplan` command.
 - Secrets (`DATABASE_URL`, `SECRET_KEY_BASE`) in `.env.elixir` (0600, gitignored).
@@ -251,12 +253,34 @@ one per scenario, which needs `tenants` to carry its own folder so
 ADR first, and it is a lever on top of ADR 0022's rework, not a replacement for
 the worker-parallelism idea ADR 0025 closed.
 
+## Phase 9 — records + cleanup (done)
+
+The legacy Node implementation is gone:
+
+- `git rm` of `src/**` (29 `.ts` files), `server.ts`, `recheck.ts`, `bench.ts`,
+  the cucumber-js harness (`cucumber.mjs`, `rerun.cucumber.mjs`,
+  `features/steps/**`, `features/support/**`), the package tooling
+  (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`), and the superseded
+  deploy units (`deploy/mealplan.service`,
+  `deploy/mealplan-recheck.{service,timer}`).
+- Kept: `sandbox-image/seccomp/generate.ts` (build-time seccomp generator, run
+  by `sandbox-image/build.sh`) and `docs/spikes/echo-headers.ts` (the open
+  identity-header study). Node is now a build-time dep only.
+- **ADR 0002** (TypeScript on Node) and **ADR 0004** (pnpm) marked
+  `superseded by ADR-0020`, in the front matter and the index. Bodies
+  unchanged. **ADR 0018** stays `proposed` — its decision (a weekly LLM
+  recheck) still holds; `Mealplan.Recheck` implements it and only the Node
+  mechanism was removed.
+- The recheck systemd units are retired. The recheck logic already lives in
+  `lib/mealplan/recheck.ex`; only its Oban schedule is outstanding (Phase 6).
+- Living docs (`AGENTS.md`, `README.md`, `.gitignore`, `features/README.md`,
+  `docs/adr/README.md`) rewritten to describe the Elixir reality. Frozen
+  historical records left as-is.
+
 ## Not started
-- **Phase 6 — Oban weekly recheck** inside the release; delete
-  `deploy/mealplan-recheck.{service,timer}`.
-- **Phase 9 — records + cleanup.** Mark ADR 0002 / 0018 superseded, update the
-  index tables and `AGENTS.md`, remove `src/**`, `server.ts`, `recheck.ts`,
-  `package.json`, `pnpm-*`.
+- **Phase 6 — Oban weekly recheck** inside the release: an Oban cron entry that
+  runs `Mealplan.Recheck`. This is the remaining migration work. ADR 0020 stays
+  `proposed` until plan 0005 fully closes.
 
 ## Done, ahead of this plan's own ordering
 

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0020
 date: 2026-08-23
 decision-makers: gburgett
 consulted: ADR 0001, ADR 0002

@@ -19,7 +19,8 @@ Consequences worth internalising before changing anything:
   A bare `ls` prints seven names: `README.md`, `config`, `meals`, `pantry`,
   `preferences`, `recipes`, `shopping-lists`. That listing is asserted in
   **three** places — `features/corpus.feature`, `features/auth.feature` and
-  `CORPUS_DIRECTORIES` in `src/corpus/scaffold.ts` — and all three have to
+  `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
+  (`Mealplan.Corpus.Scaffold`) — and all three have to
   change together. This note said "two" until a seventh name was added and
   `auth.feature` was the one that failed.
 - **The filename is the primary key.** `recipes/chicken-tacos.md`,
@@ -35,14 +36,15 @@ Consequences worth internalising before changing anything:
   next start. Without that, a new corpus directory added to a folder that
   already has history sat untracked until some later tool call swept it into a
   commit labelled `write_file recipes/foo.md`. Adding a name is therefore three
-  edits and no migration: `CORPUS_DIRECTORIES`, `features/corpus.feature`,
+  edits and no migration: `@corpus_directories`, `features/corpus.feature`,
   `features/auth.feature`.
 - **Forward migrations are dated shell scripts in `migrations/`, run inside the
   sandbox at session open.** Each script that has not run changes the corpus the
   way the agent would (bash inside the sandbox) and is committed as
   `migration <id>`. What has run is recorded in the hidden root dotfile
   `.mealplan-migrations.json`, written and committed with the migration. See
-  `features/migrations.feature` and `src/migrations/run.ts`.
+  `features/migrations.feature` and `Mealplan.Corpus.Migrations`
+  (`lib/mealplan/corpus/migrations.ex`).
 - **Everything is markdown a human can open and edit.** If a change would make a
   document unreadable in a text editor, it is the wrong change.
 - **Prefer bash over new tools.** Before adding a command, ask whether `grep`
@@ -57,8 +59,8 @@ Consequences worth internalising before changing anything:
   `walmart_cart_link`, makes no network call: it is the choke point where
   "nothing unchosen reaches the household's cart" is enforced, and bash cannot
   be trusted to keep that property from memory. That exception is recorded in
-  ADR 0017, and it is the only one. See ADR 0010, and `src/mcp/tools.ts`, where
-  the test is written down.
+  ADR 0017, and it is the only one. See ADR 0010, and `Mealplan.Mcp.Tools`
+  (`lib/mealplan/mcp/tools.ex`), where the test is written down.
 - **Error messages are the documentation.** An agent recovers from "line 7 of
   recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`". It cannot recover
   from "invalid input". Name the file, the line, or the argument.
@@ -82,19 +84,19 @@ sandbox.
 | --- | --- | --- | --- |
 | Sandbox | speed and cost for one household | bubblewrap + seccomp + cgroup limits | ADR 0008 |
 | Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
-| MCP server | simplicity | TypeScript on Node.js 24, no build step | ADR 0002 |
+| MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
-| Node dependencies | supply-chain risk | pnpm, via corepack | ADR 0004 |
 | Server state | one household, one writer, and a test run that needs nothing running | SQLite in one file, through Ecto | ADR 0024 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
-| Kroger | the sandbox has no network and must not get one | two MCP tools in the server, built-in `fetch`, no package | ADR 0010 |
-| Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `node:crypto` RSA, no package | ADR 0017 |
+| Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
+| Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `:public_key` RSA, no package | ADR 0017 |
 
 **The server is on the public internet, so there are two boundaries, not one.**
 The sandbox decides what an agent may do once it is inside; OAuth decides whether
 it gets in at all. Three traps that the exe.dev proxy sets, all recorded in
-ADR 0009 and worth knowing before touching `src/mcp/server.ts`:
+ADR 0009 and worth knowing before touching `MealplanWeb.Router` and
+`lib/mealplan_web/`:
 
 - **Only one port can be public, and auth is one switch for the whole machine.**
   There is no per-path exclusion, so the "protected port for the login page, open
@@ -133,27 +135,37 @@ shared types. The corpus parser lives **only** in the CLI. The server never
 reads a recipe; it runs commands and commits. That is what keeps the document
 format defined in exactly one place.
 
-`node server.ts` starts the server. There is no build step — Node 24 strips the
-types itself, so avoid enums and namespaces, which it cannot. One process holds
-both the server and the sandbox: `run()` is a `bwrap` child, so there is no
-daemon, no RPC and no KVM.
+The server is a `mix release`: `MIX_ENV=prod mix release` builds it and
+`systemctl --user restart mealplan-elixir` deploys it (ADR 0020). There is a
+build step now, unlike the retired Node server. One BEAM node still holds both
+the server and the sandbox: `run()` spawns a `bwrap` child, so there is no
+separate daemon, no RPC and no KVM.
 
 ### How it actually runs, and how to restart it
 
-On this VM the server is a **user** systemd service, `mealplan.service`. Every
-command below is `systemctl --user`; `sudo systemctl` addresses a different
-manager and will not find it. Lingering is on, so it survives a logout and comes
-back after a reboot.
+On this VM the server is a **user** systemd service, `mealplan-elixir.service`.
+Every command below is `systemctl --user`; `sudo systemctl` addresses a
+different manager and will not find it. Lingering is on, so it survives a logout
+and comes back after a reboot.
 
 ```bash
-systemctl --user restart mealplan.service        # deploy a code change
-systemctl --user status  mealplan.service        # is it up, and since when
-journalctl --user -u mealplan.service -f         # follow the log
+systemctl --user restart mealplan-elixir.service   # deploy a built release
+systemctl --user status  mealplan-elixir.service   # is it up, and since when
+journalctl --user -u mealplan-elixir.service -f     # follow the log
 ```
 
-**Restarting IS the deploy.** There is no build step, so a `git pull` followed by
-a restart is the whole procedure for a change to the server. Two things are not
-covered by it:
+**Deploy is `mix release` THEN a restart** (ADR 0020). A `git pull` alone does
+nothing — the running service is the compiled release under
+`_build/prod/rel/mealplan/`, not the source:
+
+```bash
+git pull
+MIX_ENV=prod mix deps.get --only prod
+MIX_ENV=prod mix release --overwrite
+systemctl --user restart mealplan-elixir.service
+```
+
+Two things sit outside that procedure:
 
 - **A change to `cli/`** needs `./cli/build.sh`, which compiles the musl binary
   and stages it into `sandbox-image/rootfs/`. That takes effect on the **next
@@ -161,17 +173,18 @@ covered by it:
   binds the image afresh. `sandbox-image/rootfs/` is gitignored, so a fresh
   checkout has to run `./sandbox-image/build.sh` and `./cli/build.sh` before
   anything works.
-- **A change to the unit file** is a change to `deploy/mealplan.service`, which
-  then has to be copied into place and followed by
+- **A change to the unit file** is a change to `deploy/mealplan-elixir.service`,
+  which then has to be copied into place and followed by
   `systemctl --user daemon-reload`, or systemd restarts the old one and says
   nothing.
 
-**The unit is `deploy/mealplan.service`, in this repository.** It is installed by
-copying it to `~/.config/systemd/user/mealplan.service`, and the two drift the
+**The unit is `deploy/mealplan-elixir.service`, in this repository.** It is
+installed by copying it to
+`~/.config/systemd/user/mealplan-elixir.service`, and the two drift the
 moment somebody edits the installed copy instead:
 
 ```bash
-diff deploy/mealplan.service ~/.config/systemd/user/mealplan.service
+diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.service
 ```
 
 It is **concrete, not a template** — every path and address in it is this
@@ -193,18 +206,16 @@ Read them after every restart rather than trusting `active (running)` — the
 process being up says nothing about which folder it opened.
 
 `Restart=on-failure`, and the server exits 0 on `SIGTERM`, so
-`systemctl --user stop` stays stopped. Running `node server.ts` by hand while the
-service is up collides on port 8000; stop the service first, or use a different
-`MEALPLAN_PORT`.
+`systemctl --user stop` stays stopped. Running `mix phx.server` or the release
+binary by hand while the service is up collides on port 8000; stop the service
+first, or use a different `MEALPLAN_PORT`.
 
 `docs/deploying-behind-exe-dev.md` holds the rest: pinning the port, going
 public, the variables in full, and what to register with Kroger.
 
-**Use `pnpm`, never `npm install`.** The settings in `pnpm-workspace.yaml` block
-dependency build scripts and refuse packages published in the last seven days.
-This is the one defence that matters for a risk the sandbox does not cover: the
-server's dependencies run *outside* it, in the process holding tenant
-credentials. Commit `pnpm-lock.yaml`; use `--frozen-lockfile` in CI.
+**`mix.lock` is committed; run `mix deps.get --only prod` on deploy** (ADR 0020).
+The server's dependencies run *outside* the sandbox, in the process holding
+tenant credentials, so the lockfile is the supply-chain control that matters.
 
 ## We practice BDD
 
@@ -300,9 +311,10 @@ Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
 in `test/test_helper.exs` compiles every feature in `config :cucumber, :features`
 whatever else is on the command line. Use tags to narrow scenarios.
 
-`features/sandbox.feature` is not in that list and does not run here. Its only
-runner is still the TypeScript harness — `pnpm test:security`, which spawns the
-app as an OS process. See ADR 0023.
+`features/sandbox.feature` now runs here too, through
+`test/features/step_definitions/sandbox_steps.exs` (ADR 0023). Its `@security`
+scenarios assert something real only under bubblewrap; `test_helper.exs`
+excludes the `:security` tag under `MEALPLAN_SANDBOX=host`.
 
 **A run leaves nothing behind, and that is asserted rather than assumed.** Each
 sandboxed command gets one directory under a root named for the OS process id;
