@@ -152,7 +152,8 @@ defmodule Mealplan.Boot do
   defp sandbox_status do
     Sandbox.backend().status_line(
       image_root: Sandbox.default_image_root(),
-      seccomp_filter: Sandbox.default_seccomp_filter()
+      seccomp_filter: Sandbox.default_seccomp_filter(),
+      microsandbox_image: Sandbox.default_microsandbox_image()
     )
   end
 

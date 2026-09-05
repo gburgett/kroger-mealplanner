@@ -252,6 +252,11 @@ defmodule Mealplan.Sandbox.Session do
   # --- the mechanics ----------------------------------------------------
 
   defp do_run(state, command, opts) do
+    # Bump this tenant's LRU clock so `Mealplan.Sandbox.open/3` evicts a colder
+    # session than this one when it needs room. A no-op for the modes with no
+    # live cost.
+    Mealplan.Sandbox.touch(state.tenant)
+
     state.backend.run(state.handle, command,
       max_output_bytes: Keyword.get(opts, :max_output_bytes, state.max_output_bytes),
       env: Keyword.get(opts, :env, %{}),

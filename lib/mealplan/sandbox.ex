@@ -12,6 +12,8 @@ defmodule Mealplan.Sandbox do
 
   alias Mealplan.Sandbox.Session
 
+  require Logger
+
   @registry Mealplan.Sandbox.Registry
   @supervisor Mealplan.Sandbox.DynamicSupervisor
 
@@ -32,12 +34,16 @@ defmodule Mealplan.Sandbox do
         {:ok, pid}
 
       [] ->
+        :ok = evict_if_full(tenant)
+
         child_opts =
           opts
           |> Keyword.merge(
             tenant: tenant,
             folder: folder,
-            name: {:via, Registry, {@registry, tenant}}
+            # The value is the LRU clock: an initial timestamp here, bumped by
+            # the Session on every command. `evict_if_full/1` reads it.
+            name: {:via, Registry, {@registry, tenant, System.monotonic_time()}}
           )
 
         case DynamicSupervisor.start_child(@supervisor, {Session, child_opts}) do
@@ -46,6 +52,37 @@ defmodule Mealplan.Sandbox do
           other -> other
         end
     end
+  end
+
+  # Admission control for the one backend with a per-session live cost. When the
+  # registry already holds `max_live_sessions/0` sessions and none is the tenant
+  # now asking, close the least-recently-used one first — its microVM goes with
+  # it (`Session.terminate/2`). Bubblewrap and host never reach this: their
+  # `max_live_sessions/0` is nil.
+  defp evict_if_full(tenant) do
+    with limit when is_integer(limit) <- max_live_sessions(),
+         entries <- live_sessions(),
+         true <- length(entries) >= limit,
+         false <- Enum.any?(entries, fn {key, _pid, _ts} -> key == tenant end) do
+      {lru_key, lru_pid, _ts} = Enum.min_by(entries, fn {_key, _pid, ts} -> ts || 0 end)
+      Logger.info("sandbox: evicting least-recently-used session #{lru_key} to admit #{tenant}")
+      Session.close(lru_pid)
+    end
+
+    :ok
+  end
+
+  defp live_sessions do
+    Registry.select(@registry, [{{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
+  end
+
+  @doc false
+  # Called by `Mealplan.Sandbox.Session` on every command: the LRU clock the
+  # eviction in `open/3` sorts on.
+  @spec touch(String.t()) :: :ok
+  def touch(tenant) do
+    _ = Registry.update_value(@registry, tenant, fn _ -> System.monotonic_time() end)
+    :ok
   end
 
   @doc "The session pid for `tenant`, or nil."
@@ -73,7 +110,7 @@ defmodule Mealplan.Sandbox do
   downgrade, because a boundary that disappears when a file is missing is worse
   than one that is absent on purpose.
   """
-  @spec mode() :: :bubblewrap | :host
+  @spec mode() :: :bubblewrap | :host | :microsandbox
   def mode, do: config()[:mode] || :bubblewrap
 
   @doc """
@@ -87,6 +124,7 @@ defmodule Mealplan.Sandbox do
     case mode() do
       :bubblewrap -> Mealplan.Sandbox.Backend.Bubblewrap
       :host -> Mealplan.Sandbox.Backend.Host
+      :microsandbox -> Mealplan.Sandbox.Backend.Microsandbox
     end
   end
 
@@ -102,6 +140,26 @@ defmodule Mealplan.Sandbox do
 
   def default_seccomp_filter do
     config()[:seccomp_filter] || Path.join(repo_root(), "sandbox-image/seccomp/filter.bpf")
+  end
+
+  @doc """
+  The microsandbox image: a `.tar` this backend loads into `msb`, or a bare
+  `msb` image reference used as given. Defaults to the `oci.tar` that
+  `sandbox-image/build.sh` writes.
+  """
+  def default_microsandbox_image do
+    config()[:microsandbox_image] || Path.join(repo_root(), "sandbox-image/oci.tar")
+  end
+
+  @doc """
+  How many live tenant sessions `microsandbox` mode allows before `open/3`
+  evicts the least-recently-used one to make room. `nil` means unbounded, which
+  is what bubblewrap and host use — they have no per-session live cost. A
+  microVM does: trade study §8 puts this VM's ceiling near two dozen.
+  """
+  @spec max_live_sessions() :: pos_integer() | nil
+  def max_live_sessions do
+    if mode() == :microsandbox, do: config()[:max_live_sessions] || 16, else: nil
   end
 
   defp config, do: Application.get_env(:mealplan, __MODULE__, [])

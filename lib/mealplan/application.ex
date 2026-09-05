@@ -14,6 +14,14 @@ defmodule Mealplan.Application do
     # gone. This is that someone. See Mealplan.Sandbox.Scratch.
     Mealplan.Sandbox.Scratch.sweep_stale()
 
+    # In microsandbox mode a SIGKILLed BEAM runs no `Session.terminate/2`, so
+    # its tenants' microVMs would be left running. Same idea as the scratch
+    # sweep above, one layer out: remove every `mealplan-*` microVM that no
+    # live session owns.
+    if Mealplan.Sandbox.mode() == :microsandbox do
+      Mealplan.Sandbox.Backend.Microsandbox.sweep_orphans()
+    end
+
     children = [
       MealplanWeb.Telemetry,
       Mealplan.Repo,
