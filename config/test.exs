@@ -73,7 +73,8 @@ config :cucumber,
     "features/kroger_link.feature",
     "features/auth.feature",
     "features/walmart.feature",
-    "features/consumable_recheck.feature"
+    "features/consumable_recheck.feature",
+    "features/onboarding.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

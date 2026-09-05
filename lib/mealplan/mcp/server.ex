@@ -38,18 +38,22 @@ defmodule Mealplan.Mcp.Server do
     tenant = Mealplan.Config.tenant()
     base_url = Mealplan.Config.public_url()
 
-    {tree, history} =
+    {tree, history, onboarding} =
       case Mealplan.Sandbox.whereis(tenant) do
         pid when is_pid(pid) ->
-          {Mealplan.Corpus.Tree.render(pid), Mealplan.Git.Repository.recent_history(pid)}
+          onboarding = if Mealplan.Onboarding.done?(pid), do: "", else: Mealplan.Onboarding.note()
+
+          {Mealplan.Corpus.Tree.render(pid), Mealplan.Git.Repository.recent_history(pid),
+           onboarding}
 
         _ ->
-          {"", ""}
+          {"", "", ""}
       end
 
     [
       tree,
       history,
+      onboarding,
       "A meal plan is a folder of markdown documents. Read README.md in the folder first; " <>
         "it is the schema. Plan meals with ordinary shell commands.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>

@@ -766,12 +766,34 @@ defmodule Mealplan.Mcp.Tools do
   Returns `{:ok, result_map}` where `result_map` is a JSON-RPC `tools/call`
   result — `content`, optional `structuredContent`, and `isError`. A missing or
   blank required argument is `isError: true`, not an exception.
+
+  While a household's own content shows onboarding incomplete (`Mealplan.Onboarding`,
+  ADR 0026), a second `content` block carries the onboarding note on the way out —
+  the one channel every MCP client must show the model, unlike the handshake
+  `instructions` field some clients ignore.
   """
   @spec call(String.t(), map(), String.t(), DateTime.t()) ::
           {:ok, map()} | {:error, :unknown_tool}
-  def call(name, args, tenant, now)
+  def call(name, args, tenant, now) do
+    case do_call(name, args, tenant, now) do
+      {:ok, result} -> {:ok, with_onboarding_note(result, tenant)}
+      other -> other
+    end
+  end
 
-  def call("bash", args, tenant, now) do
+  defp with_onboarding_note(result, tenant) do
+    if Mealplan.Onboarding.done?(session!(tenant)) do
+      result
+    else
+      Map.update!(result, "content", fn blocks ->
+        blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
+      end)
+    end
+  end
+
+  defp do_call(name, args, tenant, now)
+
+  defp do_call("bash", args, tenant, now) do
     with {:ok, command} <- required_string(args, "command", @bash_command_required),
          {:ok, message} <- required_trimmed(args, "message", @bash_message_required) do
       session = session!(tenant)
@@ -794,7 +816,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("read_file", args, tenant, _now) do
+  defp do_call("read_file", args, tenant, _now) do
     with {:ok, path} <- required_string(args, "path", @read_file_path_required) do
       case Session.read_corpus(session!(tenant), path) do
         {:ok, content} ->
@@ -813,7 +835,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("write_file", args, tenant, now) do
+  defp do_call("write_file", args, tenant, now) do
     with {:ok, path} <- required_string(args, "path", @write_file_path_required),
          {:ok, content} <- required_present(args, "content", @write_file_content_required),
          {:ok, message} <- required_trimmed(args, "message", @write_file_message_required) do
@@ -834,7 +856,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("kroger_find_products", args, tenant, now) do
+  defp do_call("kroger_find_products", args, tenant, now) do
     with {:ok, path} <- required_string(args, "path", @fp_path_required),
          {:ok, message} <- required_trimmed(args, "message", @fp_message_required) do
       run_network(fn ->
@@ -863,7 +885,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("kroger_send_to_cart", args, tenant, now) do
+  defp do_call("kroger_send_to_cart", args, tenant, now) do
     with {:ok, path} <- required_string(args, "path", @stc_path_required),
          {:ok, message} <- required_trimmed(args, "message", @stc_message_required),
          {:ok, only} <- parse_cart_items(Map.get(args, "items"), "upc", @stc_upc_required) do
@@ -897,7 +919,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("walmart_find_stores", args, _tenant, _now) do
+  defp do_call("walmart_find_stores", args, _tenant, _now) do
     with {:ok, zip} <- required_string(args, "zip", @fs_zip_required),
          {:ok, zip} <- validate_zip(zip) do
       run_network(fn ->
@@ -914,7 +936,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("walmart_find_products", args, tenant, now) do
+  defp do_call("walmart_find_products", args, tenant, now) do
     with {:ok, %{"path" => path, "message" => message}} <-
            required_all(args, [
              {"path", :string, @fwp_path_required},
@@ -937,7 +959,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call("walmart_cart_link", args, tenant, now) do
+  defp do_call("walmart_cart_link", args, tenant, now) do
     with {:ok, %{"path" => path, "message" => message}} <-
            required_all(args, [
              {"path", :string, @cl_path_required},
@@ -965,7 +987,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  def call(_name, _args, _tenant, _now), do: {:error, :unknown_tool}
+  defp do_call(_name, _args, _tenant, _now), do: {:error, :unknown_tool}
 
   # --- helpers ---------------------------------------------------------
 

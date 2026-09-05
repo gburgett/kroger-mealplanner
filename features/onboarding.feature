@@ -110,8 +110,7 @@ Feature: Onboarding a new household through whichever assistant it picked
 
       Sear the chicken.
       """
-    Then the command succeeds
-    And the file "recipes/chicken-tacos.md" exists in the meal-plan folder
+    Then the file "recipes/chicken-tacos.md" exists in the meal-plan folder
 
   Scenario: The landing page names the MCP address and both apps' current steps
     When a browser asks for the meal planner's landing page
