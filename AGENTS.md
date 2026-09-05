@@ -82,7 +82,7 @@ sandbox.
 
 | Component | Primary driver | Choice | Record |
 | --- | --- | --- | --- |
-| Sandbox | speed and cost for one household | bubblewrap + seccomp + cgroup limits | ADR 0008 |
+| Sandbox | speed and cost for one household | bubblewrap + seccomp + cgroup limits; microsandbox (libkrun) as a selectable session-layer backend for more than one household on one machine | ADR 0008, ADR 0027 |
 | Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
@@ -111,11 +111,17 @@ The identity headers are not yet proven unforgeable — see
 `docs/exedev-identity-header-study.md`, which is open, and which explains why the
 measurement cannot be made from the VM.
 
-**The lens is one household on one machine. Multi-tenancy is an open research
-question, not a requirement.** That is what ADR 0008 settled, and it is why the
-sandbox is 3.3 ms of bubblewrap rather than a microVM per tenant. The session
-interface (`open` / `run` / `close`) stays in the design anyway, thin, so the
-question stays answerable without a rewrite.
+**The lens is one household on one machine.** That is what ADR 0008 settled, and
+it is why the default sandbox is 3.3 ms of bubblewrap rather than a microVM per
+tenant. The session interface (`open` / `run` / `close`) has always stayed in
+the design, thin — and ADR 0027 has now filled it in for a second mechanism:
+`MEALPLAN_SANDBOX=microsandbox` runs each tenant in its own libkrun microVM, for
+more than one household on one machine. Bubblewrap stays the default and the
+command-layer boundary; the microVM is the session layer, chosen by one switch
+at boot. Multi-tenancy above ~15 concurrent tenants, or a stronger failure
+domain than one shared VM, is still open — see
+`docs/multi-tenant-isolation-trade-study.md` §10 for the threshold that moves
+the session layer to Fly Sprites.
 
 The sandbox took three records to settle, and the wrong turns are worth reading:
 agentOS (ADR 0001) cannot execute `git`; microsandbox (ADR 0005) works but buys a
@@ -201,9 +207,20 @@ the server still starts and the Kroger tools refuse by name, which is a better
 failure than the meal planner not starting at all.
 
 **The start-up lines in the journal are the health check.** They name the folder,
-the household, the token store, and whether Kroger is configured and linked.
-Read them after every restart rather than trusting `active (running)` — the
-process being up says nothing about which folder it opened.
+the household, the token store, the sandbox mechanism, and whether Kroger is
+configured and linked. Read them after every restart rather than trusting
+`active (running)` — the process being up says nothing about which folder it
+opened.
+
+**The unit leaves `MEALPLAN_SANDBOX` unset, so this machine runs bubblewrap.**
+Setting `MEALPLAN_SANDBOX=microsandbox` switches the session layer to a libkrun
+microVM per tenant (ADR 0027) — for more than one household on one machine. It
+needs `msb` on `PATH`, read/write on `/dev/kvm` (`msb doctor`), and
+`sandbox-image/oci.tar` built with `./sandbox-image/build.sh --microsandbox`.
+The server runs `msb load` on that tar itself at boot; the health line then
+reads `sandbox: microsandbox (libkrun microVM) …`. `MEALPLAN_MAX_LIVE_SESSIONS`
+(default 16) caps concurrent microVMs; the oldest idle session is evicted to
+admit a new tenant. `docs/deploying-behind-exe-dev.md` has the rest.
 
 `Restart=on-failure`, and the server exits 0 on `SIGTERM`, so
 `systemctl --user stop` stays stopped. Running `mix phx.server` or the release
@@ -437,10 +454,12 @@ commands. Free to design in now, a rewrite to retrofit.
 
 `docs/multi-tenant-isolation-trade-study.md` prices the second lens against named
 candidates and supersedes §11 of the older study. Its answer: **stay on this VM.**
-The session layer becomes microsandbox (installed, needs a fresh login for KVM) when
-tenancy becomes real, bubblewrap stays the command layer either way, and Fly Sprites
-is the offload target if the failure domain — not cost, and not capacity — forces one.
-Cloudflare Dynamic Workers run JavaScript, not a shell, so they are out permanently.
+The §10 trigger fired on 2026-09-05, so the session layer **is** microsandbox now
+where `MEALPLAN_SANDBOX=microsandbox` is set — one libkrun microVM per tenant
+(ADR 0027). Bubblewrap stays the command layer either way and the default. Fly
+Sprites is the offload target if the failure domain — not cost, and not capacity
+— forces one. Cloudflare Dynamic Workers run JavaScript, not a shell, so they
+are out permanently.
 Two numbers to carry: a mostly-idle tenant costs under a tenth of a dollar a month
 anywhere, and the concurrency defect in `sandbox-trade-study.md` §11.7 blocks quoting
 any of it with confidence.

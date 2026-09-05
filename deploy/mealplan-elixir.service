@@ -69,6 +69,11 @@ Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
 Environment=PATH=/usr/bin:/bin
+# MEALPLAN_SANDBOX is deliberately unset: this is one household on one machine,
+# so the confinement is bubblewrap (ADR 0008). Set it to "microsandbox" for a
+# libkrun microVM per tenant (ADR 0027) — that also needs `msb` on PATH,
+# /dev/kvm read/write, and sandbox-image/oci.tar built. See
+# docs/deploying-behind-exe-dev.md.
 # The BEAM must run UTF-8 or Elixir mangles non-ASCII output. rel/env.sh.eex
 # also sets these; belt and braces.
 Environment=LANG=C.UTF-8
