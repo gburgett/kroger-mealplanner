@@ -67,31 +67,52 @@ defmodule Mealplan.Sandbox.Runner do
 
     started = System.monotonic_time(:microsecond)
 
+    attempt(command, %{
+      image_root: image_root,
+      seccomp_filter: seccomp_filter,
+      workspace: workspace,
+      tenant: tenant,
+      use_user_scope: use_user_scope,
+      nproc_budget: nproc_budget,
+      limits: limits,
+      timeout_ms: timeout_ms,
+      cap: cap,
+      env: env,
+      input: input,
+      mode: mode,
+      started: started
+    })
+  end
+
+  # bwrap's own `unshare(CLONE_NEWUSER)` sometimes answers EAGAIN under load —
+  # measured on this VM once the suite grew past ~250 commands run back to
+  # back with no delay between them (ADR 0025) — and says so before the
+  # command inside ever starts, which is what makes retrying safe: nothing
+  # ran, so nothing can have run twice. It has been measured recurring on a
+  # single command up to twice in a row; a command that fails this way three
+  # times running is treated as a real failure rather than retried forever.
+  @bwrap_startup_failure "bwrap: Creating new namespace failed"
+
+  defp attempt(command, o, retries_left \\ 2) do
     # One directory holds everything this command needs and nothing outside it
     # wants: the two stream files, its stdin, and the TMPDIR it writes to
-    # itself. The `after` below removes the lot, so no path out of this function
-    # — including a raise — can leak them. See Mealplan.Sandbox.Scratch for what
-    # happens when there is no path out at all.
+    # itself. The `after` below removes the lot, so no path out of this
+    # function — including a raise — can leak them. See Mealplan.Sandbox.Scratch
+    # for what happens when there is no path out at all.
     dir = Scratch.command_dir!()
 
-    try do
-      do_run(dir, command, %{
-        image_root: image_root,
-        seccomp_filter: seccomp_filter,
-        workspace: workspace,
-        tenant: tenant,
-        use_user_scope: use_user_scope,
-        nproc_budget: nproc_budget,
-        limits: limits,
-        timeout_ms: timeout_ms,
-        cap: cap,
-        env: env,
-        input: input,
-        mode: mode,
-        started: started
-      })
-    after
-      File.rm_rf(dir)
+    result =
+      try do
+        do_run(dir, command, o)
+      after
+        File.rm_rf(dir)
+      end
+
+    if retries_left > 0 and o.mode == :bubblewrap and result.exit_code != 0 and
+         String.contains?(result.stderr, @bwrap_startup_failure) do
+      attempt(command, o, retries_left - 1)
+    else
+      result
     end
   end
 
