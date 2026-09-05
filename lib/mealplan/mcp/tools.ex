@@ -229,9 +229,8 @@ defmodule Mealplan.Mcp.Tools do
         - 1 `0001111050170` Kroger Mild Cheddar Shredded Cheese — 8 oz — $2.00
 
   IT CHOOSES NOTHING. Searching for "boneless chicken thighs" returns noise as
-  well as thighs, and picking for the household is not yours to do. Two or more
-  candidates on a line means nobody has chosen yet, and kroger_send_to_cart will
-  refuse that line rather than guess.
+  well as thighs. Two or more candidates on a line means nobody has
+  chosen yet, and kroger_send_to_cart will refuse that line rather than guess.
 
   To choose, DELETE the candidate lines you do not want, with the bash or
   write_file tool, until one is left. Showing the household the candidates and
