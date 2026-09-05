@@ -1,11 +1,18 @@
 # Trade study: which isolation model carries a tenant boundary
 
 **Date:** 2026-08-26
-**Status:** open. No ADR is written from this study, because no decision is being
-taken. Multi-tenancy is still a research question, not a requirement — that is
-what [ADR 0008](adr/0008-use-bubblewrap-for-the-sandbox.md) settled. This study
-answers "if it became a requirement tomorrow, what would we reach for, and what
-would it cost?"
+**Status:** the §10 trigger *"More than one household, ever"* fired on
+2026-09-05. [ADR 0027](adr/0027-give-the-session-layer-a-microvm.md) is written
+from §9: microsandbox is now a selectable session-layer backend on this VM,
+bubblewrap stays the default and the command layer. The rest of this study —
+the cost model, the capacity numbers, the Fly Sprites threshold in §10 — still
+stands and still decides nothing about the single-household lens.
+
+Originally filed **open**: no ADR was written from this study, because no
+decision was being taken. Multi-tenancy was a research question, not a
+requirement — that is what [ADR 0008](adr/0008-use-bubblewrap-for-the-sandbox.md)
+settled. This study answered "if it became a requirement tomorrow, what would we
+reach for, and what would it cost?"
 **Supersedes:** §11 of [`sandbox-trade-study.md`](sandbox-trade-study.md), which
 asked the same question three days ago against a different candidate set and
 without any cost model.

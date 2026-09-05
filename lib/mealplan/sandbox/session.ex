@@ -16,7 +16,7 @@ defmodule Mealplan.Sandbox.Session do
 
   use GenServer
 
-  alias Mealplan.Sandbox.{Limits, Runner}
+  alias Mealplan.Sandbox.Limits
   alias Mealplan.Corpus.Paths
 
   require Logger
@@ -27,6 +27,8 @@ defmodule Mealplan.Sandbox.Session do
     :tenant,
     :folder,
     :mode,
+    :backend,
+    :handle,
     :image_root,
     :seccomp_filter,
     :limits,
@@ -88,48 +90,97 @@ defmodule Mealplan.Sandbox.Session do
     folder = Keyword.fetch!(opts, :folder)
     File.mkdir_p!(folder)
 
-    mode = Keyword.get(opts, :mode) || Mealplan.Sandbox.mode()
+    # One switch at boot picks the confinement mechanism. The Session is the
+    # same whichever it is; the Backend is where bubblewrap, host and
+    # microsandbox part ways. See `Mealplan.Sandbox.Backend`.
+    backend = Keyword.get(opts, :backend) || Mealplan.Sandbox.backend()
 
     image_root = Keyword.get(opts, :image_root) || Mealplan.Sandbox.default_image_root()
 
     seccomp_filter =
       Keyword.get(opts, :seccomp_filter) || Mealplan.Sandbox.default_seccomp_filter()
 
-    # A missing image is an error, never a quiet fall back to :host. The
-    # boundary has to be absent on purpose or not at all — see
-    # `Mealplan.Sandbox.mode/0`.
-    if mode == :bubblewrap do
-      unless File.exists?(Path.join([image_root, "usr", "bin", "bash"])) do
-        raise "no sandbox image at #{image_root}. Build it with ./sandbox-image/build.sh"
-      end
-
-      unless File.exists?(seccomp_filter) do
-        raise "no seccomp filter at #{seccomp_filter}. Build it with ./sandbox-image/build.sh"
-      end
-    end
-
     limits = Keyword.get(opts, :limits) || Limits.default()
     use_user_scope = Keyword.get_lazy(opts, :use_user_scope, &Limits.user_scope_available?/0)
+    timeout_ms = Keyword.get(opts, :timeout_ms, 10_000)
+    max_output_bytes = Keyword.get(opts, :max_output_bytes, 64 * 1024)
+
+    # Walking /proc for the uid's task count once per session, not once per
+    # command — see Limits.nproc_budget/2. A session runs a handful of
+    # commands for one scenario; recomputing this for each of them was pure
+    # repeated work for a number that only needs to be roughly right.
+    nproc_budget =
+      Keyword.get_lazy(opts, :nproc_budget, fn ->
+        Limits.nproc_budget(limits, use_user_scope)
+      end)
+
+    backend_opts = [
+      tenant: Keyword.fetch!(opts, :tenant),
+      folder: folder,
+      image_root: image_root,
+      seccomp_filter: seccomp_filter,
+      limits: limits,
+      use_user_scope: use_user_scope,
+      nproc_budget: nproc_budget,
+      timeout_ms: timeout_ms,
+      max_output_bytes: max_output_bytes
+    ]
+
+    # A missing image, an unreachable /dev/kvm — an error here, never a quiet
+    # fall back to a weaker mechanism. The boundary has to be absent on purpose
+    # or not at all (`Mealplan.Sandbox.mode/0`).
+    :ok = backend.preflight(backend_opts)
+
+    # `close/1` fires from GenServer.stop AND from a supervisor shutting the
+    # session down: trap the exit so `terminate/2` runs for both, which is what
+    # lets a microVM be torn down when the tree goes rather than leaked.
+    Process.flag(:trap_exit, true)
+
+    {:ok, handle} = backend.open(backend_opts)
 
     state = %__MODULE__{
       tenant: Keyword.fetch!(opts, :tenant),
       folder: folder,
-      mode: mode,
+      mode: Mealplan.Sandbox.mode(),
+      backend: backend,
+      handle: handle,
       image_root: image_root,
       seccomp_filter: seccomp_filter,
       limits: limits,
-      timeout_ms: Keyword.get(opts, :timeout_ms, 10_000),
-      max_output_bytes: Keyword.get(opts, :max_output_bytes, 64 * 1024),
+      timeout_ms: timeout_ms,
+      max_output_bytes: max_output_bytes,
       use_user_scope: use_user_scope,
-      # Walking /proc for the uid's task count once per session, not once per
-      # command — see Limits.nproc_budget/2. A session runs a handful of
-      # commands for one scenario; recomputing this for each of them was pure
-      # repeated work for a number that only needs to be roughly right.
-      nproc_budget: Keyword.get_lazy(opts, :nproc_budget, fn -> Limits.nproc_budget(limits, use_user_scope) end)
+      nproc_budget: nproc_budget
     }
 
     {:ok, state}
   end
+
+  @impl true
+  def terminate(_reason, %__MODULE__{backend: backend, handle: handle}) when not is_nil(backend) do
+    backend.close(handle)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  # `Process.flag(:trap_exit, true)` in `init/1` — so `terminate/2` runs on a
+  # supervisor shutdown as well as `GenServer.stop` — turns two otherwise
+  # invisible signals into messages this process must answer:
+  #
+  #   * every command `Mealplan.Sandbox.Runner` spawns opens a port linked to
+  #     this process; when the command finishes the port closes `:normal`. That
+  #     is not a failure and does not touch the session.
+  #   * an `:EXIT` from any other linked process is the parent supervisor (or an
+  #     LRU eviction) telling the session to go. Stop with that reason so
+  #     `terminate/2` closes the backend rather than the session being killed
+  #     with the microVM still up.
+  @impl true
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
+
+  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_call(:config, _from, state), do: {:reply, state, state}
@@ -201,16 +252,12 @@ defmodule Mealplan.Sandbox.Session do
   # --- the mechanics ----------------------------------------------------
 
   defp do_run(state, command, opts) do
-    Runner.run(command,
-      mode: state.mode,
-      image_root: state.image_root,
-      seccomp_filter: state.seccomp_filter,
-      workspace: state.folder,
-      tenant: state.tenant,
-      use_user_scope: state.use_user_scope,
-      nproc_budget: state.nproc_budget,
-      limits: state.limits,
-      timeout_ms: state.timeout_ms,
+    # Bump this tenant's LRU clock so `Mealplan.Sandbox.open/3` evicts a colder
+    # session than this one when it needs room. A no-op for the modes with no
+    # live cost.
+    Mealplan.Sandbox.touch(state.tenant)
+
+    state.backend.run(state.handle, command,
       max_output_bytes: Keyword.get(opts, :max_output_bytes, state.max_output_bytes),
       env: Keyword.get(opts, :env, %{}),
       input: Keyword.get(opts, :input)

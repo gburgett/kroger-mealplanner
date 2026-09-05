@@ -22,7 +22,7 @@ decision, write a new record. Give the old record the status
 | [0005](0005-use-microsandbox-for-the-sandbox.md) | Use microsandbox for the sandbox | superseded by ADR-0008 |
 | [0006](0006-the-sandbox-has-no-interpreter-and-no-network-client.md) | The sandbox has no interpreter and no network client | accepted |
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |
-| [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted |
+| [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted; multi-tenancy posture partially superseded by ADR-0027 |
 | [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted |
 | [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012 |
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
@@ -41,6 +41,7 @@ decision, write a new record. Give the old record the status
 | [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | accepted |
 | [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
 | [0026](0026-onboard-a-new-household-through-tool-results-not-the-handshake.md) | Onboard a new household through tool-call results, not the handshake, and add the public install page Phase 8 left open | proposed |
+| [0027](0027-give-the-session-layer-a-microvm.md) | Give the session layer a microVM: microsandbox as a selectable backend | proposed |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

@@ -79,3 +79,49 @@ else
   echo "manifest.txt changed. Read the diff before committing it: a new program" >&2
   echo "in the image is a change to the decision in ADR 0006." >&2
 fi
+
+# --- the microsandbox session-layer image (opt-in) -----------------------
+#
+# `./sandbox-image/build.sh --microsandbox` also writes sandbox-image/oci.tar,
+# the rootfs the microsandbox backend boots one microVM per tenant from
+# (ADR 0027). Opt-in, and additive: the bubblewrap path above is untouched.
+#
+# It is the SAME image as above with three differences a microVM needs and a
+# bind-mounted /usr does not:
+#   * `mealplan` is baked in rather than staged into rootfs/ afterwards, because
+#     msb clones a whole image, not a directory;
+#   * /etc/passwd and /etc/group are cut to root only — the guest agent needs
+#     to resolve uid 0, and nothing else in /etc should look like a real host;
+#   * /home, /root/*, /media, /mnt, /opt and /srv go, so a walk out of
+#     /workspace lands on nothing.
+# The /usr tree — every program `enumerate.sh` lists — is byte-for-byte the
+# bubblewrap image's, so manifest.txt still describes it.
+
+if [ "${1:-}" = "--microsandbox" ] || [ "${MEALPLAN_BUILD_MICROSANDBOX:-}" = "1" ]; then
+  msb_tag="mealplan-sandbox:msb"
+  oci="$here/oci.tar"
+
+  if [ ! -f "$cli" ]; then
+    echo "--microsandbox needs the mealplan binary at $cli — run cli/build.sh first" >&2
+    exit 1
+  fi
+
+  echo "building $msb_tag (microsandbox session-layer image, ADR 0027)" >&2
+  msb_dir="$(mktemp -d)"
+  install -m 0755 "$cli" "$msb_dir/mealplan"
+  cat >"$msb_dir/Dockerfile" <<DOCKER
+FROM $tag
+COPY mealplan /usr/bin/mealplan
+RUN set -eu; \\
+    printf 'root:x:0:0:root:/workspace:/usr/bin/bash\\n' > /etc/passwd; \\
+    printf 'root:x:0:\\n' > /etc/group; \\
+    rm -f /etc/shadow /etc/passwd- /etc/group- /etc/shadow-; \\
+    rm -rf /home /root /media /mnt /opt /srv /var/cache /var/log; \\
+    mkdir -p /root /run/mealplan
+DOCKER
+
+  docker build --quiet --tag "$msb_tag" "$msb_dir" >/dev/null
+  docker save "$msb_tag" -o "$oci"
+  rm -rf "$msb_dir"
+  echo "wrote $oci ($(du -h "$oci" | cut -f1)). The server runs 'msb load' on it at boot." >&2
+fi

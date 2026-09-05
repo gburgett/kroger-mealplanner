@@ -61,22 +61,39 @@ config :mealplan,
 
 # MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
 # default; "host" runs commands unconfined and is for testing application logic
-# where no sandbox image can be built. Anything else is a typo, and a typo that
+# where no sandbox image can be built; "microsandbox" gives each tenant its own
+# libkrun microVM (ADR 0027), for more than one household on one machine, and
+# needs read/write on /dev/kvm. Anything else is a typo, and a typo that
 # silently disabled the security boundary would be the worst possible failure,
-# so it raises. See ADR 0022 and Mealplan.Sandbox.mode/0.
+# so it raises. See ADR 0022, ADR 0027 and Mealplan.Sandbox.mode/0.
 sandbox_mode =
   case System.get_env("MEALPLAN_SANDBOX") do
     nil -> :bubblewrap
     "" -> :bubblewrap
     "bubblewrap" -> :bubblewrap
     "host" -> :host
-    other -> raise "MEALPLAN_SANDBOX must be \"bubblewrap\" or \"host\", got #{inspect(other)}"
+    "microsandbox" -> :microsandbox
+    other ->
+      raise "MEALPLAN_SANDBOX must be \"bubblewrap\", \"host\" or \"microsandbox\", got #{inspect(other)}"
+  end
+
+max_live_sessions =
+  case System.get_env("MEALPLAN_MAX_LIVE_SESSIONS") do
+    nil -> nil
+    "" -> nil
+    n -> String.to_integer(n)
   end
 
 config :mealplan, Mealplan.Sandbox,
   mode: sandbox_mode,
   image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
-  seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER")
+  seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER"),
+  # A .tar the microsandbox backend loads into `msb`, or a bare `msb` image
+  # reference. Defaults to sandbox-image/oci.tar.
+  microsandbox_image: System.get_env("MEALPLAN_MICROSANDBOX_IMAGE"),
+  # nil here means "use the backend's own default" — 16 for microsandbox,
+  # unbounded for bubblewrap/host. See Mealplan.Sandbox.max_live_sessions/0.
+  max_live_sessions: max_live_sessions
 
 # Where the sandbox puts a command's stream files and its TMPDIR, and where the
 # scenarios put their corpora. `Mealplan.Sandbox.Scratch` explains the layout;

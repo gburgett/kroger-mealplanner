@@ -166,7 +166,13 @@ defmodule Mealplan.Sandbox.ScratchTest do
       command,
       Keyword.merge(
         [
-          mode: Mealplan.Sandbox.mode(),
+          # These assert `Runner`'s own scratch cleanup, which is the same for
+          # its two modes. Under `MEALPLAN_SANDBOX=microsandbox` the Runner is
+          # not the code path at all (`Mealplan.Sandbox.Backend.Microsandbox`
+          # is, with its own `after File.rm_rf/1` — see
+          # `test/mealplan/sandbox/microsandbox_test.exs`), so fall back to the
+          # unconfined mode `Runner` does understand.
+          mode: runner_mode(),
           image_root: Mealplan.Sandbox.default_image_root(),
           seccomp_filter: Mealplan.Sandbox.default_seccomp_filter(),
           workspace: workspace,
@@ -176,6 +182,13 @@ defmodule Mealplan.Sandbox.ScratchTest do
         opts
       )
     )
+  end
+
+  defp runner_mode do
+    case Mealplan.Sandbox.mode() do
+      :microsandbox -> :host
+      other -> other
+    end
   end
 
   describe "root/0 and command_dir!/0" do

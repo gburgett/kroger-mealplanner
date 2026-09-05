@@ -156,6 +156,9 @@ code to the attacker's token endpoint.
 | `MEALPLAN_OWNER` | `gordon@gordonburgett.net` | the only email that may approve a client |
 | `MEALPLAN_FOLDER` | `~/meal-plan` | the folder the sandbox mounts |
 | `MEALPLAN_STATE` | `~/.local/state/mealplan/auth.json` | clients and tokens. Refused if inside the meal-plan folder |
+| `MEALPLAN_SANDBOX` | `bubblewrap` | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
+| `MEALPLAN_MICROSANDBOX_IMAGE` | `sandbox-image/oci.tar` | the `.tar` the microsandbox backend `msb load`s, or a bare `msb` image reference. Only read under `MEALPLAN_SANDBOX=microsandbox` |
+| `MEALPLAN_MAX_LIVE_SESSIONS` | `16` (microsandbox); unbounded otherwise | how many live tenant microVMs before `open/3` evicts the least-recently-used one |
 | `KROGER_CLIENT_ID` | — | the Kroger developer client id. Without it there is no cart |
 | `KROGER_CLIENT_SECRET` | — | the matching secret. Never reaches the sandbox |
 | `MEALPLAN_KROGER_STATE` | beside `MEALPLAN_STATE`, as `kroger.json` | the household's Kroger credential. Also refused if inside the meal-plan folder |
@@ -176,6 +179,33 @@ now enforced at start-up: the file must be outside `MEALPLAN_FOLDER`, and the
 server refuses to start rather than serve with the household's Kroger
 credential inside the folder the sandbox mounts. There is no `DATABASE_URL`,
 no user and no password — the file's own permissions are the access control.
+
+## Running each tenant in a microVM (opt-in)
+
+The unit leaves `MEALPLAN_SANDBOX` unset, so this machine runs bubblewrap:
+isolation enough for one household, whose threat is prompt injection in recipe
+text. For **more than one household on one machine**, set
+`MEALPLAN_SANDBOX=microsandbox`. Each tenant then gets its own libkrun microVM —
+a real tenant boundary, per ADR 0027. It needs three things:
+
+* `msb` (microsandbox 0.6.x) on `PATH`;
+* read/write on `/dev/kvm` — check with `msb doctor` (`KVM access read/write`),
+  and that the service user is in the `kvm` group;
+* the image: `./sandbox-image/build.sh --microsandbox` writes
+  `sandbox-image/oci.tar`. The server runs `msb load` on it itself at boot.
+
+The start-up journal then reads `sandbox: microsandbox (libkrun microVM) …`
+instead of `sandbox: bubblewrap …`. A missing prerequisite is a start-up
+failure, not a downgrade to bubblewrap — the mechanism is chosen on purpose or
+not at all.
+
+`MEALPLAN_MAX_LIVE_SESSIONS` (default 16) caps concurrent microVMs; the oldest
+idle session is closed to admit a new tenant, and its microVM goes with it. The
+trade study (`multi-tenant-isolation-trade-study.md` §8) puts this VM's ceiling
+near two dozen. A change to `cli/` needs `./sandbox-image/build.sh
+--microsandbox` re-run and the affected sessions reopened, because the microVM
+boots from the baked image rather than binding `sandbox-image/rootfs/` afresh
+each command the way bubblewrap does.
 
 ## Registering with Kroger
 

@@ -206,7 +206,7 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | gcc --version                            |
       | busybox wget https://example.com         |
 
-  @security
+  @security @bubblewrap
   Scenario: The seccomp filter refuses a socket to a program that is in the image
     gawk can open a socket through its /inet/tcp special files, and gawk is in
     the image because the specifications need awk. A network namespace alone
@@ -214,9 +214,35 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     "Operation not permitted" is the socket call itself being refused, which is
     the filter and nothing else. See ADR 0008 and sandbox-image/seccomp.
 
+    Bubblewrap only: the microsandbox backend has no seccomp filter of ours, so
+    the same call fails a step later with a route/resolve error instead. That it
+    fails is asserted for both backends by "The network cannot be reached…".
+
     When I run "awk 'BEGIN { print \"x\" |& \"/inet/tcp/0/example.com/80\" }'"
     Then the command fails
     And the error output mentions "Operation not permitted"
+
+  @microsandbox
+  Scenario: A socket call from a program in the image still cannot reach the network
+    The microsandbox companion to the seccomp scenario above: gawk's /inet/tcp
+    socket has nowhere to go because the microVM was booted with --no-net. The
+    reason text is a route or resolve failure rather than "Operation not
+    permitted", so this only asserts that the call fails.
+
+    When I run "awk 'BEGIN { print \"x\" |& \"/inet/tcp/0/example.com/80\" }'"
+    Then the command fails
+
+  @security
+  Scenario: The network cannot be reached, whichever backend is confining the command
+    ADR 0005's Confirmation asks for this to be measured against the backend in
+    use, not assumed. git IS in the image and DOES try to reach out, so its
+    failure is the network being refused — a namespace with no route under
+    bubblewrap, a microVM with --no-net under microsandbox. The reason text
+    differs between the two; that the command cannot get out does not.
+
+    When I run "git ls-remote https://example.com/household.git"
+    Then the command fails
+    And the error output explains that network access is not allowed
 
   @security
   Scenario: The image holds only the programs it is recorded as holding
@@ -227,8 +253,13 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     When I list every program in the sandbox
     Then the list matches "sandbox-image/manifest.txt"
 
-  @security
+  @security @bubblewrap
   Scenario Outline: Nothing outside the meal-plan folder is readable
+    Bubblewrap binds only /usr and /workspace, so there is no /etc and no /home
+    for these to reach. The microsandbox companion — "The microVM holds nothing
+    of the host" — asserts the same property against a guest that does have an
+    /etc: a synthetic, root-only one.
+
     When I run "<command>"
     Then the command fails
 
@@ -239,16 +270,50 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | cat ../../etc/passwd  |
       | cat /workspace/../etc/passwd |
 
-  @security
+  @microsandbox
+  Scenario: The microVM holds nothing of the host
+    The guest is a throwaway rootfs of its own. /etc/passwd is present — the
+    guest agent has to resolve uid 0 — but it is a synthetic root-only stub, and
+    /home, /etc/shadow and the rest of the distro's account files are not there
+    at all. Nothing of the household or the host is on the other side of a path
+    that leaves /workspace.
+
+    When I run "cat /etc/passwd; echo ---; ls /home 2>&1 || true; cat /etc/shadow 2>&1 || true"
+    Then the output does not contain "nobody"
+    And the output does not contain "/home/"
+    And the output does not contain "sbin/nologin"
+
+  @security @bubblewrap
   Scenario: Symlinks cannot be used to escape the folder
     Given I have run "ln -s /etc/passwd recipes/escape.md"
     When I run "cat recipes/escape.md"
     Then the command fails
 
-  @security
+  @microsandbox
+  Scenario: A symlink out of the folder resolves to nothing on the microVM
+    /etc/shadow is removed from the microsandbox image, so a link an agent
+    plants that points there resolves to nothing readable — the same outcome as
+    the bubblewrap symlink scenario, by a different route.
+
+    Given I have run "ln -s /etc/shadow recipes/escape.md"
+    When I run "cat recipes/escape.md"
+    Then the command fails
+
+  @security @bubblewrap
   Scenario: Nothing outside the meal-plan folder is writable
     When I run "touch /etc/evil"
     Then the command fails
+
+  @microsandbox
+  Scenario: A write outside the workspace does not reach the household's folder
+    The guest root is writable — it is the microVM's own ephemeral disk, thrown
+    away when the session closes. What matters is that it is not the household's
+    folder and not another tenant's: only /workspace is backed by real files.
+
+    When I run "echo kept > /workspace/kept.md && echo stray > /etc/stray && cat /etc/stray"
+    Then the command succeeds
+    And the file "kept.md" exists in the meal-plan folder
+    And the file "etc/stray" does not exist in the meal-plan folder
 
   @security
   Scenario Outline: The file tools cannot be steered outside the folder either
@@ -304,12 +369,18 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the command fails
     And the meal planner still answers the next command
 
+  @fork-limit
   Scenario: A command that forks without end is stopped, not the whole machine
     The classic ":() { :|:& }; :" backgrounds every fork, so the shell that
     started it returns success within milliseconds however the sandbox behaves —
     it cannot tell us whether the limit held. Dropping the "&" makes each level
     wait for its children, so the process limit is something the command finds
     out about and reports.
+
+    Excluded under microsandbox: `msb exec --rlimit nproc` does not bite (the
+    guest command runs as uid 0), so a fork bomb is capped only by the VM's own
+    memory and CPU and, worst case, wedges that one tenant's microVM until
+    `close/1` disposes of it. ADR 0027 records this as an accepted downgrade.
 
     When I run ":() { :|: ; }; : "
     Then the command fails

@@ -16,14 +16,29 @@ end)
 # here, in this process, against the real tool handlers. `compile_features!`
 # turns each one into an ExUnit test.
 #
-# Under MEALPLAN_SANDBOX=host there is no sandbox, so every @security scenario
-# would assert something that is false and pass or fail for the wrong reason.
-# They are excluded — loudly. A suite that reports green having quietly dropped
-# the security scenarios is the one failure this mode must not have. See
-# ADR 0022.
-unless Mealplan.Sandbox.confined?() do
-  ExUnit.configure(exclude: [:security])
+# Which scenarios and unit tests this run can honestly assert depends on the
+# backend:
+#
+#   * host — there is no sandbox, so every @security scenario would pass or fail
+#     for the wrong reason. Exclude them, loudly (ADR 0022). The @microsandbox
+#     tag never matches here either.
+#   * microsandbox — most @security scenarios hold against a microVM, but the
+#     ones tagged @bubblewrap assert a bubblewrap mechanism (a seccomp EPERM, an
+#     absent /etc) that a microVM meets by a different route or not at all; each
+#     has a @microsandbox companion. The @fork-limit scenario is an accepted
+#     downgrade (ADR 0027).
+#   * bubblewrap — the @microsandbox scenarios and the microsandbox unit tests
+#     need real libkrun, so they are excluded.
+excludes =
+  cond do
+    not Mealplan.Sandbox.confined?() -> [:security, :microsandbox]
+    Mealplan.Sandbox.mode() == :microsandbox -> [:bubblewrap, :"fork-limit"]
+    true -> [:microsandbox]
+  end
 
+ExUnit.configure(exclude: excludes)
+
+unless Mealplan.Sandbox.confined?() do
   IO.puts(:stderr, """
 
   ┌───────────────────────────────────────────────────────────────────────────┐
@@ -31,6 +46,17 @@ unless Mealplan.Sandbox.confined?() do
   │ scenarios are NOT running. This run says nothing about containment.       │
   │ Before a release, run them for real:                                      │
   │     ./sandbox-image/build.sh && ./cli/build.sh && mix test                │
+  └───────────────────────────────────────────────────────────────────────────┘
+  """)
+end
+
+if Mealplan.Sandbox.mode() == :microsandbox do
+  IO.puts(:stderr, """
+
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ MEALPLAN_SANDBOX=microsandbox — each tenant runs in a libkrun microVM.    │
+  │ @bubblewrap scenarios and @fork-limit are excluded (ADR 0027); their      │
+  │ @microsandbox companions run instead.                                     │
   └───────────────────────────────────────────────────────────────────────────┘
   """)
 end
