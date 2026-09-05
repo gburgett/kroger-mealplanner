@@ -16,11 +16,12 @@
 # same reasoning as deploy/mealplan.service: one household, one machine
 # (ADR 0008).
 #
-# WHILE THE MIGRATION IS IN PROGRESS this runs ALONGSIDE the Node service:
-# port 8001 (Node is on 8000), and its own meal-plan folder
-# (/home/exedev/meal-plan-elixir) so the two servers never commit to one git
-# repository at once. Plan 0005 Phase 9 retires deploy/mealplan.service and
-# this one moves to port 8000 and /home/exedev/meal-plan.
+# THE CUTOVER HAPPENED: this is the server now, on port 8000, against the
+# real /home/exedev/meal-plan. It ran alongside the Node service for the rest
+# of the migration, on 8001 against its own /home/exedev/meal-plan-elixir
+# folder, so the two servers never committed to one git repository at once.
+# deploy/mealplan.service is stopped and disabled; it stays in the repository
+# until plan 0005 Phase 9 deletes the Node source it starts.
 #
 # DEPLOY = `mix release` THEN RESTART. There is a build step now (ADR 0020):
 #
@@ -48,21 +49,23 @@ ExecStop=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan s
 
 # The endpoint only serves in a release when this is set.
 Environment=PHX_SERVER=true
-# 8001 while the Node server holds 8000. Phase 9 moves this to 8000.
-Environment=MEALPLAN_PORT=8001
-# The OAuth issuer. Configuration, never the Host header (ADR 0009). Left unset
-# until the Elixir server is the one exe.dev points the public hostname at.
-#Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
+# The port exe.dev's proxy reaches this VM on (`ssh exe.dev share port`).
+Environment=MEALPLAN_PORT=8000
+# The OAuth issuer. Configuration, never the Host header (ADR 0009). This is
+# now the address exe.dev points the public hostname at.
+Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
 Environment=MEALPLAN_OWNER=gordon@gordonburgett.net
-# Its OWN folder during the migration, so it never races the Node server on
-# .git/index.lock. Phase 9 switches this to /home/exedev/meal-plan.
-Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan-elixir
+# The real meal-plan folder — the one the Node server used to hold.
+Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan
 # The state database (ADR 0024): OAuth clients and tokens, and the household's
 # Kroger credential. It MUST be outside MEALPLAN_FOLDER — the sandbox mounts
 # that folder, and the Kroger refresh token is held in the clear because a hash
 # cannot go in an Authorization header. The server refuses to start if this path
-# is inside it. Its own file during the migration, like the folder above.
-Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan-elixir.db
+# is inside it. This is a fresh file: neither the Node server's auth.json nor
+# the migration's own mealplan-elixir.db carry into it, so every MCP client has
+# to register and authorise again, and the household has to relink Kroger at
+# /kroger once more. Accepted at cutover.
+Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
 Environment=PATH=/usr/bin:/bin
