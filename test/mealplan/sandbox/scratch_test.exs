@@ -16,15 +16,31 @@ defmodule Mealplan.Sandbox.ScratchTest do
   setup do
     # A base of this test's own, so nothing here can see — or remove — the
     # roots of the run it is part of, or of a partition running beside it.
+    #
+    # `Scratch.root/0` memoises its answer in `:persistent_term` for the life
+    # of the OS process, so `tmp_base` alone is not enough: whichever test
+    # calls `root/0` or `command_dir!/0` first — here or in an ordinary
+    # sandboxed command elsewhere in the same suite — fixes it for every test
+    # afterward. `release/0` erased that memo but the live suite around it
+    # promptly recomputed it from the SAME shared `tmp_base`, so "release/0
+    # removes the root" was deleting a directory a still-running scenario's
+    # session was using. Erase and restore the memo here too, so this file's
+    # `root/0` and `command_dir!/0` calls always see this test's own base.
     base = Path.join(System.tmp_dir!(), "scratch-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(base)
-    previous = Application.get_env(:mealplan, :tmp_base)
+    previous_base = Application.get_env(:mealplan, :tmp_base)
+    previous_root = :persistent_term.get({Scratch, :root}, nil)
     Application.put_env(:mealplan, :tmp_base, base)
+    :persistent_term.erase({Scratch, :root})
 
     on_exit(fn ->
-      if previous,
-        do: Application.put_env(:mealplan, :tmp_base, previous),
+      if previous_base,
+        do: Application.put_env(:mealplan, :tmp_base, previous_base),
         else: Application.delete_env(:mealplan, :tmp_base)
+
+      if previous_root,
+        do: :persistent_term.put({Scratch, :root}, previous_root),
+        else: :persistent_term.erase({Scratch, :root})
 
       File.rm_rf(base)
     end)
