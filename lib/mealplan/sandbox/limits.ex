@@ -83,15 +83,21 @@ defmodule Mealplan.Sandbox.Limits do
   `env -i` is load-bearing: bubblewrap becomes pid 1 in the sandbox and keeps
   the environment it was launched with, so without it `cat /proc/1/environ`
   reads the server's environment. `--clearenv` only sets the child's env.
+
+  `:nproc_budget`, when given, is the precomputed result of `nproc_budget/2` —
+  see there for why a session computes it once rather than every call.
   """
   @spec wrap([String.t()], t(), keyword()) :: [String.t()]
   def wrap(argv, %__MODULE__{} = limits, opts) do
     use_user_scope = Keyword.fetch!(opts, :use_user_scope)
     unit_name = Keyword.fetch!(opts, :unit_name)
 
+    budget =
+      Keyword.get_lazy(opts, :nproc_budget, fn -> nproc_budget(limits, use_user_scope) end)
+
     inner =
       ["prlimit"] ++
-        nproc_argument(limits, use_user_scope) ++
+        nproc_argument(budget) ++
         ["--fsize=#{limits.file_size_max}", "--", "/usr/bin/env", "-i"] ++
         argv
 
@@ -113,15 +119,28 @@ defmodule Mealplan.Sandbox.Limits do
     end
   end
 
-  # RLIMIT_NPROC is an absolute count per uid, not a budget for us. With a
-  # cgroup, TasksMax is the better control and this adds nothing. Without one,
-  # the uid's current thread count plus headroom: a fork bomb still dies, a
-  # busy machine still works.
-  defp nproc_argument(_limits, true), do: []
+  @doc """
+  The `--nproc` budget for a command with no cgroup, or `nil` when
+  `use_user_scope` makes `TasksMax` the real control and this adds nothing.
 
-  defp nproc_argument(%__MODULE__{tasks_max: tasks_max}, false) do
-    ["--nproc=#{tasks_owned_by_this_uid() + tasks_max * 4}"]
+  RLIMIT_NPROC is an absolute count per uid, not a budget for us, so the
+  budget is the uid's current thread count plus headroom: a fork bomb still
+  dies, a busy machine still works. That count comes from walking every entry
+  in `/proc` — cheap once, and there is no reason to pay it again for every
+  command in the same session: nothing about *this* command's limit needs the
+  uid's task count to be current to the millisecond, only roughly right.
+  Computed once per `Mealplan.Sandbox.Session` and passed to `wrap/3` as
+  `:nproc_budget`, not recomputed inside it.
+  """
+  @spec nproc_budget(t(), boolean()) :: pos_integer() | nil
+  def nproc_budget(_limits, true), do: nil
+
+  def nproc_budget(%__MODULE__{tasks_max: tasks_max}, false) do
+    tasks_owned_by_this_uid() + tasks_max * 4
   end
+
+  defp nproc_argument(nil), do: []
+  defp nproc_argument(budget), do: ["--nproc=#{budget}"]
 
   defp tasks_owned_by_this_uid do
     uid = uid()

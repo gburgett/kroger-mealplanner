@@ -400,3 +400,51 @@ inside it.
 **Decision:** ADR 0025. The suite runs as one process. §4 and §6 (this
 document's two worker-parallelism proposals) are superseded by it; §§1–3, §7,
 §9 and §10 are unaffected.
+
+## 12. Fixed cost inside the one process, and two of it removed
+
+With partitioning off the table, the remaining lever is the fixed per-scenario
+cost §9 measured at ~0.29 s and §10 at ~0.25 s. `mix test --trace` gives a
+per-scenario breakdown; summing all 183 durations came within a few hundred
+milliseconds of the suite's own wall clock, meaning there is essentially no
+scheduling overhead left to find — the time is inside the scenarios.
+
+Two fixed costs turned out to be paid by every scenario regardless of whether
+that scenario's own steps needed them:
+
+- **`Mealplan.Sandbox.Limits.wrap/3` recomputed its `--nproc` rlimit budget on
+  every single sandboxed command**, by walking every entry in `/proc` and
+  `stat`-ing each one for its owning uid — about 8–10 ms per call on this
+  machine (145 processes), paid whenever `use_user_scope` is false, which is
+  every test run without a reachable systemd user bus. The budget does not
+  need to be current to the command; it only has to be roughly right, so
+  `Mealplan.Sandbox.Session` now computes it once at `init/1`, alongside
+  `use_user_scope`, and every command in that session's life reuses it.
+- **`before_scenario` computed `commit_count/1` — a real sandboxed
+  `git rev-list --count HEAD`, ~8 ms — for every scenario**, to have a
+  "commits before" figure ready. Exactly one step,
+  `"the history has 1 more commit than before"`, ever reads it, in exactly one
+  scenario. That scenario is now tagged `@remembers-commit-count`, and a
+  tagged `before_scenario` hook computes the figure only there.
+
+Measured, host sandbox mode, three runs after both changes:
+
+| | Wall clock | Mean / scenario |
+| --- | --- | --- |
+| Before (§11's one-process baseline) | 26.5 s | 140.9 ms |
+| After | 17.2–18.6 s | 97.9 ms |
+
+About 30% off the one-process suite, with no `.feature` behaviour change
+(one new tag) and no change to what the rlimit or the commit count mean —
+only when they are computed. `mix test` with the real bubblewrap sandbox
+dropped from 34.6 s to 26.0 s the same way; its one failure is unchanged and
+unrelated (the missing `@security` step in `history.feature` §11 already
+found).
+
+Not chased further: the slowest individual scenarios are now the ones doing
+legitimately more work — a fresh `Mealplan.Boot.open_corpus/3` outside the
+template, for the migration and `@old-dinner-shape` scenarios — and a single
+~650 ms outlier in `auth.feature`'s first real-HTTP scenario that looks like
+one-time Bandit/Finch warm-up rather than a repeated cost. Neither is a
+scenario paying for work it does not need, which is what made the two fixes
+above worth making.

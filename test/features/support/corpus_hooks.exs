@@ -124,10 +124,15 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:walmart, walmart)
      |> Map.put(:walmart_key_path, walmart_key_path)
      |> Map.put(:llm, llm)
-     |> Map.put(:list_path, nil)
-     # What the history held before the scenario did anything, for the steps
-     # that assert a delta rather than a total.
-     |> Map.put(:commits_before, commit_count(session))}
+     |> Map.put(:list_path, nil)}
+  end
+
+  # "the history has 1 more commit than before" is the only step that reads
+  # `commits_before`, and it is one scenario. `commit_count/1` is a real
+  # sandboxed `git rev-list`, not a free call, so scenarios that never read it
+  # should not pay for it.
+  before_scenario "@remembers-commit-count", context, name: "remember the commit count" do
+    {:ok, Map.put(context, :commits_before, commit_count(context.session))}
   end
 
   @doc """

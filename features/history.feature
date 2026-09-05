@@ -160,6 +160,7 @@ Feature: The meal plan remembers what it used to say
     Then the command fails
     And the file "recipes/broken.md" is committed
 
+  @remembers-commit-count
   Scenario: History is not a chore the agent has to remember
     When I write the file "recipes/omelette.md":
       """

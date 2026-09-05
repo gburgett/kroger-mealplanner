@@ -32,7 +32,8 @@ defmodule Mealplan.Sandbox.Session do
     :limits,
     :timeout_ms,
     :max_output_bytes,
-    :use_user_scope
+    :use_user_scope,
+    :nproc_budget
   ]
 
   # --- client ---------------------------------------------------------------
@@ -107,16 +108,24 @@ defmodule Mealplan.Sandbox.Session do
       end
     end
 
+    limits = Keyword.get(opts, :limits) || Limits.default()
+    use_user_scope = Keyword.get_lazy(opts, :use_user_scope, &Limits.user_scope_available?/0)
+
     state = %__MODULE__{
       tenant: Keyword.fetch!(opts, :tenant),
       folder: folder,
       mode: mode,
       image_root: image_root,
       seccomp_filter: seccomp_filter,
-      limits: Keyword.get(opts, :limits) || Limits.default(),
+      limits: limits,
       timeout_ms: Keyword.get(opts, :timeout_ms, 10_000),
       max_output_bytes: Keyword.get(opts, :max_output_bytes, 64 * 1024),
-      use_user_scope: Keyword.get_lazy(opts, :use_user_scope, &Limits.user_scope_available?/0)
+      use_user_scope: use_user_scope,
+      # Walking /proc for the uid's task count once per session, not once per
+      # command — see Limits.nproc_budget/2. A session runs a handful of
+      # commands for one scenario; recomputing this for each of them was pure
+      # repeated work for a number that only needs to be roughly right.
+      nproc_budget: Keyword.get_lazy(opts, :nproc_budget, fn -> Limits.nproc_budget(limits, use_user_scope) end)
     }
 
     {:ok, state}
@@ -199,6 +208,7 @@ defmodule Mealplan.Sandbox.Session do
       workspace: state.folder,
       tenant: state.tenant,
       use_user_scope: state.use_user_scope,
+      nproc_budget: state.nproc_budget,
       limits: state.limits,
       timeout_ms: state.timeout_ms,
       max_output_bytes: Keyword.get(opts, :max_output_bytes, state.max_output_bytes),

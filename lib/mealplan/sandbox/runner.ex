@@ -37,6 +37,10 @@ defmodule Mealplan.Sandbox.Runner do
     * `:image_root` (required), `:seccomp_filter` (path or nil, required)
     * `:limits` — `%Limits{}` (default `Limits.default/0`)
     * `:use_user_scope` — boolean (required)
+    * `:nproc_budget` — the session's precomputed
+      `Mealplan.Sandbox.Limits.nproc_budget/2` result, or `nil` when
+      `:use_user_scope` is true. Computed fresh if omitted — a one-off caller
+      only pays for it once either way.
     * `:workspace` — the meal-plan folder (required)
     * `:tenant` — names the transient scope unit (required)
     * `:timeout_ms` — default 10_000
@@ -52,6 +56,9 @@ defmodule Mealplan.Sandbox.Runner do
     tenant = Keyword.fetch!(opts, :tenant)
     use_user_scope = Keyword.fetch!(opts, :use_user_scope)
     limits = Keyword.get(opts, :limits) || Limits.default()
+
+    nproc_budget =
+      Keyword.get_lazy(opts, :nproc_budget, fn -> Limits.nproc_budget(limits, use_user_scope) end)
     timeout_ms = Keyword.get(opts, :timeout_ms, 10_000)
     cap = Keyword.get(opts, :max_output_bytes, 64 * 1024)
     env = Keyword.get(opts, :env, %{})
@@ -74,6 +81,7 @@ defmodule Mealplan.Sandbox.Runner do
         workspace: workspace,
         tenant: tenant,
         use_user_scope: use_user_scope,
+        nproc_budget: nproc_budget,
         limits: limits,
         timeout_ms: timeout_ms,
         cap: cap,
@@ -94,6 +102,7 @@ defmodule Mealplan.Sandbox.Runner do
       workspace: workspace,
       tenant: tenant,
       use_user_scope: use_user_scope,
+      nproc_budget: nproc_budget,
       limits: limits,
       timeout_ms: timeout_ms,
       cap: cap,
@@ -166,7 +175,12 @@ defmodule Mealplan.Sandbox.Runner do
           {shell, "-", workspace}
       end
 
-    argv = Limits.wrap(inner, limits, use_user_scope: use_user_scope, unit_name: unit_name)
+    argv =
+      Limits.wrap(inner, limits,
+        use_user_scope: use_user_scope,
+        nproc_budget: nproc_budget,
+        unit_name: unit_name
+      )
 
     wrapper_args =
       ["-w", @wrapper, out_path, err_path, seccomp_arg, input_path, "--"] ++ argv
