@@ -39,12 +39,7 @@ defmodule MealplanWeb.LoginController do
 
       true ->
         conn
-        |> html(
-          LoginPage.phone_form(
-            return_to: return_to,
-            configured: Mealplan.Config.owner_phone() != nil
-          )
-        )
+        |> html(LoginPage.phone_form(return_to: return_to))
     end
   end
 
@@ -80,7 +75,6 @@ defmodule MealplanWeb.LoginController do
         |> html(
           LoginPage.phone_form(
             return_to: return_to,
-            configured: Mealplan.Config.owner_phone() != nil,
             error: sendable(error)
           )
         )
@@ -102,7 +96,6 @@ defmodule MealplanWeb.LoginController do
         |> html(
           LoginPage.phone_form(
             return_to: return_to,
-            configured: Mealplan.Config.owner_phone() != nil,
             error: "That code did not work. Ask for a new code."
           )
         )
@@ -169,7 +162,6 @@ defmodule MealplanWeb.LoginController do
     |> html(
       LoginPage.phone_form(
         return_to: return_to,
-        configured: Mealplan.Config.owner_phone() != nil,
         error: message
       )
     )

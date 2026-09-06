@@ -35,25 +35,13 @@ defmodule Mealplan.Mcp.Server do
   # URL is threaded through — configuration, never a `Host` header (ADR 0009).
   @impl Anubis.Server
   def server_instructions do
-    tenant = Mealplan.Config.tenant()
     base_url = Mealplan.Config.public_url()
 
-    {tree, history, onboarding} =
-      case Mealplan.Sandbox.whereis(tenant) do
-        pid when is_pid(pid) ->
-          onboarding = if Mealplan.Onboarding.done?(pid), do: "", else: Mealplan.Onboarding.note()
-
-          {Mealplan.Corpus.Tree.render(pid), Mealplan.Git.Repository.recent_history(pid),
-           onboarding}
-
-        _ ->
-          {"", "", ""}
-      end
-
+    # No per-tenant tree or history here: `server_instructions/0` is read at the
+    # handshake with no connection in hand, and there is no single household to
+    # describe any more (ADR 0033). The onboarding nudge still reaches the model
+    # on every `tools/call` reply — see `Mealplan.Mcp.Tools.call/4`.
     [
-      tree,
-      history,
-      onboarding,
       "A meal plan is a folder of markdown documents. Read README.md in the folder first; " <>
         "it is the schema. Plan meals with ordinary shell commands.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>
@@ -100,10 +88,13 @@ defmodule Mealplan.Mcp.Server do
     end
   end
 
-  # The tenant the bearer plug resolved for this connection. One household
-  # falls back to the configured tenant; the seam is here for when a token
-  # names its own.
+  # The tenant the bearer plug resolved for this connection, from the access
+  # token's stored `tenant_id` (ADR 0033). `MealplanWeb.Plugs.BearerAuth`
+  # assigns it, and `Anubis`'s HTTP transport inherits `conn.assigns` into the
+  # frame. There is no global fallback any more: a call with no tenant is a
+  # bug in the gate, not a shared default.
   defp tenant(frame) do
-    frame.assigns[:tenant] || frame.assigns["tenant"] || Mealplan.Config.tenant()
+    frame.assigns[:tenant] || frame.assigns["tenant"] ||
+      raise "no tenant on the MCP frame — the bearer gate did not assign one"
   end
 end

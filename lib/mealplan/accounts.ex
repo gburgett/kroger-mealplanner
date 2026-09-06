@@ -1,143 +1,97 @@
 defmodule Mealplan.Accounts do
   @moduledoc """
-  Tenants, users and memberships. Plan 0005 Phase 2.
+  Tenants, users and memberships. Plan 0005 Phase 2, generalised by ADR 0033.
 
-  `MEALPLAN_OWNER` is the bootstrap: the first tenant and its owner are seeded
-  from configuration, so one household still starts with no manual account
-  setup. The consent gate then asks "is this user the owner of this tenant"
-  instead of "is this email the one configured owner".
+  There is no bootstrap household and no configured owner any more. Every
+  household — the current one included — is invited from the command line
+  (`Mealplan.Invitations`), and the first code that number spends provisions its
+  tenant and its owner membership. This module is the read side of that: "does
+  this telephone own this tenant", which is the question the consent gate and
+  every bearer call ask.
 
-  How a person PROVES they are that user moved in ADR 0027, from an exe.dev
-  header to a code sent to `MEALPLAN_OWNER_PHONE`. This module changed by one
-  function and one column: `link_owner_login!/3` attaches the telephone and the
-  SuperTokens id to the owner row the first time a code is spent.
+  Identity is the telephone number, in E.164. `owner?/2` and `same_phone?/2`
+  compare after normalisation, so a number typed with spaces or hyphens still
+  matches.
   """
 
   import Ecto.Query
-  alias Mealplan.Repo
   alias Mealplan.Accounts.{Membership, Tenant, User}
+  alias Mealplan.Repo
 
-  @doc "Lower-cased comparison, ADR 0009's `sameEmail`."
-  def same_email?(one, other) do
-    String.downcase(String.trim(one || "")) == String.downcase(String.trim(other || ""))
+  @doc "Normalise a telephone to E.164, as far as a string can be: digits and a leading `+`."
+  def normalise_phone(phone), do: User.normalise_phone(phone) || ""
+
+  @doc "Two telephones are the same after normalisation. ADR 0009's `sameEmail`, for a phone."
+  def same_phone?(one, other) do
+    a = normalise_phone(one)
+    b = normalise_phone(other)
+    a != "" and a == b
   end
 
   @doc """
-  Ensure the bootstrap tenant exists with `owner_email` as its owner. Idempotent.
-  Returns the `%Tenant{}`.
+  Upsert a user by telephone (the primary key). `attrs` may carry
+  `:supertokens_user_id` and `:label`, attached without ever overwriting a
+  value we already had with nil. Returns `%User{}`.
   """
-  def bootstrap!(tenant_slug, owner_email) do
-    tenant =
-      case Repo.get_by(Tenant, slug: tenant_slug) do
-        nil -> Repo.insert!(Tenant.changeset(%Tenant{}, %{slug: tenant_slug, name: tenant_slug}))
-        t -> t
-      end
-
-    user = upsert_user!(%{email: owner_email})
-
-    unless Repo.get_by(Membership, tenant_id: tenant.id, user_id: user.id) do
-      Repo.insert!(
-        Membership.changeset(%Membership{}, %{
-          tenant_id: tenant.id,
-          user_id: user.id,
-          role: "owner"
-        })
-      )
-    end
-
-    tenant
-  end
-
-  @doc "Upsert a user by SuperTokens id (preferred) or email. Returns `%User{}`."
   def upsert_user!(attrs) do
-    email = attrs |> Map.get(:email) |> to_string() |> String.trim() |> String.downcase()
-    core_id = attrs[:supertokens_user_id]
+    phone = normalise_phone(attrs[:phone] || attrs["phone"])
+    core_id = attrs[:supertokens_user_id] || attrs["supertokens_user_id"]
+    label = attrs[:label] || attrs["label"]
 
-    existing =
-      (core_id && Repo.get_by(User, supertokens_user_id: core_id)) ||
-        Repo.get_by(User, email: email)
-
-    case existing do
+    case Repo.get(User, phone) do
       nil ->
         Repo.insert!(
           User.changeset(%User{}, %{
-            email: email,
-            phone: attrs[:phone],
+            phone: phone,
+            label: label,
             supertokens_user_id: core_id
           })
         )
 
       user ->
-        # Keep the core id and the telephone fresh once we learn them, and never
-        # unset one we already had by writing a nil over it.
         user
         |> User.changeset(%{
-          email: email,
-          phone: attrs[:phone] || user.phone,
+          label: label || user.label,
           supertokens_user_id: core_id || user.supertokens_user_id
         })
         |> Repo.update!()
     end
   end
 
-  @doc """
-  Record that the owner of `tenant_slug` signed in, and attach what the core
-  told us about them. Returns the `%User{}` the session will name.
-
-  Called once per sign-in, from `Mealplan.Auth.Otp.finish/2`. The telephone is
-  already known to be the household's — `Mealplan.Auth.Otp.start/1` refused
-  every other number before a message was ever sent — so this attaches rather
-  than decides.
-  """
-  def link_owner_login!(tenant_slug, owner_email, attrs) do
-    user =
-      upsert_user!(%{
-        email: owner_email,
-        phone: attrs[:phone],
-        supertokens_user_id: attrs[:supertokens_user_id]
-      })
-
-    # The bootstrap normally made this membership at start-up. Make it here too,
-    # so a database restored without it does not leave the household locked out
-    # of the consent page with a valid code in their hand.
-    tenant = get_tenant_by_slug(tenant_slug) || bootstrap!(tenant_slug, owner_email)
-
-    unless Repo.get_by(Membership, tenant_id: tenant.id, user_id: user.id) do
-      Repo.insert!(
-        Membership.changeset(%Membership{}, %{
-          tenant_id: tenant.id,
-          user_id: user.id,
-          role: "owner"
-        })
-      )
-    end
-
-    user
-  end
-
-  @doc "The user with this id, or nil. The session gate reads it on each request."
+  @doc "The user with this telephone, or nil. The session gate reads it on each request."
   def get_user(nil), do: nil
-  def get_user(id), do: Repo.get(User, id)
+  def get_user(phone), do: Repo.get(User, normalise_phone(phone))
 
   def get_tenant_by_slug(slug), do: Repo.get_by(Tenant, slug: slug)
 
-  @doc "Whether `email` owns `tenant` (by slug or struct)."
-  def owner?(tenant_slug, email) when is_binary(tenant_slug) do
+  @doc "Whether `phone` is an owner of `tenant` (by slug or struct)."
+  def owner?(tenant_slug, phone) when is_binary(tenant_slug) do
     case get_tenant_by_slug(tenant_slug) do
       nil -> false
-      tenant -> owner?(tenant, email)
+      tenant -> owner?(tenant, phone)
     end
   end
 
-  def owner?(%Tenant{id: tenant_id}, email) do
-    normalized = email |> to_string() |> String.trim() |> String.downcase()
+  def owner?(%Tenant{id: tenant_id}, phone), do: owner_of_tenant_id?(tenant_id, phone)
+  def owner?(_, _), do: false
+
+  @doc """
+  Whether `phone` is an owner of the tenant with this id.
+
+  This is what `Mealplan.Auth.Provider.verify_access_token/1` re-checks on every
+  bearer call: a removed membership fails here on the next request, which is how
+  revoking an invitation logs a household's clients out within one request.
+  """
+  def owner_of_tenant_id?(nil, _phone), do: false
+
+  def owner_of_tenant_id?(tenant_id, phone) do
+    normalised = normalise_phone(phone)
 
     query =
       from m in Membership,
-        join: u in User,
-        on: u.id == m.user_id,
-        where: m.tenant_id == ^tenant_id and m.role == "owner" and u.email == ^normalized
+        where:
+          m.tenant_id == ^tenant_id and m.role == "owner" and m.user_phone == ^normalised
 
-    Repo.exists?(query)
+    normalised != "" and Repo.exists?(query)
   end
 end

@@ -15,36 +15,30 @@ defmodule MealplanWeb.LoginPage do
   """
 
   @doc """
-  The first screen. `opts` keys: `:return_to`, `:error`, `:configured` (bool).
+  The first screen. `opts` keys: `:return_to`, `:error`.
+
+  There is no "not configured" state any more (ADR 0033): the allowlist is the
+  `invitations` table, not an environment variable, so the page is always
+  usable. A number with no invitation gets the same answer a real send gets —
+  see `Mealplan.Auth.Otp.start/1`.
   """
   def phone_form(opts \\ []) do
     error = banner(opts[:error])
 
-    body =
-      if opts[:configured] == false do
-        """
-        <p class="error">Nobody can sign in yet.</p>
-        <p class="quiet">The server has no household telephone number, so it has
-        nothing to send a code to. Whoever runs this machine sets
-        <code>MEALPLAN_OWNER_PHONE</code> and restarts the meal planner. The
-        journal line that starts <code>sign-in:</code> says what is missing.</p>
-        """
-      else
-        """
-        #{error}
-        <form method="post" action="/login">
-          <input type="hidden" name="return_to" value="#{e(opts[:return_to] || "/")}">
-          <p>
-            <label for="phone">Your telephone number</label><br>
-            <input id="phone" name="phone" type="tel" autocomplete="tel"
-                   inputmode="tel" placeholder="+1 509 555 0142" required autofocus>
-          </p>
-          <p><button type="submit">Send me a code</button></p>
-        </form>
-        <p class="quiet">A six-digit code arrives as a text message. It works once,
-        and it expires in a few minutes.</p>
-        """
-      end
+    body = """
+    #{error}
+    <form method="post" action="/login">
+      <input type="hidden" name="return_to" value="#{e(opts[:return_to] || "/")}">
+      <p>
+        <label for="phone">Your telephone number</label><br>
+        <input id="phone" name="phone" type="tel" autocomplete="tel"
+               inputmode="tel" placeholder="+1 509 555 0142" required autofocus>
+      </p>
+      <p><button type="submit">Send me a code</button></p>
+    </form>
+    <p class="quiet">A six-digit code arrives as a text message. It works once,
+    and it expires in a few minutes.</p>
+    """
 
     page("Sign in to the meal plan", """
     <h1>Sign in to the meal plan</h1>

@@ -1,27 +1,28 @@
 defmodule Mealplan.Boot do
   @moduledoc """
-  Start-up: open the household's sandbox session over the meal-plan folder,
-  make it a git repository, scaffold anything missing and commit it, run the
-  dated corpus migrations, and print the health check.
+  Start-up: run the database migrations and print the health check.
 
-  Mirrors the sequence in `server.ts` / `startServer`. It runs synchronously in
-  `init/1` and before `MealplanWeb.Endpoint` in the supervision tree, so the
-  server does not accept a request until the corpus is in a known shape. A
-  failure here crashes the boot — a refusal for a person still looking at the
-  journal, exactly as the TypeScript server exited non-zero.
+  Since ADR 0033 there is no household to open at start. A fresh server has no
+  tenants; an established one opens each tenant's corpus on that tenant's first
+  request, through `Mealplan.Corpus.ensure_open/1`. `init/1` still runs
+  synchronously before `MealplanWeb.Endpoint`, so the schema is migrated and the
+  state file is proven outside every corpus before the first request.
 
-  The per-tenant half is `open_corpus/3`, separately callable. Production calls
-  it once, for the one household. The test suite calls it for each scenario's
-  own tenant and folder, which is how a scenario gets a corpus in the state a
-  real first boot leaves behind rather than a hand-built imitation of one.
+  The per-tenant half is `open_corpus/3`, separately callable. It makes a folder
+  a git repository, scaffolds anything missing, commits it, and runs the dated
+  corpus migrations — the shape a served request can assume. `Mealplan.Corpus`
+  calls it lazily; the test suite calls it for each scenario's own tenant and
+  folder, which is how a scenario gets a corpus in the state a real first boot
+  leaves behind rather than a hand-built imitation of one.
   """
 
   use GenServer, restart: :transient
 
-  alias Mealplan.Corpus.{Migrations, Scaffold, Tree}
+  alias Mealplan.Corpus.{Migrations, Scaffold}
   alias Mealplan.Git.Repository
   alias Mealplan.Sandbox
   alias Mealplan.Sandbox.Session
+  alias Mealplan.Tenancy
 
   require Logger
 
@@ -76,15 +77,12 @@ defmodule Mealplan.Boot do
 
   @impl true
   def init(_opts) do
-    tenant_slug = Mealplan.Config.tenant()
-    folder = Mealplan.Config.folder()
-    owner = Mealplan.Config.owner()
-
     # Server state in one SQLite file (ADR 0024, restored by ADR 0030).
     # PostgreSQL put it outside the corpus by construction; a file does not, so
     # the guard `src/auth/store.ts` made — `assertOutsideFolder` — is here
-    # again, before the first row is written.
-    :ok = assert_database_outside_folder!(folder)
+    # again, before the first row is written. There is no one folder any more:
+    # it is proven outside the corpus root and outside every tenant's folder.
+    :ok = assert_database_outside_corpora!()
 
     # SQLite creates the FILE on first open but not the directory above it, and
     # the default is under ~/.local/state, which a fresh machine does not have.
@@ -95,93 +93,105 @@ defmodule Mealplan.Boot do
     {:ok, _, _} =
       Ecto.Migrator.with_repo(Mealplan.Repo, &Ecto.Migrator.run(&1, :up, all: true))
 
-    # MEALPLAN_OWNER is the bootstrap: seed the first tenant and its owner so one
-    # household starts with no manual account setup.
-    _tenant_row = Mealplan.Accounts.bootstrap!(tenant_slug, owner)
+    # ADR 0033: seed nothing. Every household is invited from the command line
+    # and re-onboards from empty on its first code.
+    counts = Tenancy.counts()
 
-    Logger.info("meal-plan folder: #{folder}")
     Logger.info("state database: #{Mealplan.Config.database()}")
-    Logger.info("the household is #{owner}")
+    Logger.info("corpus root: #{Mealplan.Config.corpus_root()}")
+
+    Logger.info(
+      "households: #{counts.invited} invited, #{counts.provisioned} provisioned " <>
+        "(invite one with `mix mealplan.invite <e164>`)"
+    )
+
     Logger.info("sign-in: " <> sign_in_status())
-
-    {:ok, session, _scaffolded} = open_corpus(tenant_slug, folder)
-
-    Logger.info("tree at open:\n" <> Tree.render(session))
     Logger.info("sandbox: " <> sandbox_status())
+    Logger.info("isolation: " <> isolation_status(counts))
     Logger.info("kroger: " <> kroger_status())
     Logger.info("walmart: " <> walmart_status())
 
-    Logger.info(
-      "resource limits: " <>
-        if(Session.config(session).use_user_scope,
-          do: "cgroup v2 scope, plus rlimits",
-          else: "rlimits only — no user systemd instance was reachable"
-        )
-    )
-
-    {:ok, %{session: session}}
+    {:ok, %{}}
   end
 
-  # The agent can read every byte of the meal-plan folder — that is what the
-  # folder is for. The database holds the household's Kroger refresh token in
-  # the clear, because a hash cannot go in an Authorization header, so the file
-  # holding it must not be in there. Refuse to serve rather than serve with the
-  # credential inside the agent's reach.
-  defp assert_database_outside_folder!(folder) do
-    database = Mealplan.Config.database()
-    inside = Path.expand(database)
-    mount = Path.expand(folder)
+  # The agent can read every byte of a meal-plan folder — that is what the
+  # folder is for. The database holds a household's Kroger refresh token in the
+  # clear, because a hash cannot go in an Authorization header, so the file
+  # holding it must not be reachable from any sandbox. Refuse to serve rather
+  # than serve with the credential inside the agent's reach.
+  defp assert_database_outside_corpora!() do
+    inside = Path.expand(Mealplan.Config.database())
 
-    if inside == mount or String.starts_with?(inside, mount <> "/") do
+    roots =
+      [Mealplan.Config.corpus_root() | provisioned_corpus_paths()]
+      |> Enum.map(&Path.expand/1)
+      |> Enum.uniq()
+
+    offending =
+      Enum.find(roots, fn root ->
+        inside == root or String.starts_with?(inside, root <> "/")
+      end)
+
+    if offending do
       raise """
-      the state database is inside the meal-plan folder:
+      the state database is inside a meal-plan corpus:
 
           database: #{inside}
-          folder:   #{mount}
+          corpus:   #{offending}
 
-      The sandbox mounts the folder, so an agent could read the household's
-      Kroger credential straight out of the file. Put the database somewhere
-      else, or set MEALPLAN_STATE to a path outside #{mount}.
+      A sandbox mounts that folder, so an agent could read a household's Kroger
+      credential straight out of the file. Put the database somewhere else, or
+      set MEALPLAN_STATE to a path outside #{Mealplan.Config.corpus_root()}.
       """
     end
 
     :ok
   end
 
+  defp provisioned_corpus_paths do
+    import Ecto.Query
+
+    Mealplan.Repo.all(
+      from t in Mealplan.Accounts.Tenant, where: not is_nil(t.corpus_path), select: t.corpus_path
+    )
+  rescue
+    _ -> []
+  end
+
   # Named in the health check because a server nobody can sign in to is a
-  # server that looks healthy and is not. Says which telephone, which core and
-  # which SMS provider, and says what is missing when something is (ADR 0027,
-  # ADR 0029).
+  # server that looks healthy and is not (ADR 0027, ADR 0029).
   defp sign_in_status do
-    phone = Mealplan.Config.owner_phone()
     core = Mealplan.Config.supertokens_base()
 
     cond do
-      is_nil(phone) ->
-        "NOT CONFIGURED. Set MEALPLAN_OWNER_PHONE to the household's number in " <>
-          "E.164, or nobody can reach the consent page."
-
       is_nil(Mealplan.Config.supertokens_api_key()) ->
-        "telephone #{redact(phone)}, core #{core} — but SUPERTOKENS_API_KEY is " <>
-          "not set. That key is the whole of the lock on the managed core " <>
-          "(ADR 0029), so no code can be made or checked without it."
+        "core #{core} — but SUPERTOKENS_API_KEY is not set. That key is the whole " <>
+          "of the lock on the managed core (ADR 0029), so no code can be made or " <>
+          "checked without it."
 
       not Mealplan.Auth.Sms.configured?() ->
-        "telephone #{redact(phone)}, core #{core} — but the SMS provider is not " <>
-          "configured: #{Mealplan.Auth.Sms.why_not()}"
+        "core #{core} — but the SMS provider is not configured: #{Mealplan.Auth.Sms.why_not()}"
 
       true ->
-        "telephone #{redact(phone)}, core #{core}, messages by " <>
-          Mealplan.Config.sms_provider()
+        "core #{core}, messages by #{Mealplan.Config.sms_provider()}"
     end
   end
 
-  # The journal is world-readable on this machine. The last four digits are
-  # enough to tell one number from another, and are not enough to send to.
-  defp redact(phone) do
-    case String.length(phone) do
-      n when n > 4 -> String.duplicate("*", n - 4) <> String.slice(phone, -4, 4)
-      _ -> "****"
+  # bubblewrap between tenants is one UID namespace, not a kernel (ADR 0033).
+  # Real isolation is MEALPLAN_SANDBOX=microsandbox. Say so when a second
+  # household is reachable without a microVM between tenants.
+  defp isolation_status(%{provisioned: provisioned}) do
+    cond do
+      Sandbox.mode() == :microsandbox ->
+        "microsandbox — each household in its own libkrun microVM"
+
+      provisioned <= 1 ->
+        "#{Sandbox.mode()} — one household so far. Set MEALPLAN_SANDBOX=microsandbox " <>
+          "before a second is reachable (ADR 0027)."
+
+      true ->
+        "WEAK: #{Sandbox.mode()} shares one kernel between #{provisioned} households. " <>
+          "Set MEALPLAN_SANDBOX=microsandbox (ADR 0027, trade study §10)."
     end
   end
 

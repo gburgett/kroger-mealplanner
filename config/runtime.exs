@@ -40,9 +40,14 @@ walmart_private_key =
   end
 
 config :mealplan,
-  owner: get.("MEALPLAN_OWNER", "gordon@gordonburgett.net"),
-  folder: get.("MEALPLAN_FOLDER", Path.expand("~/meal-plan")),
-  tenant: get.("MEALPLAN_TENANT", "household"),
+  # ADR 0033: no configured owner and no bootstrap household. Every household is
+  # invited from the command line (`mix mealplan.invite`), and the first code
+  # provisions its tenant and a fresh folder under MEALPLAN_CORPUS_ROOT.
+  corpus_root: get.("MEALPLAN_CORPUS_ROOT", Path.expand("~/meal-plans")),
+  # The old single-household folder. Kept defined only as a pointer for a
+  # follow-up record that moves its contents into the re-onboarded tenant;
+  # nothing reads it at runtime.
+  folder: System.get_env("MEALPLAN_FOLDER"),
   port: mealplan_port,
   # The OAuth issuer and the address clients reach this server at. Never
   # derived from a Host header. Synthesised from the bind when unset, so local
@@ -58,12 +63,12 @@ config :mealplan,
   walmart_key_version: get.("WALMART_KEY_VERSION", "1"),
   walmart_publisher_id: System.get_env("WALMART_PUBLISHER_ID"),
   llm_base: System.get_env("MEALPLAN_LLM_BASE"),
-  # --- the household's sign-in (ADR 0027) --------------------------------
+  # --- the household's sign-in (ADR 0027, ADR 0033) ---------------------
   #
-  # The one telephone that may receive a code, in E.164. The same shape as
-  # MEALPLAN_OWNER: one household, one number. A request for any other number
-  # is refused BEFORE the core is called, so a stranger costs no message.
-  owner_phone: System.get_env("MEALPLAN_OWNER_PHONE"),
+  # There is no single owner telephone any more. `Mealplan.Auth.Otp.start/1`
+  # admits a number when an `invitations` row names it, and refuses every other
+  # one BEFORE the core is called, so a stranger costs no message.
+  #
   # The SuperTokens core — the managed deployment (ADR 0029), reached over
   # HTTPS. `SUPERTOKENS_API_KEY` is the whole of the lock: the core is a
   # trusted component, anything that can call it can act on every user, and

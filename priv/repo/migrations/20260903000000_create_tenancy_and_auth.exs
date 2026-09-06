@@ -1,10 +1,12 @@
 defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
   @moduledoc """
-  Plan 0005 Phase 2: server state, with tenancy from the first migration.
+  Plan 0005 Phase 2: server state, with tenancy from the first migration, and
+  ADR 0033's invitations on top of it.
 
   The database holds SERVER STATE ONLY — registered OAuth clients, codes in
-  flight, access and refresh tokens, and the household's Kroger tokens. It
-  never holds the corpus.
+  flight, access and refresh tokens, the household's Kroger tokens, and now the
+  invitations that admit a household in the first place. It never holds the
+  corpus.
 
   It is SQLite (ADR 0024, restored by ADR 0030), which changes what two column
   types mean rather than what they are called: `:map` and `{:array, :string}`
@@ -17,12 +19,24 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
 
   A machine that ran the PostgreSQL build restores from a dump rather than
   replaying this file. There is one schema and one migration; the storage under
-  it moved three times.
+  it moved three times, and ADR 0033 changed the shape in place — `mix
+  ecto.reset` in development, and the one live machine resets because its
+  household re-onboards anyway.
 
-  Every credential-bearing row carries a `tenant_id` from the start (ADR 0020),
-  even though the sandbox boundary stays single-tenant until ADR 0008's
-  successor. `tenants` / `users` / `memberships` divide the data and the
-  account seam; they do not divide kernels.
+  ## ADR 0033: identity is the telephone number
+
+  `users` is keyed by `phone` (E.164). There is no `email` column and no bigint
+  id: a phone-only household has no email, and email must stop being the key
+  that ownership, the OAuth subject and the session turn on. `memberships`
+  references `users.phone`. `users.label` is a display string only; nothing
+  turns on it.
+
+  ## ADR 0033: an invitation is a row, and only a shell creates one
+
+  `invitations` names every telephone the operator has admitted. `tenant_id`
+  and `redeemed_at` are null until the first code is spent, and then the row is
+  the record of which tenant that number owns. `tenants.corpus_path` is where
+  that tenant's folder lives, under `MEALPLAN_CORPUS_ROOT`.
 
   Timestamps that mirror the TypeScript `expiresAt` are stored as epoch seconds
   (`bigint`), the same value `Math.floor(Date.now()/1000)` produced, so the
@@ -35,36 +49,58 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
     create table(:tenants) do
       add :slug, :string, null: false
       add :name, :string
+      # Where this tenant's meal-plan folder lives on disk (ADR 0033). Null
+      # until the invitation that made the tenant is redeemed and a slug is
+      # chosen; from then on it is `<MEALPLAN_CORPUS_ROOT>/<slug>`.
+      add :corpus_path, :string
       timestamps(type: :utc_datetime)
     end
 
     create unique_index(:tenants, [:slug])
 
-    create table(:users) do
-      add :email, :string, null: false
-      # The telephone that receives the one-time code, in E.164 (ADR 0027).
-      # Nullable: the bootstrap seeds the owner from MEALPLAN_OWNER before
-      # MEALPLAN_OWNER_PHONE has ever been used to sign in.
-      add :phone, :string
-      # The SuperTokens user id for this person. The core owns the passwordless
-      # credential; this column is the join back to it, and it is how a second
-      # login method could arrive later without a second users table.
+    # One row per person who may open a screen. Keyed by the telephone that
+    # receives the one-time code, in E.164 (ADR 0033). `supertokens_user_id` is
+    # the join back to the core that owns the passwordless credential; this
+    # table holds no credential of its own. `label` is a human name for a
+    # screen and the journal, and nothing turns on it.
+    create table(:users, primary_key: false) do
+      add :phone, :string, primary_key: true
+      add :label, :string
       add :supertokens_user_id, :string
       timestamps(type: :utc_datetime)
     end
 
-    create unique_index(:users, [:email])
-    create unique_index(:users, [:phone])
     create unique_index(:users, [:supertokens_user_id])
 
     create table(:memberships) do
       add :tenant_id, references(:tenants, on_delete: :delete_all), null: false
-      add :user_id, references(:users, on_delete: :delete_all), null: false
+
+      add :user_phone,
+          references(:users, column: :phone, type: :string, on_delete: :delete_all),
+          null: false
+
       add :role, :string, null: false, default: "owner"
       timestamps(type: :utc_datetime)
     end
 
-    create unique_index(:memberships, [:tenant_id, :user_id])
+    create unique_index(:memberships, [:tenant_id, :user_phone])
+
+    # The allowlist (ADR 0033). `Mealplan.Auth.Otp.start/1` admits a telephone
+    # only when a row here names it, and the lookup is local and first, so the
+    # ADR 0028 properties hold: an uninvited number costs no message and creates
+    # no user in the core. `invited_by` is the inviter's telephone, or null for
+    # the operator. `tenant_id` and `redeemed_at` are set together, once, by
+    # `Mealplan.Invitations.redeem/2`.
+    create table(:invitations) do
+      add :phone, :string, null: false
+      add :label, :string
+      add :invited_by, :string
+      add :tenant_id, references(:tenants, on_delete: :nilify_all)
+      add :redeemed_at, :utc_datetime
+      timestamps(type: :utc_datetime)
+    end
+
+    create unique_index(:invitations, [:phone])
 
     # Registered OAuth clients. The whole OAuthClientInformationFull document is
     # kept as JSON, keyed by client_id — the TypeScript store was
@@ -79,7 +115,8 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
     end
 
     # Authorisation codes in flight. Keyed by the SHA-256 hash of the code, so
-    # the row holds nothing replayable if it leaks.
+    # the row holds nothing replayable if it leaks. `subject` is the telephone
+    # (ADR 0033), not an email.
     create table(:oauth_codes, primary_key: false) do
       add :code_hash, :string, primary_key: true
       add :tenant_id, references(:tenants, on_delete: :delete_all)

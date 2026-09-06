@@ -23,7 +23,7 @@ defmodule MealplanWeb.Plugs.BearerAuth do
           {:ok, info} ->
             conn
             |> assign(:auth, info)
-            |> assign(:tenant, Mealplan.Config.tenant())
+            |> assign(:tenant, info.tenant)
 
           {:error, message} ->
             unauthorised(conn, message)

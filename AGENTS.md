@@ -335,7 +335,13 @@ before a release:
 mix test    # microsandbox, the default on a machine with KVM
 ```
 
-On a machine with no KVM — CI is one — say so on purpose:
+**On THIS VM, always run the suite in microsandbox mode.**
+`MEALPLAN_SANDBOX=host mix test` here runs the suite's commands unconfined on
+the host and **crashes the running `mealplan-elixir.service`** — a host-mode
+`mix test` is not safe on a box that is also serving. This VM has KVM
+(`msb doctor` passes), so there is never a reason to reach for host mode here.
+
+On a machine with no KVM — CI is one, and this VM is NOT one — say so on purpose:
 
 ```bash
 MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test

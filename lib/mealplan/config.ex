@@ -7,14 +7,23 @@ defmodule Mealplan.Config do
   place to ask.
   """
 
-  @doc "The household. One entry, on purpose — ADR 0009."
-  def owner, do: get(:owner) || "gordon@gordonburgett.net"
+  @doc """
+  The root every tenant's meal-plan folder sits under (ADR 0033).
 
-  @doc "The meal-plan folder for the single household tenant."
-  def folder, do: get(:folder) || Path.expand("~/meal-plan")
+  Default `~/meal-plans`. A tenant's own folder is `<root>/<slug>`, recorded on
+  the `tenants` row and read through `Mealplan.Tenancy.corpus_path/1`. There is
+  no single `folder/0` or `tenant/0` any more: a request carries its own.
+  """
+  def corpus_root, do: get(:corpus_root) || Path.expand("~/meal-plans")
 
-  @doc "The one tenant id while multi-tenancy is not real (ADR 0008)."
-  def tenant, do: get(:tenant) || "household"
+  @doc """
+  The abandoned single-household folder (ADR 0033).
+
+  `MEALPLAN_FOLDER` is kept defined only as a pointer for a follow-up record
+  that moves the old household's recipes and meals into its new tenant. Nothing
+  reads it at runtime.
+  """
+  def legacy_folder, do: presence(get(:folder))
 
   @doc """
   The SQLite file holding the server state (ADR 0024, restored by ADR 0030).
@@ -29,14 +38,6 @@ defmodule Mealplan.Config do
     |> Keyword.get(:database)
     |> to_string()
   end
-
-  @doc """
-  The one telephone that may receive a sign-in code, in E.164 (ADR 0027).
-
-  Nil when `MEALPLAN_OWNER_PHONE` is unset, and the login page then refuses
-  every number by name rather than sending a message nobody can answer.
-  """
-  def owner_phone, do: presence(get(:owner_phone))
 
   @doc "The SuperTokens core — the managed deployment, over HTTPS. See ADR 0029."
   def supertokens_base,
