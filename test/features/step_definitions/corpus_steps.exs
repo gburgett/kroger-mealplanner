@@ -231,6 +231,20 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, write_file(context, "preferences/household.md", context.docstring <> "\n")}
   end
 
+  step "the household cooks for {int} adults and {int} children", %{args: [adults, children]} = context do
+    document =
+      """
+      ---
+      adults: #{adults}
+      children: #{children}
+      ---
+
+      # This household
+      """ <> "\n"
+
+    {:ok, write_file(context, "config/household.md", document)}
+  end
+
   # --- reading the folder back ----------------------------------------------
 
   step "the file {string} exists in the meal-plan folder", %{args: [path]} = context do
@@ -436,6 +450,71 @@ defmodule Mealplan.Features.CorpusSteps do
     assert String.contains?(last(context).stderr, text),
            "#{inspect(text)} is not in stderr:\n#{last(context).stderr}"
 
+    {:ok, context}
+  end
+
+  # --- serving-size warnings from config/household.md -----------------------
+
+  step "the output warns that the meal {string} on {string} serves too few",
+       %{args: [meal, date]} = context do
+    lines = output_lines(context)
+
+    assert Enum.any?(lines, fn line ->
+             String.contains?(line, meal) and String.contains?(line, date) and
+               line =~ ~r/too few/i
+           end),
+           "no \"too few\" warning for #{meal} on #{date}:\n#{output(context)}"
+
+    {:ok, context}
+  end
+
+  step "the output warns that the meal {string} on {string} serves more than double",
+       %{args: [meal, date]} = context do
+    lines = output_lines(context)
+
+    assert Enum.any?(lines, fn line ->
+             String.contains?(line, meal) and String.contains?(line, date) and
+               line =~ ~r/more than double/i
+           end),
+           "no \"more than double\" warning for #{meal} on #{date}:\n#{output(context)}"
+
+    {:ok, context}
+  end
+
+  step "the output does not warn that the meal {string} on {string} serves too few",
+       %{args: [meal, date]} = context do
+    lines = output_lines(context)
+
+    refute Enum.any?(lines, fn line ->
+             String.contains?(line, meal) and String.contains?(line, date) and
+               line =~ ~r/too few/i
+           end),
+           "there is still a \"too few\" warning for #{meal} on #{date}:\n#{output(context)}"
+
+    {:ok, context}
+  end
+
+  step "the output does not warn about any meal's servings", context do
+    text = output(context)
+
+    refute text =~ ~r/too few|more than double/i,
+           "there are serving warnings where there should be none:\n#{text}"
+
+    {:ok, context}
+  end
+
+  step "the output says the family size needs both adults and children", context do
+    text = output(context)
+
+    assert String.contains?(text, "adults") and String.contains?(text, "children"),
+           "the message never names both fields:\n#{text}"
+
+    {:ok, context}
+  end
+
+  step "the output says the family size must be whole numbers", context do
+    text = output(context)
+    assert text =~ ~r/whole non-negative numbers|whole numbers/i, text
     {:ok, context}
   end
 
@@ -889,6 +968,8 @@ defmodule Mealplan.Features.CorpusSteps do
     result = last(context)
     String.trim_trailing(result.stdout <> "\n" <> result.stderr)
   end
+
+  defp output_lines(context), do: output(context) |> String.split("\n")
 
   # Every "- ..." line of the printed list, without its section heading.
   defp item_lines(context) do

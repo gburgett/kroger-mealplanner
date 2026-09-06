@@ -84,6 +84,10 @@ defmodule Mealplan.Mcp.Tools do
                        walmart.md: which Walmart store cart links are built for.
                        No sign-in is needed for Walmart; walmart_find_stores
                        finds the stores and you write the file.
+                       household.md: how many adults and children the household
+                       cooks for, as "adults:" and "children:" in front matter —
+                       mealplan validate compares each meal's servings against
+                       it and warns on too few, or more than double.
       shopping-lists/  one document per range of nights, written by
                        "mealplan shopping-list --out".
 

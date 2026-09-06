@@ -11,12 +11,15 @@ Feature: Onboarding a new household through whichever assistant it picked
   claude.ai is known to ignore (anthropics/claude-ai-mcp#93), and which
   ChatGPT's own documentation never says it forwards either. See ADR 0026.
 
-  The note says two things: save a note in your OWN memory to use this
+  The note says four things: save a note in your OWN memory to use this
   connector whenever this household asks about meals, groceries or a shopping
-  list, and ask for a photo of the fridge and the pantry shelves, describe
-  what is in them, and write that down with `write_file`. Neither needs a new
-  tool — bash and `write_file` already reach both once the assistant has
-  described what it saw.
+  list; ask for a photo of the fridge and the pantry shelves, describe what is
+  in them, and write that down with `write_file`; ask for photos of the
+  favourite recipes in the household's recipe books and record them under
+  `recipes/`; and ask how many adults and children the household cooks for and
+  write that into `config/household.md`. None of it needs a new tool — bash and
+  `write_file` already reach it once the assistant has described or transcribed
+  what it saw.
 
   "Onboarding is done" is read from the folder, never a flag: the household
   has rewritten `preferences/household.md` away from the shipped example, AND
@@ -43,6 +46,17 @@ Feature: Onboarding a new household through whichever assistant it picked
     When I run "ls"
     Then the onboarding note says to ask for a photo of the fridge and the pantry
     And the onboarding note says to write what it sees into "pantry/" and "preferences/household.md"
+
+  Scenario: The note says what to do with recipe-book photos
+    Given the meal-plan folder is brand new
+    When I run "ls"
+    Then the onboarding note says to ask for photos of the recipes in the household's recipe books
+
+  Scenario: The note says to ask how many adults and children they cook for
+    Given the meal-plan folder is brand new
+    When I run "ls"
+    Then the onboarding note says to ask how many adults and how many children they cook for
+    And the onboarding note says to write that family size into "config/household.md" as "adults:" and "children:"
 
   Scenario: The handshake instructions carry the same note, for clients that read them
     Given the meal-plan folder is brand new

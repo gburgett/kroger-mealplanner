@@ -5,14 +5,16 @@ defmodule Mealplan.Corpus.Scaffold do
 
   A bare `ls` must print seven names and nothing else: README.md, config, meals,
   pantry, preferences, recipes, shopping-lists. The empty folders are held open
-  by a `.gitkeep` dotfile. `config/kroger.md`, `config/walmart.md` and
-  `preferences/household.md` carry a document from the first moment — the first
-  two REGENERATED until a shop is chosen, the third WRITTEN ONCE.
+  by a `.gitkeep` dotfile. `config/kroger.md`, `config/walmart.md`,
+  `config/household.md` and `preferences/household.md` carry a document from the
+  first moment — the first two REGENERATED until a shop is chosen, the last two
+  WRITTEN ONCE.
 
   The exact README and preferences example text live in `priv/corpus/` so they
   stay byte-for-byte identical to the TypeScript server's.
   """
 
+  alias Mealplan.Household.Config, as: HouseholdConfig
   alias Mealplan.Kroger.Config, as: KrogerConfig
   alias Mealplan.Sandbox.Session
   alias Mealplan.Walmart.Config, as: WalmartConfig
@@ -62,6 +64,14 @@ defmodule Mealplan.Corpus.Scaffold do
       if missing?(session, @preferences_path) do
         {:ok, _} = Session.write_corpus(session, @preferences_path, preferences_example())
         [@preferences_path | written]
+      else
+        written
+      end
+
+    written =
+      if missing?(session, HouseholdConfig.path()) do
+        {:ok, _} = Session.write_corpus(session, HouseholdConfig.path(), HouseholdConfig.document())
+        [HouseholdConfig.path() | written]
       else
         written
       end
