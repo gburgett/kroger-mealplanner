@@ -369,13 +369,29 @@ defmodule Mealplan.Features.CorpusHooks do
   # because a failing run is exactly when a hundred corpora would otherwise pile
   # up. The `after` covers the one way this hook can still leave one behind:
   # `close_session/1` raises when a session will not give up its name.
+  #
+  # Every live session is closed, not only `context[:tenant]`. A scenario that
+  # provisions a household of its own — the invitations feature drives a real
+  # sign-in, which opens a session keyed by the new `household-<hex>` slug, not
+  # by this scenario's tenant — would otherwise strand that session in the
+  # registry for the rest of the run. `Mealplan.Mcp.Server.server_instructions/0`
+  # scans every live session for the onboarding nudge (ADR 0033), so a stranded
+  # un-onboarded household kept the note showing in unrelated scenarios
+  # (onboarding.feature:92). Closing them all here also holds the "a run leaves
+  # nothing behind" invariant the suite asserts elsewhere.
   after_scenario context do
     try do
-      if context[:tenant], do: close_session(context[:tenant])
+      for slug <- live_session_slugs(), do: close_session(slug)
     after
       if context[:folder], do: File.rm_rf(context[:folder])
     end
 
     :ok
+  end
+
+  defp live_session_slugs do
+    Mealplan.Sandbox.registry()
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.uniq()
   end
 end
