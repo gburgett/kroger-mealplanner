@@ -72,8 +72,27 @@ defmodule Mealplan.Auth.Sms do
   @spec send_code(String.t(), String.t(), keyword()) :: :ok | {:error, Exception.t()}
   def send_code(phone, code, opts \\ []) do
     minutes = Keyword.get(opts, :expires_in_minutes, 5)
-    text = message(code, minutes)
+    deliver(phone, message(code, minutes))
+  end
 
+  @doc """
+  Send a plainly-labelled test message through the configured provider.
+
+  Used by `mix mealplan.sms_check`, so a new SMS credential is proven against
+  the real provider — a live `/v2/messages` or `/Messages.json` call — before a
+  household's sign-in depends on it. Same return contract as `send_code/3`.
+  """
+  @spec send_test(String.t()) :: :ok | {:error, Exception.t()}
+  def send_test(phone), do: deliver(phone, test_message())
+
+  @doc "The body `send_test/1` sends. Public so a scenario can assert on it."
+  @spec test_message() :: String.t()
+  def test_message do
+    "Meal planner SMS check: the #{Config.sms_provider()} configuration works. " <>
+      "This is a test message; no action is needed."
+  end
+
+  defp deliver(phone, text) do
     case Config.sms_provider() do
       "twilio" ->
         twilio(phone, text)
