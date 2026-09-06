@@ -28,10 +28,20 @@ name: test
 # authorisation boundary rather than containment. Narrowing it needs a second
 # tag and a decision about what @security promises — see ADR 0023.)
 
+# DISABLED 2026-09-06: on ubuntu-latest the runner loses communication with the
+# server partway through `mix test` ("The hosted runner lost communication with
+# the server", ~46 min in). The host-mode suite is memory-heavy — the same OOM
+# that hit the VM, see docs/test-suite-oom-findings.md — and a 7 GB / 2-core
+# runner does not fit it. `max_cases: 1` (test/test_helper.exs) made the run
+# serial and slower without helping. Until the suite fits a hosted runner, the
+# scenarios run on the VM before a release, per AGENTS.md. Re-enable by
+# restoring the push / pull_request triggers below:
+#
+#   push:
+#     branches: [main, elixir-migration]
+#   pull_request:
 on:
-  push:
-    branches: [main, elixir-migration]
-  pull_request:
+  workflow_dispatch:
 
 env:
   MIX_ENV: test
