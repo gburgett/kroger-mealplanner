@@ -41,6 +41,7 @@ decision, write a new record. Give the old record the status
 | [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | accepted |
 | [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
 | [0026](0026-onboard-a-new-household-through-tool-results-not-the-handshake.md) | Onboard a new household through tool-call results, not the handshake, and add the public install page Phase 8 left open | proposed |
+| [0027](0027-export-a-shopping-list-as-a-printable-pdf-and-a-reminders-link.md) | Export a shopping list as a printable PDF and an Apple Reminders link | proposed |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
