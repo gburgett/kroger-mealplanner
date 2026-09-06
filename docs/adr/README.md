@@ -47,7 +47,7 @@ decision, write a new record. Give the old record the status
 | [0030](0030-use-the-supertokens-managed-service-not-a-self-hosted-core.md) | Use the SuperTokens managed service, not a self-hosted core | accepted |
 | [0031](0031-return-the-server-state-to-sqlite.md) | Return the server state to SQLite | accepted |
 | [0032](0032-run-the-test-suite-in-microsandbox-mode-by-default.md) | Run the test suite in microsandbox mode by default | accepted |
-| [0033](0033-admit-invited-households-with-their-own-tenant-and-corpus.md) | Admit invited households, each with its own tenant and corpus | proposed |
+| [0033](0033-admit-invited-households-with-their-own-tenant-and-corpus.md) | Admit invited households, each with its own tenant and corpus | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

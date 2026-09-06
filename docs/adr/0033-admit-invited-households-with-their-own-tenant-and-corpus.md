@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-06
 decision-makers: gburgett
 consulted: ADR 0008 (multi-tenancy left open), ADR 0027 (the microVM session layer), ADR 0028 (the SMS one-time code), ADR 0030 (the managed SuperTokens core), docs/multi-tenant-isolation-trade-study.md

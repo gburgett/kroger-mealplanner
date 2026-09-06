@@ -106,9 +106,11 @@ ADR 0009 and worth knowing before touching `MealplanWeb.Router` and
 - **The OAuth endpoints must stay open**, and so must `/login`. An MCP client has
   no browser, so a gate on `/register` or `/token` makes a first credential
   impossible to get; a gate on `/login` is a locked door with the key inside.
-  What protects `/login` is the allowlist, not a gate: a number that is not
-  `MEALPLAN_OWNER_PHONE` is refused before the SuperTokens core is called, so it
-  costs no message and creates no user.
+  What protects `/login` is the allowlist, not a gate: a number with no
+  `invitations` row (ADR 0033) is refused before the SuperTokens core is
+  called, so it costs no message and creates no user. Every household — the
+  current one included — is invited by hand with `mix mealplan.invite <e164>`;
+  there is no configured owner.
 - **The issuer is configuration, never a header.** An issuer read from `Host` is
   host-header injection into the metadata document.
 
@@ -121,15 +123,18 @@ other finding, which needed no measurement: anything that can route to
 is worth exactly as much as a network boundary nobody documented. Nothing in
 `lib/` reads those headers now.
 
-**The lens is one household on one machine.** That is what ADR 0008 settled, and
-it is why the default sandbox is 3.3 ms of bubblewrap rather than a microVM per
-tenant. The session interface (`open` / `run` / `close`) has always stayed in
-the design, thin — and ADR 0027 has now filled it in for a second mechanism:
-`MEALPLAN_SANDBOX=microsandbox` runs each tenant in its own libkrun microVM, for
-more than one household on one machine. Bubblewrap stays the default and the
-command-layer boundary; the microVM is the session layer, chosen by one switch
-at boot. Multi-tenancy above ~15 concurrent tenants, or a stronger failure
-domain than one shared VM, is still open — see
+**The lens was one household on one machine.** That is what ADR 0008 settled,
+and it is why the default sandbox is 3.3 ms of bubblewrap rather than a microVM
+per tenant. ADR 0033 opened the way in for more than one: any telephone the
+operator invites gets its own tenant, its own corpus under
+`MEALPLAN_CORPUS_ROOT`, and — on the deployed server — its own libkrun microVM.
+The session interface (`open` / `run` / `close`) that stayed thin in the design
+since ADR 0008 is what carries that: `MEALPLAN_SANDBOX=microsandbox` runs each
+tenant in its own microVM (ADR 0027), and `deploy/mealplan-elixir.service` sets
+it because bubblewrap between tenants is one UID namespace, not a kernel.
+Bubblewrap stays the default for a single-household dev box and the
+command-layer boundary in every mode. Multi-tenancy above ~15 concurrent
+tenants, or a stronger failure domain than one shared VM, is still open — see
 `docs/multi-tenant-isolation-trade-study.md` §10 for the threshold that moves
 the session layer to Fly Sprites.
 
@@ -154,8 +159,9 @@ format defined in exactly one place.
 The server is a `mix release`: `MIX_ENV=prod mix release` builds it and
 `systemctl --user restart mealplan-elixir` deploys it (ADR 0020). There is a
 build step now, unlike the retired Node server. One BEAM node still holds both
-the server and the sandbox: `run()` spawns a `bwrap` child, so there is no
-separate daemon, no RPC and no KVM.
+the server and the sandbox: `run()` spawns a `bwrap` child (or, on the deployed
+server, drives a libkrun microVM per tenant — ADR 0033), so there is no
+separate daemon and no RPC.
 
 ### How it actually runs, and how to restart it
 
@@ -166,7 +172,10 @@ and comes back after a reboot.
 
 **There is one service.** `mealplan-elixir.service` is the product, and it is
 the only thing to start. The state is one SQLite file (ADR 0024, restored by
-ADR 0031) — no database server — and `MEALPLAN_STATE` names it.
+ADR 0031) — no database server — and `MEALPLAN_STATE` names it. A fresh deploy
+has no households: invite one with
+`bin/mealplan eval 'Mealplan.Invitations.create("+15095550142", label: "…")'`
+(ADR 0033), and they provision their tenant and folder on their first code.
 
 **The SuperTokens core is the managed deployment** (ADR 0030), off this VM, at
 `st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`. The meal
@@ -217,14 +226,17 @@ diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.servi
 ```
 
 It is **concrete, not a template** — every path and address in it is this
-machine's, because the lens is one household on one machine and a template with
-placeholders would describe a story this product does not have. It carries
-`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_OWNER_PHONE`,
-`MEALPLAN_FOLDER`, `MEALPLAN_STATE`, `SUPERTOKENS_CONNECTION_URI` and
-`MEALPLAN_PORT=8000`, which has to match what `ssh exe.dev share port` pinned.
+machine's, and a template with placeholders would describe a story this product
+does not have. It carries `MEALPLAN_PUBLIC_URL`, `MEALPLAN_CORPUS_ROOT`,
+`MEALPLAN_STATE`, `MEALPLAN_SANDBOX=microsandbox` (ADR 0033), `MEALPLAN_FOLDER`
+(a dead pointer to the abandoned single-household corpus, kept only for a
+follow-up migration), `SUPERTOKENS_CONNECTION_URI` and `MEALPLAN_PORT=8000`,
+which has to match what `ssh exe.dev share port` pinned. There is no
+`MEALPLAN_OWNER` or `MEALPLAN_OWNER_PHONE` any more — every household is invited
+with `mix mealplan.invite` (or `bin/mealplan eval` in a release).
 `MEALPLAN_STATE` is the state file's path (ADR 0031); it carries no password,
 so it lives in this file, and `Mealplan.Boot` refuses to start if it points
-inside `MEALPLAN_FOLDER`.
+inside `MEALPLAN_CORPUS_ROOT` or any tenant's folder.
 
 **What it does not carry is anything secret.** `SUPERTOKENS_API_KEY`, the SMS
 credentials and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` all arrive through
@@ -233,16 +245,18 @@ credentials and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` all arrive through
 failures are graded on purpose: a missing Kroger or SMS credential still starts
 the server and is named in the journal.
 
-**The start-up lines in the journal are the health check.** They name the folder,
-the folder, the household, the database, whether the household can sign in at
-all, the sandbox mechanism, and whether Kroger is configured and linked. Read
-them after every restart rather than trusting `active (running)` — the process
-being up says nothing about which folder it opened, and a server nobody can
-sign in to looks exactly as healthy as one they can.
+**The start-up lines in the journal are the health check.** They name the
+corpus root, the database, the count of invited and provisioned households,
+whether a household can sign in at all, the sandbox mechanism, the isolation
+that backend gives between households, and whether Kroger is configured. Read
+them after every restart rather than trusting `active (running)` — a server
+nobody can sign in to looks exactly as healthy as one they can. There is no
+corpus opened at start any more: each tenant's folder opens on that tenant's
+first request (`Mealplan.Corpus.ensure_open/1`).
 
-**The unit leaves `MEALPLAN_SANDBOX` unset, so this machine runs bubblewrap.**
-Setting `MEALPLAN_SANDBOX=microsandbox` switches the session layer to a libkrun
-microVM per tenant (ADR 0027) — for more than one household on one machine. It
+**The unit sets `MEALPLAN_SANDBOX=microsandbox` (ADR 0033)**, because it admits
+more than one household and bubblewrap between tenants is one UID namespace,
+not a kernel. That runs each tenant in its own libkrun microVM (ADR 0027). It
 needs `msb` on `PATH`, read/write on `/dev/kvm` (`msb doctor`), and
 `sandbox-image/oci.tar` built with `./sandbox-image/build.sh --microsandbox`.
 The server runs `msb load` on that tar itself at boot; the health line then
@@ -529,5 +543,9 @@ is a link the household opens on walmart.com, so whether they opened it — and
 what the cart holds — cannot be known either. Messages say what a link WOULD
 add.
 
-**Multi-tenancy**, still. `kroger.json` is not keyed by tenant and the
-`open(tenant)` seam is untouched. See ADR 0008.
+**Multi-tenancy above one machine.** ADR 0033 made the `open(tenant)` seam
+carry real traffic — every invited household has its own tenant, corpus and
+microVM — but it is still one shared VM. A second telephone in one household
+(`mix mealplan.invite --household <slug>`), corpus garbage collection for a
+revoked household, and moving the session layer off this VM past the trade
+study's §10 threshold are all still open. See ADR 0008 and ADR 0033.
