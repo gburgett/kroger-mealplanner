@@ -60,3 +60,24 @@ one vCPU (`-c 1`). A command that eats memory is OOM-killed inside the VM. The
 VM is one process group from the host's view, and `close/1` calls
 `msb remove`, so the host cannot accumulate half-reaped command trees the way
 host mode does.
+
+## Resolution (ADR 0034)
+
+The switch to microsandbox as the default (ADR 0032) treated the missing
+per-command memory ceiling as the cause. It was not. The cause was the last
+sentence of "The mechanism": host mode had **no boundary that reaps a runaway
+tree**. `Mealplan.Sandbox.Runner` killed a command's process group only on the
+wall-clock timeout path. A command that returned — success or failure — left
+its backgrounded and orphaned children running, and a serial suite ran
+thousands of commands in one BEAM's life.
+
+ADR 0034 fixes that. In host mode the command runs as its own process-group
+leader — the BEAM starts every port in its own session, and `run.sh`'s `exec`
+keeps that pid — so `Mealplan.Sandbox.Runner.reap_group/1` sends `kill -KILL` to
+`-<pid>` when the command returns, for any reason. That one signal is the
+kernel collecting the whole tree, the way a pid namespace does for the other
+two backends. A `SIGSTOP`-then-`SIGKILL` loop of two or three rounds is there
+only for a command still forking when it returns. Nothing accumulates across a
+run, so the mechanism this document describes cannot happen. Host mode is the
+fast default for a test run again; microsandbox stays the backend for the
+`@microsandbox` scenarios.

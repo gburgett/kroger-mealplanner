@@ -18,6 +18,11 @@ defmodule Mealplan.Browser do
   of these scenarios, and following one would hide it.
   """
 
+  import Ecto.Query
+
+  @doc "The canonical test household's telephone (ADR 0033). The corpus hook invites and redeems it."
+  def household_phone, do: "+15095550142"
+
   @doc """
   A signed-in household, as a `cookie` header.
 
@@ -28,14 +33,14 @@ defmodule Mealplan.Browser do
   the server set. No scenario forges a session, so none of them can pass
   against a server that would refuse a real one.
 
-  `email` is accepted and ignored for the number: one household has one
-  telephone, and `MEALPLAN_OWNER_PHONE` names it. It is still the argument,
-  because every existing caller passes an email and because the email is what
-  the consent page shows.
+  The argument is the telephone to sign in. It is optional: a bare
+  `signed_in/0` signs in the canonical test household (`household_phone/0`),
+  which is what most scenarios want, and an email passed by an older caller is
+  treated as "the household" and mapped to that number. A real E.164 argument
+  signs in that number — the multi-household invitations scenarios pass one.
   """
-  def signed_in(email \\ nil, _user_id \\ nil) do
-    _ = email
-    phone = Mealplan.Config.owner_phone() || "+15095550142"
+  def signed_in(who \\ nil, _user_id \\ nil) do
+    phone = if is_binary(who) and String.match?(who, ~r/^\+?\d[\d ()-]+$/), do: who, else: household_phone()
 
     sent = post("/login", %{"phone" => phone, "return_to" => "/"})
 
@@ -71,39 +76,28 @@ defmodule Mealplan.Browser do
   def anonymous, do: []
 
   @doc """
-  A session for somebody who is not the household.
+  A session for a telephone that owns no tenant (ADR 0033).
 
-  Signs in the normal way, then turns the row behind that session into a
-  stranger: the owner membership is removed and the identifiers the real owner
-  keeps — telephone, SuperTokens id — are cleared, then the email is changed.
-  The live cookie still points here, so the gate now sees a session this server
-  issued for a user who owns nothing, which is the branch under test.
+  Invites `phone`, signs it in for real (which redeems the invitation and makes
+  a tenant), then removes every owner membership it holds. The live cookie
+  still points at a real user row, so the gate sees a session this server
+  issued for a telephone that now owns nothing — the branch under test: a
+  revoked invitation, or a redemption that did not finish.
 
-  Renaming alone is not enough since `Mealplan.Accounts.owner?/2` resolves the
-  owner by membership, not by a configured string: the row would keep its owner
-  membership and still pass the gate.
-
-  The login flow cannot produce this session on its own, because one telephone
-  belongs to one household.
+  The login flow cannot land here on its own, so the membership is torn down by
+  hand afterwards.
   """
-  def signed_in_as_stranger(email) do
-    headers = signed_in()
-    owner = Mealplan.Config.owner() |> String.trim() |> String.downcase()
+  def session_without_tenant(phone \\ "+15125550166") do
+    _ =
+      case Mealplan.Invitations.get_by_phone(phone) do
+        nil -> Mealplan.Invitations.create(phone)
+        inv -> {:ok, inv}
+      end
 
-    user = Mealplan.Repo.get_by!(Mealplan.Accounts.User, email: owner)
+    headers = signed_in(phone)
 
-    user
-    |> Mealplan.Repo.preload(:memberships)
-    |> Map.fetch!(:memberships)
-    |> Enum.each(&Mealplan.Repo.delete!/1)
-
-    user
-    |> Ecto.Changeset.change(%{
-      email: email |> String.trim() |> String.downcase(),
-      phone: nil,
-      supertokens_user_id: nil
-    })
-    |> Mealplan.Repo.update!()
+    normalised = Mealplan.Accounts.normalise_phone(phone)
+    Mealplan.Repo.delete_all(from m in Mealplan.Accounts.Membership, where: m.user_phone == ^normalised)
 
     headers
   end

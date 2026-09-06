@@ -19,7 +19,6 @@ defmodule Mealplan.Mcp.Tools do
   wires them into `tools/list` and `tools/call`.
   """
 
-  alias Mealplan.Sandbox
   alias Mealplan.Sandbox.Session
   alias Mealplan.Shopping.Tools, as: Shopping
 
@@ -1058,16 +1057,7 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  defp session!(tenant) do
-    case Sandbox.whereis(tenant) do
-      pid when is_pid(pid) ->
-        pid
-
-      nil ->
-        {:ok, pid} = Sandbox.open(tenant, Mealplan.Config.folder())
-        pid
-    end
-  end
+  defp session!(tenant), do: Mealplan.Corpus.ensure_open(tenant)
 
   # stdout and stderr, rendered for a reader rather than for a parser.
   @doc false

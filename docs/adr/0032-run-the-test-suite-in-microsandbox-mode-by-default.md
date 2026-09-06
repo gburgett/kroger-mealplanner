@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0034
 date: 2026-09-06
 decision-makers: gburgett
 consulted: ADR 0022, ADR 0027, docs/test-suite-oom-findings.md
@@ -7,6 +7,14 @@ informed: all contributors
 ---
 
 # Run the test suite in microsandbox mode by default
+
+> **Superseded by [ADR 0034](0034-reap-each-host-mode-command-process-group.md).**
+> This record read the host-mode OOM as an argument for a per-command
+> containment ceiling and switched the test default to microsandbox to get one.
+> ADR 0034 found the real mechanism — a command's process tree was never reaped
+> when the command returned, only on timeout — fixed that, and took the default
+> back. Host mode is fast and safe again; microsandbox stays the backend for the
+> `@microsandbox` scenarios (ADR 0027).
 
 ## Context and Problem Statement
 

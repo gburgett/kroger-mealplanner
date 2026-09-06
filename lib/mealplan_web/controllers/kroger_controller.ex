@@ -21,12 +21,12 @@ defmodule MealplanWeb.KrogerController do
 
   # GET /kroger — link, relink, or change store.
   def index(conn, _params) do
-    case kroger() do
+    case kroger(conn) do
       nil ->
         html_resp(conn, 200, KrogerPages.status_page(%{configured: false, connected: false, store: nil}))
 
       _api ->
-        {:ok, session} = session()
+        {:ok, session} = session(conn)
         config = Kroger.Config.read(session)
 
         store =
@@ -42,7 +42,7 @@ defmodule MealplanWeb.KrogerController do
           200,
           KrogerPages.status_page(%{
             configured: true,
-            connected: Kroger.Store.connected?(tenant_id()),
+            connected: Kroger.Store.connected?(tenant_id(conn)),
             store: store
           })
         )
@@ -51,7 +51,7 @@ defmodule MealplanWeb.KrogerController do
 
   # POST /kroger/connect — start a link with no client waiting, go to Kroger.
   def connect(conn, _params) do
-    case kroger() do
+    case kroger(conn) do
       nil ->
         text_resp(conn, 409, not_configured_text())
 
@@ -66,7 +66,7 @@ defmodule MealplanWeb.KrogerController do
 
   # GET /kroger/callback — Kroger redirects here. Exchange the code, save it.
   def callback(conn, params) do
-    case kroger() do
+    case kroger(conn) do
       nil ->
         text_resp(conn, 409, not_configured_text())
 
@@ -106,7 +106,7 @@ defmodule MealplanWeb.KrogerController do
 
       true ->
         tokens = Kroger.Api.token_from_code(api, code)
-        Kroger.Store.save(tenant_id(), tokens)
+        Kroger.Store.save(tenant_id(conn), tokens)
 
         conn
         |> put_resp_header("cache-control", "no-store")
@@ -116,7 +116,7 @@ defmodule MealplanWeb.KrogerController do
 
   # GET /kroger/store — a zip code, then the stores near it.
   def store(conn, params) do
-    case kroger() do
+    case kroger(conn) do
       nil ->
         text_resp(conn, 409, not_configured_text())
 
@@ -158,7 +158,7 @@ defmodule MealplanWeb.KrogerController do
 
   # POST /kroger/store — write config/kroger.md, then mint the code if a client waits.
   def store_submit(conn, params) do
-    case kroger() do
+    case kroger(conn) do
       nil ->
         text_resp(conn, 409, not_configured_text())
 
@@ -197,7 +197,7 @@ defmodule MealplanWeb.KrogerController do
   end
 
   defp finish_store(conn, link, chosen, modality) do
-    {:ok, session} = session()
+    {:ok, session} = session(conn)
 
     Kroger.Config.write(
       session,
@@ -226,8 +226,8 @@ defmodule MealplanWeb.KrogerController do
         case Provider.issue_code(
                consent.client,
                consent.params,
-               consent.identity.email,
-               Mealplan.Config.tenant()
+               consent.identity.phone,
+               conn.assigns.tenant
              ) do
           {:ok, code} ->
             conn
@@ -244,8 +244,8 @@ defmodule MealplanWeb.KrogerController do
 
   # POST /kroger/disconnect — forget the credential, reset the folder's half.
   def disconnect(conn, _params) do
-    if kroger(), do: Kroger.Store.clear(tenant_id())
-    {:ok, session} = session()
+    if kroger(conn), do: Kroger.Store.clear(tenant_id(conn))
+    {:ok, session} = session(conn)
     Kroger.Config.write(session, now(), nil, base_url())
 
     conn
@@ -267,16 +267,16 @@ defmodule MealplanWeb.KrogerController do
     |> Enum.find(&(&1.location_id == location_id))
   end
 
-  defp kroger, do: Kroger.Api.for_household()
+  defp kroger(conn), do: Kroger.Api.for_tenant(conn.assigns.tenant)
 
-  defp session, do: Mealplan.Sandbox.open(Mealplan.Config.tenant(), Mealplan.Config.folder())
+  defp session(conn), do: {:ok, Mealplan.Corpus.ensure_open(conn.assigns.tenant)}
 
   defp now, do: Mealplan.Clock.now()
 
   defp base_url, do: Mealplan.Config.public_url()
 
-  defp tenant_id do
-    case Mealplan.Accounts.get_tenant_by_slug(Mealplan.Config.tenant()) do
+  defp tenant_id(conn) do
+    case Mealplan.Accounts.get_tenant_by_slug(conn.assigns.tenant) do
       %{id: id} -> id
       _ -> nil
     end

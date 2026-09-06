@@ -97,7 +97,7 @@ defmodule Mealplan.Features.SandboxSteps do
   # --- the session a restart forgets ------------------------------------------
 
   step "I remember the current MCP session", context do
-    client = McpClient.connect(Mealplan.Config.owner())
+    client = McpClient.connect(Mealplan.Browser.household_phone())
     {client, _result} = McpClient.run(client, "true")
     assert client.session_id, "the client never received a session id"
     {:ok, Map.put(context, :remembered_mcp_session, client)}
@@ -272,6 +272,29 @@ defmodule Mealplan.Features.SandboxSteps do
 
   step "the error output explains that the command timed out", context do
     assert last(context).stderr =~ ~r/timed out/i, "the error never says it timed out:\n#{last(context).stderr}"
+    {:ok, context}
+  end
+
+  step "no process the command started is still running", context do
+    # The scenario backgrounds `sleep 424242`. Under bubblewrap or the microVM
+    # it lives and dies inside the namespace and a host `ps` never sees it;
+    # under host mode it runs on this host, so if the process-group reap
+    # (ADR 0034) missed it, `pgrep` here finds it. Give the SIGKILL a moment.
+    survivors =
+      Enum.reduce_while(1..40, "none", fn _, _ ->
+        # Anchored, so it matches the bare `sleep 424242` and never a shell
+        # whose command line merely quotes it.
+        {out, _} = System.cmd("pgrep", ["-f", "^sleep 424242$"], stderr_to_stdout: true)
+
+        case String.trim(out) do
+          "" -> {:halt, "none"}
+          pids -> Process.sleep(25) && {:cont, pids}
+        end
+      end)
+
+    assert survivors == "none",
+           "`sleep 424242` is still running as pid(s) #{survivors} after the command returned"
+
     {:ok, context}
   end
 

@@ -31,8 +31,7 @@ Feature: The household signs in with a code sent to their telephone
   no user.
 
   Background:
-    Given the meal plan belongs to "gordon@gordonburgett.net"
-    And the household's telephone is "+15095550142"
+    Given the household "+15095550142" has been invited
     And the SuperTokens core is running
     And SMS messages are delivered to a test inbox
 

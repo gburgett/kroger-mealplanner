@@ -13,8 +13,11 @@
 #     diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.service
 #
 # CONCRETE, NOT A TEMPLATE. Every path and address below is this machine's, the
-# same reasoning as deploy/mealplan.service: one household, one machine
-# (ADR 0008).
+# same reasoning as deploy/mealplan.service.
+#
+# ADR 0033: this server now admits more than one invited household, each with
+# its own tenant and its own folder under MEALPLAN_CORPUS_ROOT, each in its own
+# libkrun microVM (MEALPLAN_SANDBOX=microsandbox). There is no configured owner.
 #
 # THE CUTOVER HAPPENED: this is the server now, on port 8000, against the
 # real /home/exedev/meal-plan. It ran alongside the Node service for the rest
@@ -56,15 +59,17 @@ Environment=MEALPLAN_PORT=8000
 # The OAuth issuer. Configuration, never the Host header (ADR 0009). This is
 # now the address exe.dev points the public hostname at.
 Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
-Environment=MEALPLAN_OWNER=gordon@gordonburgett.net
-# The real meal-plan folder — the one the Node server used to hold.
+# ADR 0033: there is no configured owner and no bootstrap household. Every
+# household is invited by hand — `bin/mealplan eval
+# 'Mealplan.Invitations.create("+15095550142", label: "...")'` — and the first
+# code that number spends provisions its own tenant and a fresh folder under
+# MEALPLAN_CORPUS_ROOT. MEALPLAN_OWNER and MEALPLAN_OWNER_PHONE are gone.
+Environment=MEALPLAN_CORPUS_ROOT=/home/exedev/meal-plans
+# The old single-household folder (ADR 0033). Kept named ONLY as a pointer for
+# a follow-up record that moves its recipes and meals into the re-onboarded
+# tenant. Nothing reads it at runtime; the current household re-onboards from
+# empty as an ordinary invitee.
 Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan
-# The household's telephone, in E.164 (ADR 0027). The one number that may
-# receive a sign-in code; every other number is refused before the core is
-# called, so a stranger at /login costs no message. Not a secret — it is one
-# fact about one household, and the journal redacts all but the last four
-# digits anyway — so it stays in this file beside MEALPLAN_OWNER.
-Environment=MEALPLAN_OWNER_PHONE=+15095550142
 # The SuperTokens core — the managed deployment (ADR 0029), over HTTPS. Its
 # API key travels in .env.elixir, not here: it is the whole of the lock on the
 # user store, and this file is world-readable and in git.
@@ -75,19 +80,21 @@ Environment=MEALPLAN_SMS_PROVIDER=twilio
 
 # The server state, one SQLite file (ADR 0024, restored by ADR 0030). It has a
 # password-free path, so unlike DATABASE_URL it lives here rather than in .env.
-# It MUST be outside MEALPLAN_FOLDER — the sandbox mounts that folder and the
-# file holds the household's Kroger token in the clear — and `Mealplan.Boot`
-# refuses to start if it is not. ~/.local/state/mealplan/mealplan.db is the
-# default; this names it so a reader of the unit knows where the state is.
+# It MUST be outside MEALPLAN_CORPUS_ROOT and outside every tenant's folder —
+# a sandbox mounts those and the file holds a household's Kroger token in the
+# clear — and `Mealplan.Boot` refuses to start if it is not.
+# ~/.local/state/mealplan/mealplan.db is the default; this names it so a reader
+# of the unit knows where the state is.
 Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
 Environment=PATH=/usr/bin:/bin
-# MEALPLAN_SANDBOX is deliberately unset: this is one household on one machine,
-# so the confinement is bubblewrap (ADR 0008). Set it to "microsandbox" for a
-# libkrun microVM per tenant (ADR 0027) — that also needs `msb` on PATH,
-# /dev/kvm read/write, and sandbox-image/oci.tar built. See
-# docs/deploying-behind-exe-dev.md.
+# ADR 0033: the deployed server admits more than one household, so each one
+# runs in its own libkrun microVM (ADR 0027). bubblewrap between tenants is one
+# UID namespace, not a kernel. This needs `msb` on PATH, /dev/kvm read/write
+# (`msb doctor`), and sandbox-image/oci.tar built with
+# `./sandbox-image/build.sh --microsandbox`. See docs/deploying-behind-exe-dev.md.
+Environment=MEALPLAN_SANDBOX=microsandbox
 # The BEAM must run UTF-8 or Elixir mangles non-ASCII output. rel/env.sh.eex
 # also sets these; belt and braces.
 Environment=LANG=C.UTF-8

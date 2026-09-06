@@ -138,11 +138,11 @@ Feature: Connecting a Kroger account
     And the refusal names this server's own address
 
   @security
-  Scenario: Only the household can start the link
-    Given "someone.else@example.com" holds a session this server issued
+  Scenario: Only a household that owns a meal plan can start the link
+    Given "+15125550166" holds a session this server issued but owns no tenant
     When I open "/kroger" in a browser
     Then the request is refused as forbidden
-    And the refusal names "gordon@gordonburgett.net"
+    And the refusal does not name another household
 
   @security
   Scenario: A browser with no session is sent to the login

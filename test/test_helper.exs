@@ -34,12 +34,15 @@ end)
 #     downgrade (ADR 0027).
 #   * bubblewrap — the @microsandbox scenarios and the microsandbox unit tests
 #     need real libkrun, so they are excluded.
+# `@future` scenarios document intent that is not built yet (features/README.md).
+# They never run in any mode.
 excludes =
-  cond do
-    not Mealplan.Sandbox.confined?() -> [:security, :microsandbox]
-    Mealplan.Sandbox.mode() == :microsandbox -> [:bubblewrap, :"fork-limit"]
-    true -> [:microsandbox]
-  end
+  [:future] ++
+    cond do
+      not Mealplan.Sandbox.confined?() -> [:security, :microsandbox]
+      Mealplan.Sandbox.mode() == :microsandbox -> [:bubblewrap, :"fork-limit"]
+      true -> [:microsandbox]
+    end
 
 ExUnit.configure(exclude: excludes)
 

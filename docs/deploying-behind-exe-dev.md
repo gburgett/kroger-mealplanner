@@ -44,9 +44,10 @@ header only means something on a request that came through the proxy and this
 VM's port is reachable without one.
 
 `/login` is open, and it is not a hole: `Mealplan.Auth.Otp.start/1` refuses
-every number that is not `MEALPLAN_OWNER_PHONE`, **before** it calls the core.
+every number with no `invitations` row (ADR 0033), **before** it calls the core.
 A stranger who finds the page costs no message, creates no user and cannot tell
-from the answer whether the number they typed was the right one.
+from the answer whether the number they typed was invited. Every household is
+invited by hand with `mix mealplan.invite <e164>`; there is no configured owner.
 
 `/kroger/callback` is in the guarded group on purpose, even though Kroger is the
 one that redirects to it. Kroger redirects a top-level browser navigation, so the
@@ -132,10 +133,11 @@ No database server (ADR 0030). The state is one SQLite file, named by
 same path. `Mealplan.Boot` creates the directory on first start and runs the
 migration itself.
 
-**The file must be outside `MEALPLAN_FOLDER`.** The sandbox mounts that folder,
-an agent reads every byte of it, and the file holds the household's Kroger
-refresh token in the clear. `Mealplan.Boot` refuses to start when the path is
-inside the folder, and names both paths when it refuses.
+**The file must be outside `MEALPLAN_CORPUS_ROOT` and every tenant's folder**
+(ADR 0033). A sandbox mounts a household's folder, an agent reads every byte of
+it, and the file holds that household's Kroger refresh token in the clear.
+`Mealplan.Boot` refuses to start when the path is inside the corpus root or any
+provisioned tenant's folder, and names both paths when it refuses.
 
 The backup is a file copy:
 
@@ -222,10 +224,10 @@ diff deploy/mealplan.service ~/.config/systemd/user/mealplan.service
 ```
 
 The unit is concrete rather than a template: every path and address in it is
-this machine's. That follows the product's own lens — one household on one
-machine (ADR 0008). On another machine, change `WorkingDirectory`, `ExecStart`,
-`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE` and
-`EnvironmentFile`.
+this machine's. On another machine, change `WorkingDirectory`, `ExecStart`,
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_CORPUS_ROOT`, `MEALPLAN_STATE` and
+`EnvironmentFile`. There is no `MEALPLAN_OWNER` — households are invited with
+`mix mealplan.invite` (ADR 0033).
 
 There is no build step, so `git pull` plus that restart is the whole deployment
 of a server change. A change under `cli/` needs `./cli/build.sh` instead, and
@@ -238,9 +240,10 @@ reboot. Without it the service stops when the last session ends. It is already
 enabled here; `loginctl show-user "$USER" --property=Linger` says so.
 
 **Read the start-up lines in the journal after every restart.** They name the
-folder, the household, the token store and whether Kroger is configured and
-linked. `active (running)` says a process exists; it does not say which folder
-that process opened.
+corpus root, the state database, the count of invited and provisioned
+households, whether a household can sign in at all, the sandbox mechanism and
+the isolation it gives, and whether Kroger is configured. `active (running)`
+says a process exists; it does not say whether anyone can sign in.
 
 `Restart=on-failure`, and the server exits 0 on `SIGTERM`, so a deliberate
 `systemctl --user stop` stays stopped.
@@ -253,11 +256,13 @@ or this collides with it on the port.
 ```bash
 MEALPLAN_HOST=0.0.0.0 \
 MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz \
-MEALPLAN_OWNER=gordon@gordonburgett.net \
+MEALPLAN_CORPUS_ROOT=~/meal-plans \
 KROGER_CLIENT_ID=... \
 KROGER_CLIENT_SECRET=... \
-node server.ts
+mix phx.server
 ```
+
+Then invite a household: `mix mealplan.invite +15095550142` (ADR 0033).
 
 `MEALPLAN_HOST` must be `0.0.0.0`. The proxy reaches the VM over `eth0`, not
 loopback, so a server bound to `127.0.0.1` is unreachable through it.
@@ -281,10 +286,10 @@ code to the attacker's token endpoint.
 | `MEALPLAN_HOST` | `127.0.0.1` | bind address. `0.0.0.0` to be reachable through the proxy |
 | `MEALPLAN_PORT` | `8765` | must match `share port`, and be within 3000–9999. The unit sets 8000 |
 | `MEALPLAN_PUBLIC_URL` | — | the OAuth issuer. Required off loopback |
-| `MEALPLAN_OWNER` | `gordon@gordonburgett.net` | the only email that may approve a client |
-| `MEALPLAN_FOLDER` | `~/meal-plan` | the folder the sandbox mounts |
-| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, the Kroger credential. Refused if inside the meal-plan folder |
-| `MEALPLAN_SANDBOX` | `bubblewrap` | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
+| `MEALPLAN_CORPUS_ROOT` | `~/meal-plans` | the directory every invited household's folder sits under, at `<root>/<slug>` (ADR 0033) |
+| `MEALPLAN_FOLDER` | — | dead pointer to the abandoned single-household corpus; nothing reads it (ADR 0033) |
+| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, invitations, the Kroger credential. Refused if inside the corpus root or any tenant folder |
+| `MEALPLAN_SANDBOX` | `bubblewrap` (dev) / `microsandbox` (the deploy unit, ADR 0033) | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
 | `MEALPLAN_MICROSANDBOX_IMAGE` | `sandbox-image/oci.tar` | the `.tar` the microsandbox backend `msb load`s, or a bare `msb` image reference. Only read under `MEALPLAN_SANDBOX=microsandbox` |
 | `MEALPLAN_MAX_LIVE_SESSIONS` | `16` (microsandbox); unbounded otherwise | how many live tenant microVMs before `open/3` evicts the least-recently-used one |
 | `KROGER_CLIENT_ID` | — | the Kroger developer client id. Without it there is no cart |
@@ -304,18 +309,20 @@ and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024, restored by
 ADR 0030). That one file holds what `auth.json` and `kroger.json` held between
 them, so
 `MEALPLAN_KROGER_STATE` is gone with no replacement. The rule is unchanged and
-now enforced at start-up: the file must be outside `MEALPLAN_FOLDER`, and the
-server refuses to start rather than serve with the household's Kroger
-credential inside the folder the sandbox mounts. There is no `DATABASE_URL`,
-no user and no password — the file's own permissions are the access control.
+now enforced at start-up: the file must be outside `MEALPLAN_CORPUS_ROOT` and
+every provisioned tenant's folder, and the server refuses to start rather than
+serve with a household's Kroger credential inside a folder a sandbox mounts.
+There is no `DATABASE_URL`, no user and no password — the file's own
+permissions are the access control.
 
-## Running each tenant in a microVM (opt-in)
+## Running each tenant in a microVM
 
-The unit leaves `MEALPLAN_SANDBOX` unset, so this machine runs bubblewrap:
-isolation enough for one household, whose threat is prompt injection in recipe
-text. For **more than one household on one machine**, set
-`MEALPLAN_SANDBOX=microsandbox`. Each tenant then gets its own libkrun microVM —
-a real tenant boundary, per ADR 0027. It needs three things:
+The deploy unit sets `MEALPLAN_SANDBOX=microsandbox` (ADR 0033), because it
+admits more than one invited household and bubblewrap between tenants is one UID
+namespace, not a kernel. Each tenant then gets its own libkrun microVM — a real
+tenant boundary, per ADR 0027. A single-household dev box can leave
+`MEALPLAN_SANDBOX` unset and run bubblewrap, whose threat is prompt injection in
+recipe text. The microVM path needs three things:
 
 * `msb` (microsandbox 0.6.x) on `PATH`;
 * read/write on `/dev/kvm` — check with `msb doctor` (`KVM access read/write`),

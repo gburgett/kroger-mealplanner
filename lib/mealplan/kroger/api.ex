@@ -85,9 +85,9 @@ defmodule Mealplan.Kroger.Api do
     end
   end
 
-  @doc "The client for the single household tenant, or nil when unconfigured."
-  def for_household do
-    case Mealplan.Accounts.get_tenant_by_slug(Mealplan.Config.tenant()) do
+  @doc "The client for `tenant_slug`'s tenant, or nil when unconfigured (ADR 0033)."
+  def for_tenant(tenant_slug) do
+    case Mealplan.Accounts.get_tenant_by_slug(tenant_slug) do
       %{id: id} -> new(id)
       _ -> new(nil)
     end

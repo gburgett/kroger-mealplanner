@@ -482,7 +482,7 @@ defmodule Mealplan.Features.KrogerSteps do
   end
 
   step "I have connected my Kroger account through the consent page", context do
-    owner = Mealplan.Config.owner()
+    owner = Mealplan.Browser.household_phone()
 
     # A real sign-in, once, and the cookie is kept — the same thing the
     # "{string} is signed in" step does. Since ADR 0027 the gate is a session,

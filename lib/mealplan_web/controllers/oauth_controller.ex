@@ -90,8 +90,8 @@ defmodule MealplanWeb.OAuthController do
             consent_id: consent_id,
             client: client,
             params: auth_params,
-            email: identity.email,
-            folder: Mealplan.Config.folder(),
+            phone: identity.phone,
+            folder: Mealplan.Tenancy.corpus_path(conn.assigns.tenant),
             offer_kroger: Mealplan.Config.kroger_client_id() != "",
             kroger_connected: false
           )
@@ -128,16 +128,16 @@ defmodule MealplanWeb.OAuthController do
   end
 
   defp complete_consent(conn, identity, pending, params) do
-    kroger = Kroger.Api.for_household()
+    kroger = Kroger.Api.for_tenant(conn.assigns.tenant)
 
     cond do
-      not Mealplan.Accounts.same_email?(identity.email, pending.identity.email) ->
+      not Mealplan.Accounts.same_phone?(identity.phone, pending.identity.phone) ->
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(
           403,
-          "this page was opened by #{pending.identity.email}, and the click came from " <>
-            "#{identity.email}. Start again.\n"
+          "this page was opened by #{pending.identity.phone}, and the click came from " <>
+            "#{identity.phone}. Start again.\n"
         )
 
       params["decision"] != "approve" ->
@@ -166,8 +166,8 @@ defmodule MealplanWeb.OAuthController do
         case Provider.issue_code(
                pending.client,
                pending.params,
-               identity.email,
-               Mealplan.Config.tenant()
+               identity.phone,
+               conn.assigns.tenant
              ) do
           {:ok, code} ->
             conn

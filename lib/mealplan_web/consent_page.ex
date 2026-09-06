@@ -13,7 +13,7 @@ defmodule MealplanWeb.ConsentPage do
   """
 
   @doc """
-  `opts` keys: `:consent_id`, `:client` (map), `:params` (map), `:email`,
+  `opts` keys: `:consent_id`, `:client` (map), `:params` (map), `:phone`,
   `:folder`, `:offer_kroger` (bool), `:kroger_connected` (bool).
   """
   def render(opts) do
@@ -77,7 +77,7 @@ defmodule MealplanWeb.ConsentPage do
     is committed, so it can be undone — but only if you notice.</p>
 
     <dl>
-      <dt>Signed in as</dt><dd>#{e(opts[:email])}</dd>
+      <dt>Signed in as</dt><dd>#{e(opts[:phone])}</dd>
       <dt>Folder</dt><dd><code>#{e(opts[:folder])}</code></dd>
       <dt>Client id</dt><dd><code>#{e(client["client_id"])}</code></dd>
     #{website}  <dt>Sends you back to</dt><dd><code>#{e(params["redirect_uri"])}</code></dd>
@@ -96,21 +96,25 @@ defmodule MealplanWeb.ConsentPage do
     """
   end
 
-  @doc "A page for a person who is signed in to exe.dev, but is not the household."
-  def not_the_household(saw, owner) do
+  @doc """
+  A page for a telephone that holds a session this server issued but owns no
+  tenant (ADR 0033) — a revoked invitation, or a redemption that did not finish.
+
+  It names no other household: there is nothing here that is anyone else's.
+  """
+  def owns_no_tenant(phone) do
     """
     <!doctype html>
     <html lang="en">
-    <head><meta charset="utf-8"><title>Not your meal plan</title>
+    <head><meta charset="utf-8"><title>No meal plan for this number</title>
     <style>body { font: 16px/1.6 system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem; }</style>
     </head>
     <body>
-    <h1>This meal plan is not yours</h1>
-    <p>exe.dev says you are signed in as <strong>#{e(saw)}</strong>.
-    This meal plan belongs to <strong>#{e(owner)}</strong>, and only that
-    account can let a program into it.</p>
-    <p>If you have more than one exe.dev account, sign out and sign in as the owner:
-    <form method="post" action="/__exe.dev/logout"><button type="submit">Sign out of exe.dev</button></form>
+    <h1>There is no meal plan for this number</h1>
+    <p>You are signed in as <strong>#{e(phone)}</strong>, but this number does
+    not own a meal plan. An invitation may have been withdrawn.</p>
+    <p>Ask whoever runs the meal planner to invite this number, then sign in again:
+    <form method="post" action="/logout"><button type="submit">Sign out</button></form>
     </p>
     </body>
     </html>

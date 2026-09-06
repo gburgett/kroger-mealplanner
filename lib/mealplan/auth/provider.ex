@@ -156,13 +156,13 @@ defmodule Mealplan.Auth.Provider do
   # --- issuing a code, from the Approve click -----------------------
 
   @doc """
-  Turn an approved consent into a code. Refuses unless `email` is an owner of
-  `tenant_slug`.
+  Turn an approved consent into a code. Refuses unless `phone` is an owner of
+  `tenant_slug` (ADR 0033 — identity is the telephone).
   """
   @spec issue_code(map(), map(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def issue_code(client, params, email, tenant_slug) do
-    if Accounts.owner?(tenant_slug, email) do
+  def issue_code(client, params, phone, tenant_slug) do
+    if Accounts.owner?(tenant_slug, phone) do
       code = Store.new_secret()
 
       :ok =
@@ -172,14 +172,14 @@ defmodule Mealplan.Auth.Provider do
           code_challenge: params["code_challenge"],
           scopes: params["scopes"] || [],
           resource: params["resource"],
-          subject: email,
+          subject: phone,
           expires_at: Store.now_seconds() + @code_ttl_seconds,
           tenant_id: tenant_id(tenant_slug)
         })
 
       {:ok, code}
     else
-      {:error, "#{email} is not the household"}
+      {:error, "#{phone} does not own this meal plan"}
     end
   end
 
@@ -274,12 +274,17 @@ defmodule Mealplan.Auth.Provider do
   @doc """
   Verify an access token. Returns `{:ok, auth_info}` or `{:error, message}`.
   `auth_info` carries `:client_id`, `:scopes`, `:expires_at`, `:subject`,
-  `:resource`, `:tenant_id`.
+  `:resource`, `:tenant_id` and `:tenant` (the slug).
+
+  The token is trusted for the tenant it was ISSUED for — `stored.tenant_id`,
+  set when the code was minted — and then the telephone `subject` is re-checked
+  against the store for still owning that tenant (ADR 0033). A membership
+  removed by `mix mealplan.invite --revoke` fails here on the next call, so
+  revoking an invitation logs that household's clients out within one request.
   """
   @spec verify_access_token(String.t()) :: {:ok, map()} | {:error, String.t()}
   def verify_access_token(token) do
     stored = Store.get_access_token(token)
-    tenant_slug = Mealplan.Config.tenant()
 
     cond do
       is_nil(stored) ->
@@ -288,7 +293,7 @@ defmodule Mealplan.Auth.Provider do
       not is_nil(stored.expires_at) and stored.expires_at <= Store.now_seconds() ->
         {:error, "the access token has expired"}
 
-      not Accounts.owner?(tenant_slug, stored.subject) ->
+      not Accounts.owner_of_tenant_id?(stored.tenant_id, stored.subject) ->
         {:error, "this token was issued to #{stored.subject}, who no longer owns this meal plan"}
 
       true ->
@@ -300,7 +305,8 @@ defmodule Mealplan.Auth.Provider do
            expires_at: stored.expires_at,
            resource: stored.resource,
            subject: stored.subject,
-           tenant_id: stored.tenant_id
+           tenant_id: stored.tenant_id,
+           tenant: tenant_slug(stored.tenant_id)
          }}
     end
   end
@@ -393,6 +399,15 @@ defmodule Mealplan.Auth.Provider do
   defp tenant_id(tenant_slug) do
     case Accounts.get_tenant_by_slug(tenant_slug) do
       %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp tenant_slug(nil), do: nil
+
+  defp tenant_slug(tenant_id) do
+    case Mealplan.Repo.get(Mealplan.Accounts.Tenant, tenant_id) do
+      %{slug: slug} -> slug
       _ -> nil
     end
   end

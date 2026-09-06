@@ -6,14 +6,19 @@ defmodule Mealplan.Accounts.Membership do
   schema "memberships" do
     field :role, :string, default: "owner"
     belongs_to :tenant, Mealplan.Accounts.Tenant
-    belongs_to :user, Mealplan.Accounts.User
+
+    belongs_to :user, Mealplan.Accounts.User,
+      foreign_key: :user_phone,
+      references: :phone,
+      type: :string
+
     timestamps(type: :utc_datetime)
   end
 
   def changeset(membership, attrs) do
     membership
-    |> cast(attrs, [:tenant_id, :user_id, :role])
-    |> validate_required([:tenant_id, :user_id, :role])
-    |> unique_constraint([:tenant_id, :user_id])
+    |> cast(attrs, [:tenant_id, :user_phone, :role])
+    |> validate_required([:tenant_id, :user_phone, :role])
+    |> unique_constraint([:tenant_id, :user_phone])
   end
 end

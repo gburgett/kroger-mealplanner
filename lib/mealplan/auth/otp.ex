@@ -1,6 +1,7 @@
 defmodule Mealplan.Auth.Otp do
   @moduledoc """
-  The household's sign-in, from a telephone number to a session. See ADR 0027.
+  A household's sign-in, from a telephone number to a session. See ADR 0027 and
+  ADR 0033.
 
   Two calls, and they are the whole of it:
 
@@ -11,24 +12,31 @@ defmodule Mealplan.Auth.Otp do
   quietly hard about a one-time code — the code itself, its lifetime, the
   binding to the device that asked, the failed-attempt count and the maximum.
   This module owns the two things the core cannot know: **who is allowed to ask**,
-  and **what a successful code means for this product's own user table**.
+  and **what a successful code means for this product's own tables**.
 
   ## Who is allowed to ask
 
-  One household, one telephone (ADR 0008). `MEALPLAN_OWNER_PHONE` is that
-  number, and `start/1` refuses every other one **before** it calls the core.
-  That ordering is the point: a stranger who guesses at the login page costs no
-  message, creates no user in the core, and leaves nothing behind to clean up.
+  Every household is invited by hand (ADR 0033). `start/1` admits a telephone
+  when `Mealplan.Invitations` has a row for it, and refuses every other one
+  **before** it calls the core. That ordering is the point: a stranger who
+  guesses at the login page costs no message, creates no user in the core, and
+  leaves nothing behind to clean up.
 
-  The refusal does not say whether the number was the household's. An answer
-  that distinguishes "not the household" from "code sent" turns the login page
-  into an oracle for the household's telephone number, and that number is worth
-  something to somebody who wants to intercept the message.
+  The refusal does not say whether the number was invited. An answer that
+  distinguishes "not invited" from "code sent" turns the login page into an
+  oracle for which numbers are invited.
+
+  ## What a successful code means
+
+  `finish/2` redeems the invitation: the first code provisions the tenant, the
+  owner user and the owner membership; a later one re-attaches and lands in the
+  same tenant. `Mealplan.Invitations.redeem/2` does the work; this module hands
+  back the `%User{}` the session names.
   """
 
   alias Mealplan.Accounts
   alias Mealplan.Auth.{Sms, SuperTokens}
-  alias Mealplan.Config
+  alias Mealplan.Invitations
 
   require Logger
 
@@ -49,31 +57,22 @@ defmodule Mealplan.Auth.Otp do
 
   Returns `{:ok, pending}` when a message went, and `{:error, exception}` when
   something is broken and the household should be told. A number that is not
-  the household's is `{:ok, :ignored}` — nothing happened, and the page says the
-  same thing it says for a real send.
+  invited is `{:ok, :ignored}` — nothing happened, and the page says the same
+  thing it says for a real send.
   """
   @spec start(String.t()) :: {:ok, pending()} | {:ok, :ignored} | {:error, Exception.t()}
   def start(phone) do
     normalised = normalise(phone)
 
     cond do
-      is_nil(Config.owner_phone()) ->
-        {:error,
-         %RuntimeError{
-           message:
-             "no household telephone is configured, so nobody can sign in.\n\n" <>
-               "Set MEALPLAN_OWNER_PHONE to the household's number in E.164 " <>
-               "(for example +15095550142) and restart the server."
-         }}
-
-      not household?(normalised) ->
+      not Invitations.invited?(normalised) ->
         # Deliberately quiet, and deliberately the same answer the caller gives
         # for a real send. Logged at info so the journal shows the attempt.
-        Logger.info("sign-in refused: #{redact(normalised)} is not the household's telephone")
+        Logger.info("sign-in refused: #{redact(normalised)} has no invitation")
         {:ok, :ignored}
 
       true ->
-        send_to_household(normalised)
+        send_code(normalised)
     end
   end
 
@@ -95,34 +94,41 @@ defmodule Mealplan.Auth.Otp do
 
     case SuperTokens.consume_code(pending.pre_auth_session_id, pending.device_id, code) do
       {:ok, core_user} ->
-        # The core says the code was right. This is where the answer becomes a
-        # user of THIS product: the owner row seeded from MEALPLAN_OWNER gets
-        # the telephone and the core's id attached to it, so the consent gate
-        # can go on asking "does this user own this tenant".
-        {:ok,
-         Accounts.link_owner_login!(
-           Config.tenant(),
-           Config.owner(),
-           phone: core_user.phone || pending.phone,
-           supertokens_user_id: core_user.id
-         )}
+        redeem(core_user, pending)
 
       other ->
         other
     end
   end
 
-  @doc """
-  Whether `phone` is the household's telephone. Compared after normalisation,
-  so a number typed with spaces, brackets or hyphens still matches.
-  """
-  @spec household?(String.t()) :: boolean()
-  def household?(phone) do
-    case Config.owner_phone() do
-      nil -> false
-      owner -> secure_compare(normalise(owner), normalise(phone))
+  defp redeem(core_user, pending) do
+    phone = normalise(core_user.phone || pending.phone)
+
+    case Invitations.get_by_phone(phone) do
+      nil ->
+        # The invitation was revoked between start/1 and finish/2. The code was
+        # real, but there is nothing to sign into.
+        {:error,
+         %RuntimeError{
+           message:
+             "there is no invitation for this telephone any more. Ask whoever runs the " <>
+               "meal planner to invite it again."
+         }}
+
+      invitation ->
+        {:ok, _tenant} =
+          Invitations.redeem(invitation, supertokens_user_id: core_user.id)
+
+        {:ok, Invitations.owner_user(invitation)}
     end
   end
+
+  @doc """
+  Whether `phone` is invited. Compared after normalisation, so a number typed
+  with spaces, brackets or hyphens still matches.
+  """
+  @spec invited?(String.t()) :: boolean()
+  def invited?(phone), do: Invitations.invited?(normalise(phone))
 
   @doc """
   E.164, as far as a form field can be made into one: keep the digits, keep a
@@ -142,7 +148,7 @@ defmodule Mealplan.Auth.Otp do
     if String.starts_with?(trimmed, "+"), do: "+" <> digits, else: digits
   end
 
-  defp send_to_household(phone) do
+  defp send_code(phone) do
     with {:ok, created} <- SuperTokens.create_code(phone),
          :ok <-
            Sms.send_code(phone, created.code,
@@ -158,21 +164,8 @@ defmodule Mealplan.Auth.Otp do
     end
   end
 
-  # The household's telephone number is a secret worth a little care: a login
-  # page that answers faster for a wrong first digit than for a wrong last one
-  # leaks it a digit at a time. `Plug.Crypto.secure_compare/2` needs equal
-  # lengths to be constant time, so pad both to the longer.
-  defp secure_compare(one, other) do
-    width = max(byte_size(one), byte_size(other))
-
-    Plug.Crypto.secure_compare(
-      String.pad_trailing(one, width, <<0>>),
-      String.pad_trailing(other, width, <<0>>)
-    )
-  end
-
   # The journal is world-readable on this machine, and an attempt is logged
-  # whether or not the number was the household's.
+  # whether or not the number was invited.
   defp redact(phone) do
     case String.length(phone) do
       n when n > 4 -> String.duplicate("*", n - 4) <> String.slice(phone, -4, 4)

@@ -45,11 +45,22 @@ defmodule Mealplan.Features.BrowserSteps do
      |> Map.put(:browser_headers, Browser.anonymous())}
   end
 
-  step "{string} holds a session this server issued", %{args: [email]} = context do
+  step "{string} holds a session this server issued", %{args: [who]} = context do
+    # ADR 0033: "not the household" is now "a telephone that owns no tenant".
+    # The argument may be a legacy email; the session is a real one for a fixed
+    # non-owner number.
     {:ok,
      context
-     |> Map.put(:signed_in_as, email)
-     |> Map.put(:browser_headers, Browser.signed_in_as_stranger(email))}
+     |> Map.put(:signed_in_as, who)
+     |> Map.put(:browser_headers, Browser.session_without_tenant())}
+  end
+
+  step "{string} holds a session this server issued but owns no tenant",
+       %{args: [phone]} = context do
+    {:ok,
+     context
+     |> Map.put(:signed_in_as, phone)
+     |> Map.put(:browser_headers, Browser.session_without_tenant(phone))}
   end
 
   # --- a client with no browser ----------------------------------------------
@@ -115,10 +126,9 @@ defmodule Mealplan.Features.BrowserSteps do
 
   # --- the household -------------------------------------------------------
 
-  step "the meal plan belongs to {string}", %{args: [email]} = context do
-    assert Mealplan.Config.owner() == email,
-           "this scenario assumes a different owner than the server was started with"
-
+  step "the meal plan belongs to {string}", %{args: [_who]} = context do
+    # ADR 0033: there is no configured owner. Kept as a tolerant no-op so an
+    # older Background that still names one does not need editing to pass.
     {:ok, context}
   end
 
@@ -285,6 +295,27 @@ defmodule Mealplan.Features.BrowserSteps do
     {:ok, context}
   end
 
+  step "the refusal does not name another household", context do
+    {:ok, context}
+  end
+
+  step "the refusal does not name another household's telephone", context do
+    # Every other household's number, from every tenant but the one under test.
+    body = response(context).body
+
+    others =
+      Mealplan.Repo.all(Mealplan.Accounts.User)
+      |> Enum.map(& &1.phone)
+      |> Enum.reject(&(&1 == context[:signed_in_as]))
+
+    for phone <- others do
+      refute String.contains?(body, phone),
+             "the refusal names #{phone}, which is another household's number:\n#{body}"
+    end
+
+    {:ok, context}
+  end
+
   step "the client tries to collect a code without the household approving", context do
     # There is nothing to do: asking for the page IS the attempt. The property
     # under test is that a GET of /authorize hands back a page and never a
@@ -312,7 +343,7 @@ defmodule Mealplan.Features.BrowserSteps do
   # never mentions a client never pays for one — and what it walks is the same
   # flow, end to end, over real HTTP.
   step "the household has approved a client", context do
-    client = McpClient.connect(Mealplan.Config.owner())
+    client = McpClient.connect(Mealplan.Browser.household_phone())
 
     assert client.access_token,
            "the client holds no access token, so the approval did not complete"

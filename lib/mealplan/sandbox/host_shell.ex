@@ -19,6 +19,17 @@ defmodule Mealplan.Sandbox.HostShell do
   sandbox image and may not be allowed to build one, such as a CI runner. See
   ADR 0022.
 
+  ## The process group is still cleaned up
+
+  A pid namespace collects a command's whole process tree for the other two
+  backends. Host mode has none, so `Mealplan.Sandbox.Runner` spawns the wrapper
+  with no `setsid` layer — the BEAM already puts the port in its own session —
+  and, once the command returns, sends `kill -KILL` to the command's process
+  group. That one signal is the kernel taking the whole tree. Without it a
+  backgrounded process outlived its command and a whole suite of them exhausted
+  the machine. See `reap_group/1`, ADR 0034 and
+  `docs/test-suite-oom-findings.md`.
+
   ## What it does keep
 
   Everything that is not the boundary itself, so a scenario behaves the same in

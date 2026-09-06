@@ -1,7 +1,8 @@
 defmodule MealplanWeb.Plugs.HouseholdSession do
   @moduledoc """
-  Let the household through, and nobody else. Replaces
-  `MealplanWeb.Plugs.ExedevGate`, which read an exe.dev header. See ADR 0027.
+  Let an invited household through, and nobody else. Replaces
+  `MealplanWeb.Plugs.ExedevGate`, which read an exe.dev header. See ADR 0027 and
+  ADR 0033.
 
   The header gate was worth what the network boundary around the VM's subnet
   was worth, and `docs/exedev-identity-header-study.md` records that nobody
@@ -10,21 +11,21 @@ defmodule MealplanWeb.Plugs.HouseholdSession do
   cares to send. A cookie this server signed does not have that hole, because
   the signature does not depend on how the request arrived.
 
-  Three answers, each naming what it saw, the same three the exe.dev gate gave:
+  Three answers:
 
-    * no session      -> 302 to `/login`, told to come back here
-    * not the household -> 403, naming both emails
-    * the household   -> `conn.assigns.identity`, and on
+    * no session           -> 302 to `/login`, told to come back here
+    * a session, owns no tenant -> 403, naming no other household
+    * a session, owns a tenant  -> `conn.assigns.identity` (`%{phone:, user:}`)
+      and `conn.assigns.tenant` (the slug), and on
 
-  `conn.assigns.identity` keeps the shape the exe.dev gate assigned —
-  `%{email:, user_id:}` — so `OAuthController` and `KrogerController` did not
-  change when the thing behind it did.
+  Identity is the telephone number now, not an email (ADR 0033). The tenant is
+  resolved from the user's owner membership, so a request carries its own
+  household rather than sharing one global answer.
   """
 
   import Plug.Conn
 
-  alias Mealplan.Accounts
-  alias MealplanWeb.ConsentPage
+  alias Mealplan.{Accounts, Tenancy}
 
   # How long a session lasts before the household types a code again. Long
   # enough that planning a week of dinners is not interrupted; short enough
@@ -39,15 +40,17 @@ defmodule MealplanWeb.Plugs.HouseholdSession do
   The identity this server issued for the request, or nil.
 
   Public because `MealplanWeb.LoginController` asks the same question to decide
-  whether a signed-in household even needs the login page.
+  whether a signed-in household even needs the login page. A returned identity
+  means "this server issued this session" — it does NOT mean the person owns a
+  tenant; `call/2` checks that separately.
   """
-  @spec identity_of(Plug.Conn.t()) :: %{email: String.t(), user_id: term()} | nil
+  @spec identity_of(Plug.Conn.t()) :: %{phone: String.t(), user: struct()} | nil
   def identity_of(conn) do
-    with user_id when not is_nil(user_id) <- get_session(conn, :user_id),
+    with phone when is_binary(phone) <- get_session(conn, :user_phone),
          signed_at when is_integer(signed_at) <- get_session(conn, :signed_in_at),
          false <- expired?(signed_at),
-         user when not is_nil(user) <- Accounts.get_user(user_id) do
-      %{email: user.email, user_id: user.id}
+         user when not is_nil(user) <- Accounts.get_user(phone) do
+      %{phone: user.phone, user: user}
     else
       _ -> nil
     end
@@ -64,11 +67,11 @@ defmodule MealplanWeb.Plugs.HouseholdSession do
   def sign_in(conn, user) do
     conn
     |> configure_session(renew: true)
-    |> put_session(:user_id, user.id)
+    |> put_session(:user_phone, user.phone)
     |> put_session(:signed_in_at, System.system_time(:second))
   end
 
-  @doc "Drop the session. Everything in it, not only the user id."
+  @doc "Drop the session. Everything in it, not only the user."
   @spec sign_out(Plug.Conn.t()) :: Plug.Conn.t()
   def sign_out(conn), do: configure_session(conn, drop: true)
 
@@ -99,18 +102,23 @@ defmodule MealplanWeb.Plugs.HouseholdSession do
     |> halt()
   end
 
-  defp gate(conn, %{email: email} = identity) do
-    if Accounts.owner?(Mealplan.Config.tenant(), email) do
-      assign(conn, :identity, identity)
-    else
-      # A session this server issued, for somebody who is not the owner of this
-      # tenant. It cannot happen while one household has one telephone, and it
-      # is answered anyway: the membership is what decides, not the cookie.
-      conn
-      |> put_resp_header("cache-control", "no-store")
-      |> put_resp_content_type("text/html")
-      |> send_resp(403, ConsentPage.not_the_household(email, Mealplan.Config.owner()))
-      |> halt()
+  defp gate(conn, %{phone: phone} = identity) do
+    case Tenancy.tenant_for_phone(phone) do
+      %{slug: slug} ->
+        conn
+        |> assign(:identity, Map.put(identity, :tenant, slug))
+        |> assign(:tenant, slug)
+
+      nil ->
+        # A session this server issued, for a telephone that owns nothing: an
+        # invitation revoked, or a code spent before its redemption finished.
+        # The refusal names no other household — there is nothing here that is
+        # anyone else's to name.
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> put_resp_content_type("text/html")
+        |> send_resp(403, MealplanWeb.ConsentPage.owns_no_tenant(phone))
+        |> halt()
     end
   end
 
