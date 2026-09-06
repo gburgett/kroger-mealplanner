@@ -23,7 +23,7 @@ Feature: Only the household reaches the meal plan
   never passed the proxy that sets it.
 
   Background:
-    Given the meal plan belongs to "gordon@gordonburgett.net"
+    Given the household "+15095550142" has been invited
 
   Scenario: An assistant with no credentials is told where to get some
     When a client calls the meal planner with no token
@@ -42,7 +42,7 @@ Feature: Only the household reaches the meal plan
 
   Scenario: The household approves a client, and the client gets a token
     Given a client has registered itself
-    And "gordon@gordonburgett.net" is signed in
+    And "+15095550142" is signed in
     When the client asks for authorisation
     Then the consent page names the client
     And the consent page names the meal-plan folder
@@ -108,12 +108,11 @@ Feature: Only the household reaches the meal plan
     And the login is told to come back to the consent page
 
   @security
-  Scenario: The consent page refuses a session for somebody who is not the household
-    Given "burglar@example.com" holds a session this server issued
+  Scenario: The consent page refuses a session for a telephone that owns no meal plan
+    Given "+15125550166" holds a session this server issued but owns no tenant
     When a browser asks for the consent page
     Then the request is refused as forbidden
-    And the refusal names "burglar@example.com"
-    And the refusal names "gordon@gordonburgett.net"
+    And the refusal does not name another household's telephone
 
   @security
   Scenario: A client cannot approve itself

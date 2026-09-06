@@ -97,7 +97,7 @@ defmodule Mealplan.Features.SandboxSteps do
   # --- the session a restart forgets ------------------------------------------
 
   step "I remember the current MCP session", context do
-    client = McpClient.connect(Mealplan.Config.owner())
+    client = McpClient.connect(Mealplan.Browser.household_phone())
     {client, _result} = McpClient.run(client, "true")
     assert client.session_id, "the client never received a session id"
     {:ok, Map.put(context, :remembered_mcp_session, client)}

@@ -57,6 +57,10 @@ defmodule Mealplan.Boot do
     now = Keyword.get_lazy(opts, :now, &Mealplan.Clock.now/0)
     base_url = Keyword.get_lazy(opts, :base_url, &Mealplan.Config.public_url/0)
 
+    # A lazily-opened tenant (ADR 0033) has a `corpus_path` that does not exist
+    # on disk yet. Make it before the sandbox binds it.
+    File.mkdir_p!(folder)
+
     {:ok, session} = Sandbox.open(tenant, folder)
 
     # The folder first, then the repository, so the first commit holds the

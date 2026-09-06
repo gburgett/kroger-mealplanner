@@ -21,7 +21,8 @@ Feature: An invited household gets its own meal plan
   corpus. See ADR 0033.
 
   Background:
-    Given the SuperTokens core is running
+    Given no household has been invited
+    And the SuperTokens core is running
     And SMS messages are delivered to a test inbox
 
   Scenario: A fresh server has no households until one is invited

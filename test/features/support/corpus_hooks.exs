@@ -94,17 +94,16 @@ defmodule Mealplan.Features.CorpusHooks do
     # to hit EAGAIN.
     {:ok, _} = File.cp_r(:persistent_term.get({__MODULE__, :template}), folder)
 
-    # The application is single-tenant by construction: the tools resolve the
-    # folder through Mealplan.Config when they open a session themselves. Point
-    # it at this scenario's folder for as long as the scenario runs. This is
-    # also why the suite is not async — see ADR 0022.
-    Application.put_env(:mealplan, :tenant, tenant)
-    Application.put_env(:mealplan, :folder, folder)
     Application.put_env(:mealplan, :clock, @frozen_clock)
 
-    # The tools resolve a tenant row to reach the Kroger credential, and the
-    # real server bootstraps one at start-up. A scenario gets the same.
-    Mealplan.Accounts.bootstrap!(tenant, Mealplan.Config.owner())
+    # ADR 0033: a request carries its own tenant, and the tools resolve the
+    # folder from the `tenants` row's corpus_path. Set MEALPLAN_CORPUS_ROOT for
+    # the invitations scenarios that provision brand-new tenants, and give this
+    # scenario's own tenant a redeemed invitation for the canonical test
+    # telephone — its corpus_path pointing at this scenario's folder — so a
+    # `Browser.signed_in/0` lands in `tenant` rather than a fresh household.
+    Application.put_env(:mealplan, :corpus_root, Path.join(run_root(), "tenants"))
+    provision_scenario_tenant(tenant, folder, Mealplan.Browser.household_phone())
 
     kroger = start_kroger_mock()
     {walmart, walmart_key_path} = start_walmart_mock(root_of(folder))
@@ -173,6 +172,41 @@ defmodule Mealplan.Features.CorpusHooks do
         Process.sleep(1)
         await_deregistered(tenant, deadline)
     end
+  end
+
+  # ADR 0033: this scenario's tenant, as a redeemed invitation for the canonical
+  # test telephone. `corpus_path` is this scenario's folder, so a real sign-in
+  # (`Otp.finish/2` -> `Invitations.redeem/2`, idempotent) re-attaches here
+  # instead of provisioning a new `household-<hex>`. The invitations feature's
+  # own steps clear this and drive fresh provisioning where that is the point.
+  defp provision_scenario_tenant(slug, folder, phone) do
+    alias Mealplan.Accounts.{Invitation, Membership, Tenant}
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    tenant =
+      Mealplan.Repo.insert!(
+        Tenant.changeset(%Tenant{}, %{slug: slug, name: slug, corpus_path: folder})
+      )
+
+    _user = Mealplan.Accounts.upsert_user!(%{phone: phone})
+
+    Mealplan.Repo.insert!(
+      Membership.changeset(%Membership{}, %{
+        tenant_id: tenant.id,
+        user_phone: Mealplan.Accounts.normalise_phone(phone),
+        role: "owner"
+      })
+    )
+
+    Mealplan.Repo.insert!(
+      Invitation.changeset(%Invitation{}, %{
+        phone: phone,
+        tenant_id: tenant.id,
+        redeemed_at: now
+      })
+    )
+
+    tenant
   end
 
   # Kroger, stood in for, for EVERY scenario rather than only the ones that use

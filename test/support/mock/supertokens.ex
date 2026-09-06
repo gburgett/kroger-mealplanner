@@ -37,7 +37,7 @@ defmodule Mealplan.Mock.SuperTokens do
   Telnyx path has its own unit test, where asserting the request shape is the
   whole point — see `test/mealplan/auth/sms_test.exs`.
   """
-  def start(opts \\ []) do
+  def start(_opts \\ []) do
     mock = Server.start(__MODULE__.Router, new_state())
 
     previous = %{
@@ -47,8 +47,7 @@ defmodule Mealplan.Mock.SuperTokens do
       sms_from: Application.get_env(:mealplan, :sms_from),
       twilio_account_sid: Application.get_env(:mealplan, :twilio_account_sid),
       twilio_auth_token: Application.get_env(:mealplan, :twilio_auth_token),
-      twilio_api_base: Application.get_env(:mealplan, :twilio_api_base),
-      owner_phone: Application.get_env(:mealplan, :owner_phone)
+      twilio_api_base: Application.get_env(:mealplan, :twilio_api_base)
     }
 
     Application.put_env(:mealplan, :supertokens_base, mock.base)
@@ -58,12 +57,6 @@ defmodule Mealplan.Mock.SuperTokens do
     Application.put_env(:mealplan, :twilio_account_sid, "ACtest")
     Application.put_env(:mealplan, :twilio_auth_token, "test-token")
     Application.put_env(:mealplan, :twilio_api_base, mock.base)
-
-    Application.put_env(
-      :mealplan,
-      :owner_phone,
-      Keyword.get(opts, :owner_phone, "+15095550142")
-    )
 
     Map.put(mock, :previous, previous)
   end

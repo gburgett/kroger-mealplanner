@@ -39,9 +39,11 @@ defmodule Mealplan.Mcp.Server do
 
     # No per-tenant tree or history here: `server_instructions/0` is read at the
     # handshake with no connection in hand, and there is no single household to
-    # describe any more (ADR 0033). The onboarding nudge still reaches the model
-    # on every `tools/call` reply — see `Mealplan.Mcp.Tools.call/4`.
+    # describe any more (ADR 0033). The onboarding nudge is still folded in when
+    # any household still needs it, and it also reaches the model on every
+    # `tools/call` reply — see `Mealplan.Mcp.Tools.call/4`.
     [
+      onboarding_instructions(),
       "A meal plan is a folder of markdown documents. Read README.md in the folder first; " <>
         "it is the schema. Plan meals with ordinary shell commands.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>
@@ -86,6 +88,29 @@ defmodule Mealplan.Mcp.Server do
       {:error, :unknown_tool} ->
         {:error, Error.protocol(:invalid_params, %{message: "Tool not found: #{name}"}), frame}
     end
+  end
+
+  # The onboarding nudge for the handshake `instructions`, or "" when every
+  # live household has already acted on it. A fresh server with no sessions
+  # open still shows it — a connecting client is most likely the first
+  # household. Per-`tools/call` filtering stays exact (`Mealplan.Mcp.Tools`).
+  defp onboarding_instructions do
+    pids =
+      Registry.select(Mealplan.Sandbox.registry(), [{{:_, :"$1", :_}, [], [:"$1"]}])
+
+    if pids != [] and Enum.all?(pids, &session_onboarding_done?/1) do
+      ""
+    else
+      Mealplan.Onboarding.note()
+    end
+  end
+
+  defp session_onboarding_done?(pid) do
+    Mealplan.Onboarding.done?(pid)
+  rescue
+    _ -> true
+  catch
+    :exit, _ -> true
   end
 
   # The tenant the bearer plug resolved for this connection, from the access

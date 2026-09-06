@@ -24,7 +24,10 @@ defmodule Mealplan.Features.SmsOtpSteps do
   # --- setting the scene -----------------------------------------------------
 
   step "the household's telephone is {string}", %{args: [phone]} = context do
-    Application.put_env(:mealplan, :owner_phone, phone)
+    # ADR 0033: the allowlist is the invitations table. The corpus hook already
+    # invited and redeemed the canonical number; a scenario that names a
+    # different one just needs a row.
+    unless Mealplan.Invitations.invited?(phone), do: {:ok, _} = Mealplan.Invitations.create(phone)
     {:ok, Map.put(context, :household_phone, phone)}
   end
 
@@ -54,13 +57,13 @@ defmodule Mealplan.Features.SmsOtpSteps do
   end
 
   step "the household has asked for a code", context do
-    {:ok, ask_for_code(context, context[:household_phone] || Mealplan.Config.owner_phone())}
+    {:ok, ask_for_code(context, context[:household_phone] || Mealplan.Browser.household_phone())}
   end
 
   step "the household has already signed in", context do
     {:ok,
      context
-     |> Map.put(:signed_in_as, Mealplan.Config.owner())
+     |> Map.put(:signed_in_as, Mealplan.Browser.household_phone())
      |> Map.put(:browser_headers, Browser.signed_in())}
   end
 
@@ -250,7 +253,7 @@ defmodule Mealplan.Features.SmsOtpSteps do
 
     logged =
       ExUnit.CaptureLog.capture_log(fn ->
-        Mealplan.Auth.Otp.start(Mealplan.Config.owner_phone())
+        Mealplan.Auth.Otp.start(Mealplan.Browser.household_phone())
       end)
 
     refute logged =~ code, "the code was written to the log"
