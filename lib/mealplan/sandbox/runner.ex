@@ -85,6 +85,7 @@ defmodule Mealplan.Sandbox.Runner do
 
     nproc_budget =
       Keyword.get_lazy(opts, :nproc_budget, fn -> Limits.nproc_budget(limits, use_user_scope) end)
+
     timeout_ms = Keyword.get(opts, :timeout_ms, 10_000)
     cap = Keyword.get(opts, :max_output_bytes, 64 * 1024)
     env = Keyword.get(opts, :env, %{})
@@ -222,32 +223,74 @@ defmodule Mealplan.Sandbox.Runner do
           {shell, "-", workspace}
       end
 
+    # Host mode drops the systemd scope: it is the mode for a machine with no
+    # KVM and no confinement to assert, so it runs the command directly under
+    # `prlimit` alone. See ADR 0034.
+    effective_scope = use_user_scope and mode != :host
+
+    # With the systemd scope off (host), `--nproc` is the only fork-bomb guard,
+    # so it must be a real number even if the session left it nil for a scope
+    # that would have carried `TasksMax`.
+    nproc_budget =
+      if mode == :host and is_nil(nproc_budget),
+        do: Limits.nproc_budget(limits, false),
+        else: nproc_budget
+
     argv =
       Limits.wrap(inner, limits,
-        use_user_scope: use_user_scope,
+        use_user_scope: effective_scope,
         nproc_budget: nproc_budget,
         unit_name: unit_name
       )
 
     wrapper_args =
-      ["-w", @wrapper, out_path, err_path, seccomp_arg, input_path, "--"] ++ argv
+      [out_path, err_path, seccomp_arg, input_path, "--"] ++ argv
+
+    {executable, spawn_args, spawn_env} =
+      case mode do
+        :bubblewrap ->
+          # `setsid` gives the whole chain its own process group; bwrap is pid 1
+          # of the sandbox pid namespace, so the group and the namespace hold
+          # the same processes.
+          {System.find_executable("setsid"), ["-w", @wrapper] ++ wrapper_args,
+           port_env(use_user_scope)}
+
+        :host ->
+          # No `setsid` layer: the BEAM already starts every port in its own
+          # session, so `run.sh` is the process-group leader and `run.sh`'s
+          # `exec` keeps that pid for the command. The port's OS pid is
+          # therefore the command's process-group id, and one
+          # `kill -KILL -<pid>` after it returns is the OS collecting the whole
+          # tree — the job a pid namespace does for the other two modes. See
+          # `reap_group/1` and ADR 0034. The `PATH` here is only so the wrapper
+          # can find `bash` (its shebang) and `prlimit`; the command's own
+          # environment still comes from `env -i` inside the limits chain.
+          {@wrapper, wrapper_args, [{~c"PATH", ~c"/usr/bin:/bin"}]}
+      end
 
     port =
       Port.open(
-        {:spawn_executable, System.find_executable("setsid")},
+        {:spawn_executable, executable},
         [
           :exit_status,
           :binary,
           :hide,
           :stderr_to_stdout,
-          args: wrapper_args,
-          env: port_env(use_user_scope)
+          args: spawn_args,
+          env: spawn_env
         ] ++ if(cwd, do: [cd: cwd], else: [])
       )
 
+    os_pid =
+      case Port.info(port, :os_pid) do
+        {:os_pid, p} -> p
+        _ -> nil
+      end
+
     timer = Process.send_after(self(), {:sandbox_timeout, port}, timeout_ms)
-    {exit_code, timed_out} = await(port, unit_name, use_user_scope, false)
+    {exit_code, timed_out} = await(port, unit_name, effective_scope, false)
     Process.cancel_timer(timer)
+    if mode == :host, do: reap_group(os_pid)
     flush(port)
 
     duration_ms = (System.monotonic_time(:microsecond) - started) / 1000
@@ -326,8 +369,10 @@ defmodule Mealplan.Sandbox.Runner do
             _ -> Integer.to_string(os_pid)
           end
 
-        _ = System.cmd("kill", ["-KILL", "-#{pgid}"], stderr_to_stdout: true)
-        _ = System.cmd("kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+        # `--` before the negative pid: without it `/usr/bin/kill` reads it as
+        # an option and no-ops. See `reap_group/1`.
+        _ = System.cmd("kill", ["-KILL", "--", "-#{pgid}"], stderr_to_stdout: true)
+        _ = System.cmd("kill", ["-KILL", "--", Integer.to_string(os_pid)], stderr_to_stdout: true)
         :ok
 
       _ ->
@@ -335,6 +380,49 @@ defmodule Mealplan.Sandbox.Runner do
     end
   rescue
     _ -> :ok
+  end
+
+  # Host mode has no pid namespace to collect a finished command's process tree.
+  # The BEAM starts every port in its own session, so `os_pid` is the command's
+  # process-group id, and one `kill -KILL` to `-os_pid` is the kernel taking the
+  # whole group — the job a pid namespace does for the other two modes.
+  #
+  # The ordinary command's group is already empty when it returns, so the
+  # `kill -0` gate ends this in one call. `hard_reap/1` runs only when something
+  # is still alive — a command that backgrounded a process, or a fork bomb. Two
+  # back-to-back SIGSTOPs freeze the group (the second catches anything that
+  # forked between the first SIGSTOP being delivered and now) before the
+  # SIGKILL, with no pause that would let it repopulate. One round clears a
+  # 400-process fork bomb; the loop is headroom. See ADR 0034.
+  defp reap_group(nil), do: :ok
+
+  defp reap_group(os_pid) do
+    # `kill -SIG -- -<pgid>` — the `--` matters: `/usr/bin/kill` (util-linux, no
+    # shell here) reads a bare `-<pgid>` as an unknown option and does nothing,
+    # exit 0 and all. After `--` it is a negative pid, i.e. the process group.
+    group = ["--", "-#{os_pid}"]
+
+    case System.cmd("kill", ["-0" | group], stderr_to_stdout: true) do
+      {_, 0} -> hard_reap(group)
+      _ -> :ok
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp hard_reap(group) do
+    Enum.reduce_while(1..40, :ok, fn _, _ ->
+      _ = System.cmd("kill", ["-STOP" | group], stderr_to_stdout: true)
+      _ = System.cmd("kill", ["-STOP" | group], stderr_to_stdout: true)
+      _ = System.cmd("kill", ["-KILL" | group], stderr_to_stdout: true)
+
+      case System.cmd("kill", ["-0" | group], stderr_to_stdout: true) do
+        {_, 0} -> {:cont, :ok}
+        _ -> {:halt, :ok}
+      end
+    end)
   end
 
   # Where the meal-plan folder appears to the command. Bubblewrap binds it at a

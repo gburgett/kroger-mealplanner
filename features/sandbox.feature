@@ -386,6 +386,18 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the command fails
     And the meal planner still answers the next command
 
+  Scenario: A command that leaves a process running does not leave it running
+    A backgrounded process used to outlive the command that started it, and
+    thousands of them across one test run exhausted the machine
+    (docs/test-suite-oom-findings.md). Every backend now reaps the command's
+    process group when the command returns — a pid namespace does it for
+    bubblewrap and the microVM, and host mode does it by hand (ADR 0034).
+
+    When I run "sleep 424242 & echo left one running"
+    Then the command succeeds
+    And no process the command started is still running
+    And the meal planner still answers the next command
+
   @slow-timeout
   Scenario: A runaway command is stopped
     When I run "sleep 600"

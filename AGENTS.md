@@ -315,19 +315,31 @@ and nothing else.
 
 That is what ADR 0022 said it had lost and would need to pay back. It is paid.
 
-**`mix test` defaults to microsandbox** (ADR 0032). Each tenant runs in a libkrun
-microVM, so the default run asserts containment for real. It needs `msb` on
-`PATH`, read/write on `/dev/kvm` (`msb doctor`), and `sandbox-image/oci.tar`
-built with `./sandbox-image/build.sh --microsandbox`. It does not need
-`MEALPLAN_CLI_PATH`: the `mealplan` binary is staged into the image.
+**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, and it is the fast
+mode for application logic — about half a minute against microsandbox's nine.
+It is what a CI runner with no KVM uses, and what to reach for while working.
+Every `@security` and `@microsandbox` scenario is EXCLUDED in that mode and
+`mix test` prints a banner saying so.
 
-**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine with no
-KVM, such as a CI runner. Every `@security` and `@microsandbox` scenario is
-EXCLUDED in that mode and `mix test` prints a banner saying so. Host mode was
-the old default, and it is why the full suite used to OOM this machine — see
-`docs/test-suite-oom-findings.md`.
+Host mode used to OOM this machine — the full suite left hundreds of live
+`bash` processes because nothing reaped a command's process tree when the
+command returned, only on timeout (`docs/test-suite-oom-findings.md`). ADR 0034
+fixed that: the command is the leader of its own process group (the BEAM starts
+every port in its own session), so once it returns `Mealplan.Sandbox.Runner`
+sends `kill -KILL` to that group and the kernel takes the whole tree in one
+call. Nothing accumulates. A host-mode `mix test` is safe on this VM again,
+even while the service is up.
 
-That exclusion is currently wider than it needs to be, and knowing so is worth
+```bash
+MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
+```
+
+`MEALPLAN_CLI_PATH` is a host-mode need only: under microsandbox and bubblewrap
+the binary is staged into the image, so a checkout with an image built does not
+set it. A machine with no KVM and no image built has only host mode, and the
+preflight raise names the piece that is missing.
+
+The `@security` exclusion is wider than it needs to be, and knowing so is worth
 more than pretending otherwise: `mix test --include security` passes 22 of the
 23 `@security` scenarios in the ported files under host mode, because most of
 them are about the AUTHORISATION boundary, which host mode does not weaken.
@@ -335,9 +347,18 @@ Only "History cannot be pushed anywhere" needs real confinement. Narrowing the
 rule needs a second tag and changes what a green run claims, so it has not been
 done — see ADR 0023.
 
-**`MEALPLAN_SANDBOX=bubblewrap` is still the product**, and still the only mode
-that runs every `@security` scenario, the `@bubblewrap` ones included. Run it
-before a release:
+**`MEALPLAN_SANDBOX=microsandbox` runs the `@microsandbox` companions** — the
+`@security` scenarios that assert containment against a libkrun microVM per
+tenant (ADR 0027). It needs `msb` on `PATH`, read/write on `/dev/kvm`
+(`msb doctor`), and `sandbox-image/oci.tar` built with
+`./sandbox-image/build.sh --microsandbox`. It is slower than host mode by an
+order of magnitude, so reach for it when the change is about the sandbox, not
+for every iteration.
+
+**`MEALPLAN_SANDBOX=bubblewrap` is the product and the default**, test
+included (ADR 0034 took the test default back from microsandbox, ADR 0032). It
+is the only mode that runs every `@security` scenario, the `@bubblewrap` ones
+included. Run it before a release:
 
 ```bash
 ./sandbox-image/build.sh && ./cli/build.sh && MEALPLAN_SANDBOX=bubblewrap mix test
@@ -346,24 +367,12 @@ before a release:
 ### Running the suite
 
 ```bash
-mix test    # microsandbox, the default on a machine with KVM
-```
-
-**On THIS VM, always run the suite in microsandbox mode.**
-`MEALPLAN_SANDBOX=host mix test` here runs the suite's commands unconfined on
-the host and **crashes the running `mealplan-elixir.service`** — a host-mode
-`mix test` is not safe on a box that is also serving. This VM has KVM
-(`msb doctor` passes), so there is never a reason to reach for host mode here.
-
-On a machine with no KVM — CI is one, and this VM is NOT one — say so on purpose:
-
-```bash
+# fast, for application logic — @security and @microsandbox excluded, loudly
 MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
-```
 
-`MEALPLAN_CLI_PATH` is a host-mode need only: under microsandbox and bubblewrap
-the binary is staged into the image. A machine with no KVM and no image built
-has no mode that works, and the preflight raise names the piece that is missing.
+# the product, and what `mix test` with no MEALPLAN_SANDBOX picks
+./sandbox-image/build.sh && ./cli/build.sh && mix test
+```
 
 **Nothing else has to be running.** The state is one SQLite file (ADR 0024,
 restored by ADR 0031), so a test run needs no server, no user, no password and
@@ -406,10 +415,19 @@ holds the regression tests, and they exist because the removal was once the last
 line of the function: a killed `yes | sort` left an 11 GB spill and filled the
 VM to 94%.
 
-After a run, both of these should print nothing:
+**Processes leave nothing behind either.** Bubblewrap and the microVM collect a
+command's whole process tree in a pid namespace when the command's pid 1 exits.
+Host mode has no pid namespace, so the command runs as its own process-group
+leader and `Mealplan.Sandbox.Runner.reap_group/1` sends `kill -KILL` to that
+group once the command returns — one call, the kernel takes the tree
+(ADR 0034). Before that, a host-mode suite left hundreds of stray `bash`
+processes and OOM'd the VM.
+
+After a run, all of these should print nothing:
 
 ```bash
 ls /tmp /dev/shm | grep mealplan
+pgrep -af 'sleep 424242|bwrap'                                  # no stray command trees
 sqlite3 mealplan_test.db 'select count(*) from oauth_clients'   # 0
 ```
 

@@ -92,23 +92,19 @@ config :mealplan,
   telnyx_messaging_profile_id: System.get_env("TELNYX_MESSAGING_PROFILE_ID"),
   telnyx_api_base: System.get_env("TELNYX_API_BASE")
 
-# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and stays
-# the default for dev and prod; "host" runs commands unconfined and is only for
-# a machine with no KVM, such as a CI runner; "microsandbox" gives each tenant
-# its own libkrun microVM (ADR 0027), for more than one household on one
-# machine, and needs read/write on /dev/kvm. Tests default to "microsandbox"
-# (ADR 0032): a test run that says nothing about containment was the point of
-# ADR 0022, and a test run that OOMs the host with accumulated bash trees is
-# not a test run at all. Anything else is a typo, and a typo that silently
+# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
+# default, test included; "host" runs commands unconfined and is for testing
+# application logic where no sandbox image can be built, such as a CI runner —
+# it reaps each command's process group itself, so it does not accumulate stray
+# process trees (ADR 0034); "microsandbox" gives each tenant its own libkrun
+# microVM (ADR 0027), for more than one household on one machine, and needs
+# read/write on /dev/kvm. Anything else is a typo, and a typo that silently
 # disabled the security boundary would be the worst possible failure, so it
-# raises. See ADR 0022, ADR 0027, ADR 0032 and Mealplan.Sandbox.mode/0.
-default_sandbox_mode =
-  if config_env() == :test, do: :microsandbox, else: :bubblewrap
-
+# raises. See ADR 0022, ADR 0027, ADR 0034 and Mealplan.Sandbox.mode/0.
 sandbox_mode =
   case System.get_env("MEALPLAN_SANDBOX") do
-    nil -> default_sandbox_mode
-    "" -> default_sandbox_mode
+    nil -> :bubblewrap
+    "" -> :bubblewrap
     "bubblewrap" -> :bubblewrap
     "host" -> :host
     "microsandbox" -> :microsandbox

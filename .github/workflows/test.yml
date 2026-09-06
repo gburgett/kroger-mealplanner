@@ -1,10 +1,11 @@
 name: test
 
 # The scenarios under features/ run in host mode here, on purpose: an
-# ubuntu-latest runner has no /dev/kvm, so the microsandbox default (ADR 0032)
-# cannot run, and building a bubblewrap image needs Docker plus unprivileged
-# user namespaces. Host mode is the no-KVM fallback, not the default — see
-# ADR 0022 and ADR 0032. The database is one SQLite file
+# ubuntu-latest runner has no /dev/kvm, so microsandbox cannot run, and building
+# a bubblewrap image needs Docker plus unprivileged user namespaces. Host mode
+# is explicit here because the default is bubblewrap (ADR 0034 took the test
+# default back from ADR 0032's microsandbox) — see ADR 0022 and ADR 0034. The
+# database is one SQLite file
 # (ADR 0024, restored by ADR 0030), so this job needs no service — ADR 0028's
 # PostgreSQL was only there for a self-hosted SuperTokens core, and ADR 0029
 # moved that core off the machine.
@@ -30,12 +31,14 @@ name: test
 
 # DISABLED 2026-09-06: on ubuntu-latest the runner loses communication with the
 # server partway through `mix test` ("The hosted runner lost communication with
-# the server", ~46 min in). The host-mode suite is memory-heavy — the same OOM
-# that hit the VM, see docs/test-suite-oom-findings.md — and a 7 GB / 2-core
-# runner does not fit it. `max_cases: 1` (test/test_helper.exs) made the run
-# serial and slower without helping. Until the suite fits a hosted runner, the
-# scenarios run on the VM before a release, per AGENTS.md. Re-enable by
-# restoring the push / pull_request triggers below:
+# the server", ~46 min in). The host-mode suite was memory-heavy — the same OOM
+# that hit the VM, see docs/test-suite-oom-findings.md — because nothing reaped
+# a command's process tree when the command returned. ADR 0034 fixed that: the
+# runner now `kill -KILL`s the command's process group when it returns, so the
+# accumulation is gone. Re-enabling this workflow is a follow-up that needs a
+# run on a hosted runner to confirm it now fits. Until then the scenarios run
+# on the VM before a release, per AGENTS.md.
+# Re-enable by restoring the push / pull_request triggers below:
 #
 #   push:
 #     branches: [main, elixir-migration]
@@ -98,9 +101,9 @@ jobs:
       # on files nobody in this change touched. Add it in a commit that runs
       # `mix format` on 1.19 first.
 
-      # Host mode is explicit here because ubuntu-latest has no /dev/kvm;
-      # `mix test` with no MEALPLAN_SANDBOX would pick microsandbox (ADR 0032)
-      # and preflight would raise.
+      # Host mode is explicit here because ubuntu-latest has no /dev/kvm and no
+      # bubblewrap image; `mix test` with no MEALPLAN_SANDBOX picks bubblewrap
+      # (ADR 0034) and preflight would raise for the missing image.
       - name: Run the scenarios
         env:
           MEALPLAN_SANDBOX: host
