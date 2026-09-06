@@ -36,7 +36,7 @@ decision, write a new record. Give the old record the status
 | [0019](0019-import-pinterest-boards-as-a-pins-and-links-ledger.md) | Import Pinterest boards as a pins-and-links ledger the agent converts | proposed |
 | [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021; PostgreSQL restored by ADR-0029 |
 | [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | accepted |
-| [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted |
+| [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted; the host-mode-for-CI default superseded by ADR-0032 |
 | [0023](0023-drive-the-screens-the-transport-and-the-third-parties-over-real-http-in-test.md) | Drive the screens, the transport and the third parties over real HTTP in test | accepted |
 | [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | superseded by ADR-0029; decision restored by ADR-0031 |
 | [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
@@ -46,8 +46,9 @@ decision, write a new record. Give the old record the status
 | [0029](0029-move-the-server-state-back-to-postgresql.md) | Move the server state back to PostgreSQL, because the SuperTokens core needs it | superseded by ADR-0031 |
 | [0030](0030-use-the-supertokens-managed-service-not-a-self-hosted-core.md) | Use the SuperTokens managed service, not a self-hosted core | accepted |
 | [0031](0031-return-the-server-state-to-sqlite.md) | Return the server state to SQLite | accepted |
+| [0032](0032-run-the-test-suite-in-microsandbox-mode-by-default.md) | Run the test suite in microsandbox mode by default | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
-`../bubblewrap-lockdown-study.md` and `../test-suite-parallelisation-study.md`. Plans that follow from a decision live in
+`../bubblewrap-lockdown-study.md`, `../test-suite-parallelisation-study.md` and `../test-suite-oom-findings.md`. Plans that follow from a decision live in
 `../plans/`.

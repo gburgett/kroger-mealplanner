@@ -1,7 +1,10 @@
 name: test
 
-# The scenarios under features/ run in host mode: no sandbox image to build, and
-# nothing spawned per scenario. See ADR 0022. The database is one SQLite file
+# The scenarios under features/ run in host mode here, on purpose: an
+# ubuntu-latest runner has no /dev/kvm, so the microsandbox default (ADR 0032)
+# cannot run, and building a bubblewrap image needs Docker plus unprivileged
+# user namespaces. Host mode is the no-KVM fallback, not the default — see
+# ADR 0022 and ADR 0032. The database is one SQLite file
 # (ADR 0024, restored by ADR 0030), so this job needs no service — ADR 0028's
 # PostgreSQL was only there for a self-hosted SuperTokens core, and ADR 0029
 # moved that core off the machine.
@@ -85,6 +88,9 @@ jobs:
       # on files nobody in this change touched. Add it in a commit that runs
       # `mix format` on 1.19 first.
 
+      # Host mode is explicit here because ubuntu-latest has no /dev/kvm;
+      # `mix test` with no MEALPLAN_SANDBOX would pick microsandbox (ADR 0032)
+      # and preflight would raise.
       - name: Run the scenarios
         env:
           MEALPLAN_SANDBOX: host

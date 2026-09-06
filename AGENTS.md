@@ -301,10 +301,17 @@ and nothing else.
 
 That is what ADR 0022 said it had lost and would need to pay back. It is paid.
 
-**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine that
-cannot build the sandbox image, such as a CI runner. Every `@security` scenario
-is EXCLUDED in that mode and `mix test` prints a banner saying so, because a
-green run that quietly skipped them would be the worst possible outcome.
+**`mix test` defaults to microsandbox** (ADR 0032). Each tenant runs in a libkrun
+microVM, so the default run asserts containment for real. It needs `msb` on
+`PATH`, read/write on `/dev/kvm` (`msb doctor`), and `sandbox-image/oci.tar`
+built with `./sandbox-image/build.sh --microsandbox`. It does not need
+`MEALPLAN_CLI_PATH`: the `mealplan` binary is staged into the image.
+
+**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine with no
+KVM, such as a CI runner. Every `@security` and `@microsandbox` scenario is
+EXCLUDED in that mode and `mix test` prints a banner saying so. Host mode was
+the old default, and it is why the full suite used to OOM this machine — see
+`docs/test-suite-oom-findings.md`.
 
 That exclusion is currently wider than it needs to be, and knowing so is worth
 more than pretending otherwise: `mix test --include security` passes 22 of the
@@ -314,25 +321,29 @@ Only "History cannot be pushed anywhere" needs real confinement. Narrowing the
 rule needs a second tag and changes what a green run claims, so it has not been
 done — see ADR 0023.
 
-Before a release, run them for real:
+**`MEALPLAN_SANDBOX=bubblewrap` is still the product**, and still the only mode
+that runs every `@security` scenario, the `@bubblewrap` ones included. Run it
+before a release:
 
 ```bash
-./sandbox-image/build.sh && ./cli/build.sh && mix test   # bubblewrap, @security included
+./sandbox-image/build.sh && ./cli/build.sh && MEALPLAN_SANDBOX=bubblewrap mix test
 ```
 
 ### Running the suite
 
 ```bash
-MEALPLAN_SANDBOX=host \
-MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release \
-  mix test
+mix test    # microsandbox, the default on a machine with KVM
 ```
 
-That is the command CI runs and the one to reach for while working. The two
-variables are not optional in a checkout with no sandbox image: `MEALPLAN_SANDBOX`
-defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
-command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
-find `mealplan`, which is staged into that image rather than installed on PATH.
+On a machine with no KVM — CI is one — say so on purpose:
+
+```bash
+MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
+```
+
+`MEALPLAN_CLI_PATH` is a host-mode need only: under microsandbox and bubblewrap
+the binary is staged into the image. A machine with no KVM and no image built
+has no mode that works, and the preflight raise names the piece that is missing.
 
 **Nothing else has to be running.** The state is one SQLite file (ADR 0024,
 restored by ADR 0031), so a test run needs no server, no user, no password and
@@ -349,10 +360,10 @@ port. No scenario can reach the managed core or send a real text message.
 Narrowing a run:
 
 ```bash
-mix test test/mealplan/sandbox/scratch_test.exs   # a unit test file
-mix test --only security                          # containment, needs bubblewrap
-mix test --include security                       # host mode: 22 of 23 pass, ADR 0023
-mix test test/mealplan/auth/sms_test.exs          # the Twilio and Telnyx request shapes
+mix test test/mealplan/sandbox/scratch_test.exs     # a unit test file
+mix test test/mealplan/sandbox/microsandbox_test.exs # the microVM backend, real KVM
+mix test --only security                            # @security scenarios only
+mix test test/mealplan/auth/sms_test.exs            # the Twilio and Telnyx request shapes
 ```
 
 Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
@@ -400,8 +411,9 @@ Rules of thumb:
 - **A bug gets a failing scenario before it gets a fix.**
 - `@core` and `@security` must pass before any release. `@future` documents
   intent and is excluded from the default run. `@security` cannot pass under
-  `MEALPLAN_SANDBOX=host`, where it does not run at all — a release needs the
-  bubblewrap run.
+  `MEALPLAN_SANDBOX=host`, where it does not run at all; microsandbox covers the
+  `@microsandbox` half, and a release still runs bubblewrap for the
+  `@bubblewrap` scenarios.
 
 See `features/README.md` for the conventions the scenarios follow.
 
