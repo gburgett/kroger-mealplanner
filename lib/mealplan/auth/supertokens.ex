@@ -19,9 +19,11 @@ defmodule Mealplan.Auth.SuperTokens do
   above exactly this call — and it is the reason Twilio and Telnyx attach as
   ordinary HTTP clients rather than as SuperTokens plugins.
 
-  **The core is a trusted component.** Anything that reaches it can act on
-  every user, so it binds `127.0.0.1:3567`, nothing forwards to it, and
-  `SUPERTOKENS_API_KEY` is a second lock rather than the only one.
+  **The core is a trusted component, and it is the managed deployment** (ADR
+  0029). Anything that can call it can act on every user. There is no network
+  boundary in front of it, so `SUPERTOKENS_API_KEY` — sent on every call below,
+  in both `Authorization` and `api-key` — is the whole of the lock rather than a
+  second one.
 
   What the core owns, and this module therefore does not re-implement: the code
   itself, its lifetime, the device binding that stops a code being spent from
@@ -55,9 +57,11 @@ defmodule Mealplan.Auth.SuperTokens do
       %__MODULE__{
         message:
           "the SuperTokens core did not answer #{endpoint}: #{inspect(reason)}.\n\n" <>
-            "It should be listening on #{Mealplan.Config.supertokens_base()}. Check it with:\n\n" <>
-            "    systemctl --user status supertokens.service\n" <>
-            "    curl -sS #{Mealplan.Config.supertokens_base()}/hello\n",
+            "It is the managed deployment at #{Mealplan.Config.supertokens_base()} " <>
+            "(ADR 0029). Check it, and the key, with:\n\n" <>
+            "    curl -sS #{Mealplan.Config.supertokens_base()}/hello\n" <>
+            "    curl -sS -H \"api-key: $SUPERTOKENS_API_KEY\" " <>
+            "#{Mealplan.Config.supertokens_base()}/apiversion\n",
         endpoint: endpoint,
         status: nil
       }

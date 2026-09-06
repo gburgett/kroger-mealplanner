@@ -3,8 +3,9 @@ name: test
 # The scenarios under features/ run in host mode: no sandbox image to build, and
 # nothing spawned per scenario. See ADR 0022. The database is PostgreSQL again
 # (ADR 0028), so this job starts one service — that is the cost ADR 0024 had
-# bought and ADR 0028 spent, and it is spent because the SuperTokens core the
-# sign-in scenarios drive accepts no other database.
+# bought and ADR 0028 spent. ADR 0028 spent it for a self-hosted SuperTokens
+# core; ADR 0029 moved the core to the managed service and the state stayed in
+# PostgreSQL, so the job still needs the service.
 #
 # The tool scenarios run in the test BEAM against the handlers. The ones about
 # the screens and the transport go over a real socket to an endpoint this same

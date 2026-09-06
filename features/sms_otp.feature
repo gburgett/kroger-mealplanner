@@ -16,9 +16,12 @@ Feature: The household signs in with a code sent to their telephone
   number, an SMS arrives, and the code goes back in a form. The session that
   follows is an ordinary signed cookie.
 
-  A self-hosted SuperTokens core makes and checks the code. It runs on
-  127.0.0.1:3567 and it is never public — anything that reaches it can act on
-  every user. It does NOT send the message: it returns the code to this server,
+  A SuperTokens core makes and checks the code. It is the managed deployment at
+  `st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io` (ADR 0029),
+  reached over HTTPS and authenticated with `SUPERTOKENS_API_KEY`. That key is
+  the whole of the lock: the core is a trusted component, anything that can call
+  it can act on every user, and there is no network boundary in front of it any
+  more. The core does NOT send the message: it returns the code to this server,
   and this server posts it to Twilio or to Telnyx. That is the same shape as
   Kroger and Walmart, and it is why swapping one provider for the other is one
   environment variable.
@@ -117,6 +120,6 @@ Feature: The household signs in with a code sent to their telephone
   @security
   Scenario: The core is not reachable from the sandbox
     Given the household has approved a client
-    When the client runs "curl -s http://127.0.0.1:3567/hello"
+    When the client runs "curl -s https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io/hello"
     Then the command fails
     And no answer from the core reaches the agent

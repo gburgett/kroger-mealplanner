@@ -2,9 +2,9 @@ import Config
 
 # The database is PostgreSQL (ADR 0028). A test run therefore needs a server
 # running, which is exactly what ADR 0024 had bought and what ADR 0028 spent.
-# It is spendable and not free: the SuperTokens core that `features/sms_otp.feature`
-# drives needs the same server, so a developer set up to run that feature is
-# already set up to run the suite. A fresh checkout needs one line first:
+# ADR 0028 spent it for a self-hosted SuperTokens core; ADR 0029 moved the core
+# to the managed service, and the state stayed in PostgreSQL, so the suite
+# still needs a server. A fresh checkout needs one line first:
 #
 #     sudo systemctl start postgresql     # or: docker compose up -d db
 #

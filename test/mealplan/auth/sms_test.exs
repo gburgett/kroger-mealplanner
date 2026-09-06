@@ -190,6 +190,11 @@ defmodule Mealplan.Auth.SmsTest do
 
     test "a missing MEALPLAN_SMS_FROM is named for either provider" do
       Application.delete_env(:mealplan, :sms_from)
+      # Give each provider its credential, so the only thing still missing is
+      # the sender.
+      Application.put_env(:mealplan, :twilio_account_sid, "AC123")
+      Application.put_env(:mealplan, :twilio_auth_token, "secret-token")
+      Application.put_env(:mealplan, :telnyx_api_key, "KEY123")
 
       for provider <- ["twilio", "telnyx"] do
         Application.put_env(:mealplan, :sms_provider, provider)

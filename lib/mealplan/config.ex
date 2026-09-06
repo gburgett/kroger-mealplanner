@@ -47,10 +47,17 @@ defmodule Mealplan.Config do
   """
   def owner_phone, do: presence(get(:owner_phone))
 
-  @doc "The SuperTokens core. Loopback. Never published — see ADR 0027."
-  def supertokens_base, do: get(:supertokens_base) || "http://127.0.0.1:3567"
+  @doc "The SuperTokens core — the managed deployment, over HTTPS. See ADR 0029."
+  def supertokens_base,
+    do:
+      get(:supertokens_base) ||
+        "https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io"
 
-  @doc "The core's API key. Nil is allowed, and the core then has none either."
+  @doc """
+  The core's API key. It is the whole of the lock now (ADR 0029): the managed
+  core has no network boundary in front of it. Nil is a misconfiguration, and
+  `Mealplan.Boot` names it in the start-up health line.
+  """
   def supertokens_api_key, do: presence(get(:supertokens_api_key))
 
   @doc ~S'"twilio" or "telnyx". Anything else is a typo and `Mealplan.Auth.Sms` says so.'

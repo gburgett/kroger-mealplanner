@@ -3,9 +3,10 @@ import Config
 # Server state, in PostgreSQL (ADR 0028). `mix ecto.reset` is the whole reset.
 #
 # A local server has to be running — that is the cost ADR 0024 had bought and
-# ADR 0028 spent, and it is spendable because the SuperTokens core needs the
-# same server. DATABASE_URL overrides every field below, which is how a
-# developer points at a container instead.
+# ADR 0028 spent. ADR 0028 spent it for a self-hosted core; ADR 0029 moved the
+# core to the managed service, and the state stayed here. DATABASE_URL
+# overrides every field below, which is how a developer points at a container
+# instead.
 #
 # It cannot be inside the meal-plan folder, whatever anyone sets: a connection
 # string names a host and a database, not a path in the sandbox mount.

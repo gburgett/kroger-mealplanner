@@ -64,9 +64,16 @@ config :mealplan,
   # MEALPLAN_OWNER: one household, one number. A request for any other number
   # is refused BEFORE the core is called, so a stranger costs no message.
   owner_phone: System.get_env("MEALPLAN_OWNER_PHONE"),
-  # The SuperTokens core. Loopback, always — anything that reaches it can act
-  # on every user, so it is never published and never proxied. See ADR 0027.
-  supertokens_base: get.("SUPERTOKENS_CONNECTION_URI", "http://127.0.0.1:3567"),
+  # The SuperTokens core — the managed deployment (ADR 0029), reached over
+  # HTTPS. `SUPERTOKENS_API_KEY` is the whole of the lock: the core is a
+  # trusted component, anything that can call it can act on every user, and
+  # there is no network boundary in front of it. A missing key is no sign-in
+  # at all, and `Mealplan.Boot` says so in the start-up health line.
+  supertokens_base:
+    get.(
+      "SUPERTOKENS_CONNECTION_URI",
+      "https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io"
+    ),
   supertokens_api_key: System.get_env("SUPERTOKENS_API_KEY"),
   # "twilio" or "telnyx". The core makes the code and hands it back; this
   # server posts it. Neither provider is a package — one signed call each,
@@ -218,8 +225,8 @@ end
 if config_env() == :prod do
   # The state database (ADR 0028). No default: a server that silently opens the
   # wrong database is worse than one that refuses to start and names the
-  # variable. The SuperTokens core has its own URL and its own database in the
-  # same server; the two share no table.
+  # variable. The SuperTokens core is the managed deployment (ADR 0029) and
+  # brings its own database — nothing on this VM shares this one.
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -227,9 +234,6 @@ if config_env() == :prod do
       It names the meal planner's own database, for example:
 
           postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
-
-      The SuperTokens core has its own, POSTGRESQL_CONNECTION_URI, in
-      deploy/supertokens.service. They are two databases in one server.
       """
 
   config :mealplan, Mealplan.Repo,

@@ -1,12 +1,14 @@
 defmodule Mealplan.Mock.SuperTokens do
   @moduledoc """
-  The SuperTokens core and the SMS provider, stood in for. See ADR 0027.
+  The SuperTokens core and the SMS provider, stood in for. See ADR 0027 and
+  ADR 0029.
 
-  `features/README.md` allows exactly one kind of mock — a third-party HTTP API
-  — and this is two of them behind one server, because in a sign-in they are
-  one round trip: the core makes the code, and the provider carries it. Running
-  them on one port keeps the scenario able to say "the code that arrived" and
-  mean the code the core actually made.
+  The real core is the managed deployment (ADR 0029), reached over HTTPS with
+  an API key. `features/README.md` allows exactly one kind of mock — a
+  third-party HTTP API — and this is two of them behind one server, because in
+  a sign-in they are one round trip: the core makes the code, and the provider
+  carries it. Running them on one port keeps the scenario able to say "the code
+  that arrived" and mean the code the core actually made.
 
   It is a real HTTP server on a real port, so `Mealplan.Auth.SuperTokens` and
   `Mealplan.Auth.Sms` make real requests, with real headers, real form encoding

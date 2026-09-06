@@ -87,16 +87,16 @@ already terminates. Nothing new is published. The session cookie is `Secure`,
 which is another way of saying these routes only work over HTTPS, which they
 already are.
 
-**The SuperTokens core needs no public route at all, and must not have one.**
-It binds `127.0.0.1:3567`. Only the meal planner talks to it, from the same
-machine. SuperTokens' own documentation is blunt about why:
+**The SuperTokens core needs no route on this VM at all.** It is the managed
+deployment (ADR 0029): SuperTokens runs it, at
+`https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`, and the
+meal planner reaches it as an outbound HTTPS call. Nothing on this machine
+listens for it and nothing forwards to it.
 
-> The core service is a trusted backend component. Deploy it on a private
-> network reachable only by your backend, and never expose it directly to the
-> public internet or to your frontend.
-
-Anything that reaches the core can act on every user. There is no per-user
-authorisation inside it.
+Anything that can call the core can act on every user. There is no per-user
+authorisation inside it, and no network boundary in front of it now, so
+`SUPERTOKENS_API_KEY` is the whole of the lock. It lives in the 0600
+`.env.elixir`.
 
 **So there is no reverse proxy here, and adding one would be a mistake.**
 The usual reason to put Caddy or nginx in front of two applications is to give
@@ -105,14 +105,8 @@ them one public address and route by path. That reason is absent twice over:
 * exe.dev **is** the reverse proxy. It terminates TLS, it holds the certificate,
   and it forwards one port. A second proxy behind it is a third hop that
   terminates nothing and routes nothing.
-* There is no second application to route to. The core is loopback-only by
-  design, so there is no path that should ever reach it from outside. A proxy
-  in front of both would exist only to publish the thing that must not be
-  published.
-
-What a proxy would add is a place to get that wrong. `location /auth { proxy_pass
-http://127.0.0.1:3567; }` is one line, it looks reasonable, and it publishes the
-user store.
+* There is no second application to route to. The only listener on this VM is
+  the meal planner. The core is somewhere else entirely.
 
 **When a proxy would earn its place**, and it does not yet: if this ever leaves
 exe.dev and has to terminate TLS itself, Caddy is the one to reach for — one
@@ -121,71 +115,57 @@ proxies to `127.0.0.1:8000`, with the core still nowhere in the file. That is a
 change of hosting, not a change of design, and it belongs in a record of its own
 when somebody makes it.
 
-## The two other services
+## The other service
 
-`systemctl --user` addresses all three. They start in this order and stop in
-any.
+Two services run on this VM: the meal planner and PostgreSQL. The SuperTokens
+core is the managed deployment (ADR 0029) and runs off the machine.
 
 ```bash
-systemctl --user status supertokens.service     # the sign-in codes (ADR 0027)
 systemctl --user status mealplan-elixir.service # the meal planner
-sudo systemctl status postgresql                # the state for both (ADR 0028)
+sudo systemctl status postgresql                # its state (ADR 0028)
 ```
 
 ### PostgreSQL, once
 
-Two databases in one server. They share a backup and no table.
+One database, for the meal planner. (ADR 0028 gave it PostgreSQL because a
+self-hosted core needed the server anyway; ADR 0029 moved the core off the VM,
+and the state stays here for now.)
 
 ```bash
 sudo -u postgres createuser --pwprompt mealplan
 sudo -u postgres createdb --owner=mealplan mealplan
-
-sudo -u postgres createuser --pwprompt supertokens
-sudo -u postgres createdb --owner=supertokens supertokens
 ```
 
-Then the two connection strings, each in the 0600 file its service reads:
+Then its connection string, in the 0600 file the service reads:
 
 ```bash
 # ~/kroger-mealplanner/.env          (the meal planner)
 DATABASE_URL=postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
-
-# ~/kroger-mealplanner/.env.supertokens   (the core)
-POSTGRESQL_CONNECTION_URI=postgresql://supertokens:PASSWORD@127.0.0.1:5432/supertokens
-SUPERTOKENS_API_KEY=<something long and random>
 ```
 
-The scheme must be `postgresql://`. The core refuses `postgres://` at start-up,
-and says so.
+### The SuperTokens core
 
-`SUPERTOKENS_API_KEY` goes in **both** files — the core checks it and the meal
-planner sends it. They have to match, and a mismatch shows up as every sign-in
-failing with "the sign-in service did not answer".
-
-### The SuperTokens core, once
-
-The core is a separate download; the unit starts it and does not install it.
-Take the **Binary** build for PostgreSQL from
-<https://supertokens.com/docs/deployment/self-host-supertokens>, then:
+Nothing to install. Point the meal planner at the managed deployment and give
+it the key from that deployment's dashboard, in `.env.elixir` (0600, gitignored):
 
 ```bash
-cd supertokens && sudo ./install
-cp deploy/supertokens.service ~/.config/systemd/user/supertokens.service
-systemctl --user daemon-reload
-systemctl --user enable --now supertokens.service
-
-curl -sS http://127.0.0.1:3567/hello     # "Hello" means the core AND its database
+# ~/kroger-mealplanner/.env.elixir
+SUPERTOKENS_API_KEY=<the key from the SuperTokens dashboard>
 ```
 
-`/hello` returns 200 only when the core's database connection is good, which is
-why it is the check rather than `systemctl is-active`.
-
-**Check that it is not reachable from anywhere else.** This is the one command
-worth running after any change to that unit:
+The URL is `deploy/mealplan-elixir.service`'s `SUPERTOKENS_CONNECTION_URI` and
+defaults to the same value in `config/runtime.exs`. Check the core and the key
+from this VM — not from the sandbox, which has no network:
 
 ```bash
-ss -ltnp | grep 3567        # must say 127.0.0.1:3567, never 0.0.0.0:3567
+curl -sS "$SUPERTOKENS_CONNECTION_URI/hello"                         # -> Hello
+curl -sS -H "api-key: $SUPERTOKENS_API_KEY" "$SUPERTOKENS_CONNECTION_URI/apiversion"
 ```
+
+`/hello` answers with no key. `/apiversion` answers `Invalid API key` when the
+key is wrong or missing, and a JSON version list when it is right. A wrong key
+shows up in the meal planner as every sign-in failing, and the start-up
+`sign-in:` journal line says `NO API KEY` when the variable is unset.
 
 ### The SMS provider
 

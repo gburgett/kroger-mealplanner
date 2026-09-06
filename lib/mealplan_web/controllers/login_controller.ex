@@ -93,14 +93,17 @@ defmodule MealplanWeb.LoginController do
 
     case {pending(conn), params["code"]} do
       {nil, _} ->
-        # No login in flight. Either the session was dropped, or the number was
-        # never the household's and `send_code/2` stored nothing.
+        # No login in flight. Either the session was dropped (a spent device,
+        # an expired code), or the number was never the household's and
+        # `send_code/2` stored nothing. Either way this is a refused sign-in,
+        # not a fresh visit, so it answers 401 like every other failure below.
         conn
+        |> put_status(:unauthorized)
         |> html(
           LoginPage.phone_form(
             return_to: return_to,
             configured: Mealplan.Config.owner_phone() != nil,
-            error: "That code did not work. Ask for a new one."
+            error: "That code did not work. Ask for a new code."
           )
         )
 
@@ -142,10 +145,10 @@ defmodule MealplanWeb.LoginController do
         )
 
       {:error, :wrong_code, _} ->
-        restart(conn, return_to, "Too many wrong codes. Ask for a new one.")
+        restart(conn, return_to, "Too many wrong codes. Ask for a new code.")
 
       {:error, :expired} ->
-        restart(conn, return_to, "That code has expired. Ask for a new one.")
+        restart(conn, return_to, "That code has expired. Ask for a new code.")
 
       {:error, :restart} ->
         restart(conn, return_to, "That sign-in is no longer valid. Ask for a new code.")

@@ -35,13 +35,13 @@
 # still needs ./sandbox-image/build.sh — unchanged by this migration.
 Description=Kroger meal planner MCP server (Elixir)
 Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md
-# Two services to wait for now (ADR 0027, ADR 0028): the state is a database in
-# PostgreSQL again, and the household cannot sign in without the SuperTokens
-# core. Neither is a hard requirement — the server starts and says in the
-# journal what is missing — but starting after them avoids a first minute of
-# refusals on every reboot.
-After=network-online.target postgresql.service supertokens.service
-Wants=network-online.target postgresql.service supertokens.service
+# One local service to wait for (ADR 0028): the state is a database in
+# PostgreSQL. The SuperTokens core is the managed deployment (ADR 0029), off
+# this VM, reached over the network — nothing to order against here. Neither
+# PostgreSQL nor the core is a hard requirement: the server starts and the
+# journal says what is missing.
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
 
 [Service]
 Type=simple
@@ -67,9 +67,10 @@ Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan
 # fact about one household, and the journal redacts all but the last four
 # digits anyway — so it stays in this file beside MEALPLAN_OWNER.
 Environment=MEALPLAN_OWNER_PHONE=+15095550142
-# The SuperTokens core. Loopback, and it must stay that way: anything that
-# reaches it can act on every user. See deploy/supertokens.service.
-Environment=SUPERTOKENS_CONNECTION_URI=http://127.0.0.1:3567
+# The SuperTokens core — the managed deployment (ADR 0029), over HTTPS. Its
+# API key travels in .env.elixir, not here: it is the whole of the lock on the
+# user store, and this file is world-readable and in git.
+Environment=SUPERTOKENS_CONNECTION_URI=https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io
 # "twilio" or "telnyx". Both are built; this picks. The credentials for
 # whichever one this names travel in .env, never here.
 Environment=MEALPLAN_SMS_PROVIDER=twilio
@@ -98,19 +99,20 @@ Environment=ELIXIR_ERL_OPTIONS=+fnu
 # else it signed before (ADR 0027), so rotating it signs everybody out.
 #
 # KROGER_CLIENT_ID / KROGER_CLIENT_SECRET and the Walmart credential travel the
-# same path. So do the four that arrived with ADR 0027 and ADR 0028:
+# same path. So do the four that arrived with ADR 0027, ADR 0028 and ADR 0029:
 #
 #     DATABASE_URL=postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
-#     SUPERTOKENS_API_KEY=...          # the same value as .env.supertokens
+#     SUPERTOKENS_API_KEY=...          # the managed core's key, from its dashboard
 #     MEALPLAN_SMS_FROM=+1...          # the number codes are sent FROM
 #     TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
 #     # or, for Telnyx: TELNYX_API_KEY=... TELNYX_MESSAGING_PROFILE_ID=...
 #
 # DATABASE_URL is the one with no default: the server refuses to start without
 # it and names it, because a server that silently opens the wrong database is
-# worse than one that will not start. The SMS credentials are optional in the
-# same way the Kroger ones are — the server starts, and the journal line that
-# begins "sign-in:" says what is missing.
+# worse than one that will not start. SUPERTOKENS_API_KEY has no default
+# either, but the server still starts without it — the "sign-in:" journal line
+# says NO API KEY and every code request then fails (ADR 0029). The SMS
+# credentials are optional the same way the Kroger ones are.
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env.elixir
 

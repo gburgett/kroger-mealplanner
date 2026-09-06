@@ -88,9 +88,9 @@ sandbox.
 | Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
-| Server state | the SuperTokens core accepts nothing else, and one server beats two | PostgreSQL, through Ecto | ADR 0029 |
+| Server state | PostgreSQL arrived with the core (ADR 0029); the core left (ADR 0030), the state stayed | PostgreSQL, through Ecto | ADR 0029 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
-| Who may approve | a header is only worth the network path it arrived on | an SMS one-time code, through a self-hosted SuperTokens core | ADR 0028 |
+| Who may approve | a header is only worth the network path it arrived on | an SMS one-time code; the SuperTokens managed service is the code authority | ADR 0028, ADR 0030 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
 | Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `:public_key` RSA, no package | ADR 0017 |
 
@@ -164,18 +164,18 @@ Every command below is `systemctl --user`; `sudo systemctl` addresses a
 different manager and will not find it. Lingering is on, so it survives a logout
 and comes back after a reboot.
 
-**There are three services now, not one.** `mealplan-elixir.service` is the
-product. `supertokens.service` is the authority for the household's sign-in
-code (ADR 0028). PostgreSQL is a system service, under `sudo systemctl`, and
-holds a database for each of the other two (ADR 0029).
+**There are two services, not one.** `mealplan-elixir.service` is the product.
+PostgreSQL is a system service, under `sudo systemctl`, and holds the meal
+planner's state (ADR 0029).
 
-**The SuperTokens core binds `127.0.0.1:3567` and must never be published.**
-Anything that reaches it can act on every user; there is no per-user
-authorisation inside it. `ss -ltnp | grep 3567` after any change to that unit —
-`0.0.0.0` there is the user store on the internet. There is no reverse proxy in
-front of these: exe.dev already is one, and the only other listener is the one
-that must not be reachable. `docs/deploying-behind-exe-dev.md` works through
-why, and when that would change.
+**The SuperTokens core is the managed deployment** (ADR 0030), off this VM, at
+`st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`. The meal
+planner reaches it as an outbound HTTPS call and authenticates with
+`SUPERTOKENS_API_KEY`. Anything that can call the core can act on every user,
+and there is no network boundary in front of it now, so that key is the whole
+of the lock — it lives in the 0600 `.env.elixir`, never in the unit. There is
+no reverse proxy on this VM: exe.dev already is one, and the meal planner is
+the only listener. `docs/deploying-behind-exe-dev.md` works through why.
 
 ```bash
 systemctl --user restart mealplan-elixir.service   # deploy a built release
@@ -335,11 +335,11 @@ defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
 command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
 find `mealplan`, which is staged into that image rather than installed on PATH.
 
-**A PostgreSQL server has to be running.** That is new, and it is the whole of
-what ADR 0024 bought and ADR 0029 spent: the SuperTokens core that
-`features/sms_otp.feature` drives accepts no other database, so a server is on
-the machine anyway and a second datastore beside it would buy only a second
-backup to forget. One line first, in a fresh checkout:
+**A PostgreSQL server has to be running.** That is what ADR 0024 bought and
+ADR 0029 spent. ADR 0029 spent it because a self-hosted SuperTokens core needed
+the server anyway; ADR 0030 moved the core to the managed service, but the
+state stays in PostgreSQL for now, so the requirement stands. One line first,
+in a fresh checkout:
 
 ```bash
 sudo systemctl start postgresql       # or: docker compose up -d db
@@ -349,10 +349,10 @@ sudo systemctl start postgresql       # or: docker compose up -d db
 `PGPASSWORD`, `PGHOST`, `PGPORT` and `PGDATABASE` override the defaults, and
 `DATABASE_URL` overrides all of them. `mix ecto.reset` is the reset.
 
-The SuperTokens core itself does **not** have to be running: it is a
-third-party HTTP API, which is the one kind of thing this suite mocks, and
+The SuperTokens core is **not** reached in a test run: it is a third-party HTTP
+API, which is the one kind of thing this suite mocks, and
 `Mealplan.Mock.SuperTokens` stands in for it and for the SMS provider on one
-port. No scenario can reach a real core or send a real text message.
+port. No scenario can reach the managed core or send a real text message.
 
 Narrowing a run:
 

@@ -3,6 +3,12 @@ defmodule MealplanWeb.Router do
 
   pipeline :browser do
     plug :accepts, ["html"]
+    # The household's sign-in keeps its state in the signed session cookie
+    # (ADR 0027): the login in flight on `/login`, and the `user_id` a
+    # completed sign-in leaves. Both `LoginController` and
+    # `MealplanWeb.Plugs.HouseholdSession` read it, so it has to be fetched
+    # before either runs.
+    plug :fetch_session
   end
 
   # The gated pages: the only screens a person opens. The gate is a session
@@ -10,6 +16,7 @@ defmodule MealplanWeb.Router do
   # an exe.dev header until ADR 0027 — see MealplanWeb.Plugs.HouseholdSession
   # for why a header could not carry it.
   pipeline :household do
+    plug :fetch_session
     plug MealplanWeb.Plugs.HouseholdSession
   end
 

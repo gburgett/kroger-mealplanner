@@ -119,7 +119,8 @@ defmodule Mealplan.Boot do
 
   # Named in the health check because a server nobody can sign in to is a
   # server that looks healthy and is not. Says which telephone, which core and
-  # which SMS provider, and says what is missing when something is (ADR 0027).
+  # which SMS provider, and says what is missing when something is (ADR 0027,
+  # ADR 0029).
   defp sign_in_status do
     phone = Mealplan.Config.owner_phone()
     core = Mealplan.Config.supertokens_base()
@@ -128,6 +129,11 @@ defmodule Mealplan.Boot do
       is_nil(phone) ->
         "NOT CONFIGURED. Set MEALPLAN_OWNER_PHONE to the household's number in " <>
           "E.164, or nobody can reach the consent page."
+
+      is_nil(Mealplan.Config.supertokens_api_key()) ->
+        "telephone #{redact(phone)}, core #{core} — but SUPERTOKENS_API_KEY is " <>
+          "not set. That key is the whole of the lock on the managed core " <>
+          "(ADR 0029), so no code can be made or checked without it."
 
       not Mealplan.Auth.Sms.configured?() ->
         "telephone #{redact(phone)}, core #{core} — but the SMS provider is not " <>

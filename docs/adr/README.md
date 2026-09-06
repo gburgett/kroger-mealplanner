@@ -42,8 +42,9 @@ decision, write a new record. Give the old record the status
 | [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
 | [0026](0026-onboard-a-new-household-through-tool-results-not-the-handshake.md) | Onboard a new household through tool-call results, not the handshake, and add the public install page Phase 8 left open | proposed |
 | [0027](0027-give-the-session-layer-a-microvm.md) | Give the session layer a microVM: microsandbox as a selectable backend | proposed |
-| [0028](0028-authenticate-the-household-with-sms-otp.md) | Authenticate the household with an SMS one-time code, through a self-hosted SuperTokens core | accepted |
-| [0029](0029-move-the-server-state-back-to-postgresql.md) | Move the server state back to PostgreSQL, because the SuperTokens core needs it | accepted |
+| [0028](0028-authenticate-the-household-with-sms-otp.md) | Authenticate the household with an SMS one-time code, through a self-hosted SuperTokens core | accepted; the self-hosted core superseded by ADR-0030 |
+| [0029](0029-move-the-server-state-back-to-postgresql.md) | Move the server state back to PostgreSQL, because the SuperTokens core needs it | accepted; reason overtaken by ADR-0030, decision stands |
+| [0030](0030-use-the-supertokens-managed-service-not-a-self-hosted-core.md) | Use the SuperTokens managed service, not a self-hosted core | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
