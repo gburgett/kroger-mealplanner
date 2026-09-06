@@ -703,14 +703,21 @@ defmodule Mealplan.Mcp.Tools do
     end)
   end
 
-  # The five network tools. Built here rather than as a module attribute
-  # because the Kroger descriptions carry `Mealplan.Kroger.Help.how_to/1`,
-  # which threads the configured public URL — the same rule as the OAuth
-  # issuer, never a header.
+  # The network tools. Built here rather than as a module attribute because
+  # the Kroger descriptions carry `Mealplan.Kroger.Help.how_to/1`, which
+  # threads the configured public URL — the same rule as the OAuth issuer,
+  # never a header.
+  #
+  # The three Walmart tools are left off entirely while the server has no
+  # Walmart credential (ADR 0033, written pending affiliate approval): an
+  # agent cannot use a tool it does not know exists, so there is nothing to
+  # refuse by name. Once WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY_PATH are
+  # set, `Mealplan.Walmart.Api.configured?/0` flips and they reappear with no
+  # further change needed here.
   defp network_tools do
     base_url = Mealplan.Config.public_url()
 
-    [
+    kroger_tools = [
       %{
         name: "kroger_find_products",
         title: "Find Kroger products for the lines on a shopping list",
@@ -730,29 +737,40 @@ defmodule Mealplan.Mcp.Tools do
             Mealplan.Kroger.Help.how_to(base_url),
         input_schema: @send_to_cart_input_schema,
         output_schema: @send_to_cart_output_schema
-      },
-      %{
-        name: "walmart_find_stores",
-        title: "Find the Walmart stores near a postcode",
-        description: @find_stores_description,
-        input_schema: @find_stores_input_schema,
-        output_schema: @find_stores_output_schema
-      },
-      %{
-        name: "walmart_find_products",
-        title: "Find Walmart products for the lines on a shopping list",
-        description: @find_walmart_products_description,
-        input_schema: @find_walmart_products_input_schema,
-        output_schema: @find_products_output_schema
-      },
-      %{
-        name: "walmart_cart_link",
-        title: "Build the link that fills the household Walmart cart",
-        description: @cart_link_description <> "\n\n" <> Mealplan.Walmart.Help.how_to(),
-        input_schema: @cart_link_input_schema,
-        output_schema: @cart_link_output_schema
       }
     ]
+
+    kroger_tools ++ walmart_tools()
+  end
+
+  defp walmart_tools do
+    if Mealplan.Walmart.Api.configured?() do
+      [
+        %{
+          name: "walmart_find_stores",
+          title: "Find the Walmart stores near a postcode",
+          description: @find_stores_description,
+          input_schema: @find_stores_input_schema,
+          output_schema: @find_stores_output_schema
+        },
+        %{
+          name: "walmart_find_products",
+          title: "Find Walmart products for the lines on a shopping list",
+          description: @find_walmart_products_description,
+          input_schema: @find_walmart_products_input_schema,
+          output_schema: @find_products_output_schema
+        },
+        %{
+          name: "walmart_cart_link",
+          title: "Build the link that fills the household Walmart cart",
+          description: @cart_link_description <> "\n\n" <> Mealplan.Walmart.Help.how_to(),
+          input_schema: @cart_link_input_schema,
+          output_schema: @cart_link_output_schema
+        }
+      ]
+    else
+      []
+    end
   end
 
   @doc "The set of tool names this server serves."

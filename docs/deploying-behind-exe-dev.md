@@ -390,9 +390,11 @@ for the household to sign in to. See ADR 0017.
    ```
 
 With no `WALMART_CONSUMER_ID` the server starts and works normally, and the
-three Walmart tools refuse and say what is missing. A key file that does not
-parse fails AT START-UP, while somebody is reading the journal, not on the
-first search.
+three Walmart tools are left off `tools/list` and out of the handshake
+instructions entirely — an agent cannot use a tool it does not know exists
+(ADR 0033). They reappear, with no further change, the moment a real
+credential is set. A key file that does not parse fails AT START-UP, while
+somebody is reading the journal, not on the first search.
 
 The start-up lines say which side is live: `walmart: configured, consumer ...`
 or `walmart: not configured`.

@@ -289,6 +289,25 @@ Feature: Shopping at Walmart through the affiliate API
     When a client connects to the meal planner over MCP
     Then the meal planner's instructions explain the Walmart flow
 
+  @core
+  Scenario: The Walmart tools disappear when the server has no credential
+    Pending affiliate approval, this server has no Walmart consumer id or
+    signing key at all. An agent cannot use a tool it does not know exists, so
+    hiding the three Walmart tools beats listing ones that would only ever
+    refuse. See ADR 0033. The moment a real credential is configured, they
+    come back with no further change needed.
+
+    Given the server has no Walmart credential
+    When a client connects to the meal planner over MCP
+    Then the server reports the tools:
+      | tool                 | purpose                                    |
+      | bash                 | run a shell command in the sandbox         |
+      | read_file            | read a file from the meal-plan folder      |
+      | write_file           | create or overwrite a file in the folder   |
+      | kroger_find_products | find Kroger products for a shopping list   |
+      | kroger_send_to_cart  | add the chosen products to the Kroger cart |
+    And the meal planner's instructions say nothing about Walmart
+
   @security
   Scenario: The Walmart tools cannot reach a file outside the meal-plan folder
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
