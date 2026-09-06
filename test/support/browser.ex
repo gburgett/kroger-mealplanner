@@ -73,17 +73,36 @@ defmodule Mealplan.Browser do
   @doc """
   A session for somebody who is not the household.
 
-  Signs in the normal way, then renames the user behind the session. That is
-  the only way to reach the "a session this server issued, for the wrong
-  person" branch of the gate: the login flow itself cannot produce one, because
-  one telephone belongs to one household.
+  Signs in the normal way, then turns the row behind that session into a
+  stranger: the owner membership is removed and the identifiers the real owner
+  keeps — telephone, SuperTokens id — are cleared, then the email is changed.
+  The live cookie still points here, so the gate now sees a session this server
+  issued for a user who owns nothing, which is the branch under test.
+
+  Renaming alone is not enough since `Mealplan.Accounts.owner?/2` resolves the
+  owner by membership, not by a configured string: the row would keep its owner
+  membership and still pass the gate.
+
+  The login flow cannot produce this session on its own, because one telephone
+  belongs to one household.
   """
   def signed_in_as_stranger(email) do
     headers = signed_in()
-    owner = Mealplan.Config.owner()
+    owner = Mealplan.Config.owner() |> String.trim() |> String.downcase()
 
-    Mealplan.Repo.get_by!(Mealplan.Accounts.User, email: String.downcase(owner))
-    |> Mealplan.Accounts.User.changeset(%{email: email})
+    user = Mealplan.Repo.get_by!(Mealplan.Accounts.User, email: owner)
+
+    user
+    |> Mealplan.Repo.preload(:memberships)
+    |> Map.fetch!(:memberships)
+    |> Enum.each(&Mealplan.Repo.delete!/1)
+
+    user
+    |> Ecto.Changeset.change(%{
+      email: email |> String.trim() |> String.downcase(),
+      phone: nil,
+      supertokens_user_id: nil
+    })
     |> Mealplan.Repo.update!()
 
     headers
