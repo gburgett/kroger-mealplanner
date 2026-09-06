@@ -68,6 +68,39 @@ defmodule Mealplan.Features.OnboardingSteps do
     {:ok, context}
   end
 
+  step "the onboarding note says to ask for photos of the recipes in the household's recipe books",
+       context do
+    text = last_text(context)
+
+    for word <- ["photo", "recipes", "books"] do
+      assert String.contains?(text, word), "the note never says \"#{word}\":\n#{text}"
+    end
+
+    {:ok, context}
+  end
+
+  step "the onboarding note says to ask how many adults and how many children they cook for",
+       context do
+    text = last_text(context)
+
+    for word <- ["adults", "children", "cooks"] do
+      assert String.contains?(text, word), "the note never says \"#{word}\":\n#{text}"
+    end
+
+    {:ok, context}
+  end
+
+  step "the onboarding note says to write that family size into {string} as {string} and {string}",
+       %{args: [target, first, second]} = context do
+    text = last_text(context)
+
+    for expected <- [target, first, second] do
+      assert String.contains?(text, expected), "the note never names #{expected}:\n#{text}"
+    end
+
+    {:ok, context}
+  end
+
   # --- the handshake instructions --------------------------------------------
 
   step "the meal planner's instructions carry the onboarding note", context do

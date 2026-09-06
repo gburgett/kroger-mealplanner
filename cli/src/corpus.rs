@@ -4,10 +4,12 @@
 //! recipe — it runs commands and commits — which is what keeps the document
 //! format defined in exactly one place despite the two languages. See ADR 0007.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use crate::quantity::{parse_quantity, unit_named, Number, Unit};
+use crate::quantity::{parse_quantity, to_display_number, unit_named, Number, Unit};
 
 /// Something wrong with a document, named well enough to act on.
 ///
@@ -89,6 +91,12 @@ pub struct Corpus {
     pub staples: Vec<String>,
     pub consumables: Vec<Consumable>,
     pub problems: Vec<Problem>,
+    /// Serving-size checks that are advisory, not corruption. A day is still
+    /// valid; the household just wants a look before it shops.
+    pub warnings: Vec<Problem>,
+    /// adults + children from `config/household.md`, or None when the household
+    /// never answered — in which case the validator has no serving opinion.
+    pub household_servings: Option<Number>,
 }
 
 impl Corpus {
@@ -106,6 +114,8 @@ pub fn load(root: &Path, only: Option<&str>) -> Corpus {
         staples: Vec::new(),
         consumables: Vec::new(),
         problems: Vec::new(),
+        warnings: Vec::new(),
+        household_servings: None,
     };
 
     let wanted: Option<String> = only.map(normalise);
@@ -125,6 +135,7 @@ pub fn load(root: &Path, only: Option<&str>) -> Corpus {
 
     corpus.staples = read_staples(root);
     corpus.consumables = read_consumables(root);
+    corpus.household_servings = read_household_servings(root, &mut corpus);
 
     if let Some(only) = wanted {
         // A path outside recipes/ and meals/ has no schema to check. README.md
@@ -406,6 +417,211 @@ fn read_consumables(root: &Path) -> Vec<Consumable> {
             Some(Consumable { item, status })
         })
         .collect()
+}
+
+// --- household size ------------------------------------------------------
+
+/// `adults:` and `children:` from `config/household.md`, summed.
+///
+/// `preferences/household.md` is prose and never parsed (ADR 0013); the one
+/// machine-read household fact lives in its own document so the validator can
+/// compare meal servings against it. An absent file, an absent front matter,
+/// or two empty values is "never answered", which is an ordinary state — the
+/// validator simply has no serving opinion.
+fn read_household_servings(root: &Path, corpus: &mut Corpus) -> Option<Number> {
+    let path = "config/household.md";
+    let Ok(text) = fs::read_to_string(root.join(path)) else {
+        return None;
+    };
+    let Some(front) = front_matter(&text) else {
+        return None;
+    };
+
+    let adults = field(&front, "adults").map(|value| value.trim().to_string());
+    let children = field(&front, "children").map(|value| value.trim().to_string());
+
+    let adults_given = adults.as_deref().is_some_and(|value| !value.is_empty());
+    let children_given = children.as_deref().is_some_and(|value| !value.is_empty());
+
+    match (adults_given, children_given) {
+        (false, false) => None,
+        (true, false) | (false, true) => {
+            let missing = if adults_given { "children" } else { "adults" };
+            corpus.problems.push(Problem {
+                file: path.to_string(),
+                line: None,
+                message: format!(
+                    "the household size is half-written: no `{missing}:`. A family size is both `adults:` and `children:` — write both, or leave both empty."
+                ),
+            });
+            None
+        }
+        (true, true) => {
+            let adults_raw = adults.unwrap_or_default();
+            let children_raw = children.unwrap_or_default();
+
+            match (parse_count(&adults_raw), parse_count(&children_raw)) {
+                (Some(adults), Some(children)) => {
+                    let total = Number::from_integer(adults) + Number::from_integer(children);
+                    if total > Number::from_integer(0) { Some(total) } else { None }
+                }
+                _ => {
+                    let (key, seen) = if parse_count(&adults_raw).is_none() {
+                        ("adults", &adults_raw)
+                    } else {
+                        ("children", &children_raw)
+                    };
+                    corpus.problems.push(Problem {
+                        file: path.to_string(),
+                        line: None,
+                        message: format!(
+                            "cannot read `{key}: {seen}`. `adults:` and `children:` are whole non-negative numbers, for example `adults: 2` and `children: 2`."
+                        ),
+                    });
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Warn, never fail, when a meal feeds too few people or more than double the
+/// household. A lighter meal than the whole household is ordinary (a weekday
+/// breakfast for one), so these are advisory, not corruption.
+///
+/// The warning is emitted only for a day that is the change in front of the
+/// agent right now — uncommitted, or touched by the latest commit — so a
+/// standing plan whose Tuesday lunch serves one does not get re-flagged on
+/// every later `mealplan validate` that has nothing to do with it. See
+/// `changed_meal_files`.
+pub fn check_servings(corpus: &mut Corpus) {
+    let Some(expected) = corpus.household_servings else {
+        return;
+    };
+    let twice = expected * Number::from_integer(2);
+    let changed = changed_meal_files(&corpus.root);
+    let mut warnings = Vec::new();
+
+    for day in &corpus.days {
+        // When git cannot say (a folder that is not a repository), warn about
+        // every offending day rather than silently none of them.
+        if let Some(changed) = &changed {
+            if !changed.contains(day.path.as_str()) {
+                continue;
+            }
+        }
+
+        for meal in &day.meals {
+            let Some(servings) = effective_servings(corpus, meal) else {
+                continue;
+            };
+
+            if servings < expected {
+                warnings.push(Problem {
+                    file: day.path.clone(),
+                    line: Some(meal.line),
+                    message: format!(
+                        "{} serves {}, too few for the household of {}. If everyone is eating, raise its `servings:`.",
+                        meal.name,
+                        to_display_number(servings),
+                        to_display_number(expected)
+                    ),
+                });
+            } else if servings > twice {
+                warnings.push(Problem {
+                    file: day.path.clone(),
+                    line: Some(meal.line),
+                    message: format!(
+                        "{} serves {}, more than double the household of {}. Check that `servings:` is not a doubled recipe amount.",
+                        meal.name,
+                        to_display_number(servings),
+                        to_display_number(expected)
+                    ),
+                });
+            }
+        }
+    }
+
+    corpus.warnings = warnings;
+}
+
+/// The meal files the agent is looking at right now: the ones with uncommitted
+/// changes, plus the ones the latest commit touched.
+///
+/// `mealplan validate` is normally run straight after an edit, and the server
+/// commits after every mutating command — so "the latest commit" is the edit
+/// the agent just made, and uncommitted changes are the edit still in progress
+/// inside this one command. Gating to those two keeps the warning attached to
+/// what is being changed.
+///
+/// Returns `None` when git cannot say, which `check_servings` treats as "no
+/// gating".
+fn changed_meal_files(root: &Path) -> Option<HashSet<String>> {
+    let status = Command::new("git")
+        .current_dir(root)
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()?;
+    if !status.status.success() {
+        return None;
+    }
+
+    let last_commit = Command::new("git")
+        .current_dir(root)
+        .args(["diff-tree", "--no-commit-id", "--name-only", "--root", "-r", "HEAD"])
+        .output()
+        .ok()?;
+    if !last_commit.status.success() {
+        return None;
+    }
+
+    let mut files = HashSet::new();
+
+    for line in String::from_utf8_lossy(&status.stdout).lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        // Porcelain: "XY path", or "XY old -> new" for a rename. The path is
+        // everything after the two status characters and the following space;
+        // for a rename, the destination is the right side of the arrow.
+        let path = line[3..].trim();
+        let path = path.rsplit(" -> ").next().unwrap_or(path).trim();
+        if path.starts_with("meals/") {
+            files.insert(path.to_string());
+        }
+    }
+
+    for line in String::from_utf8_lossy(&last_commit.stdout).lines() {
+        let path = line.trim();
+        if path.starts_with("meals/") {
+            files.insert(path.to_string());
+        }
+    }
+
+    Some(files)
+}
+
+/// What a meal feeds: its own `servings:` line, or — without one — what its
+/// recipes feed. A meal with no recipes and no servings claims nothing, so it
+/// is never checked.
+fn effective_servings(corpus: &Corpus, meal: &Meal) -> Option<Number> {
+    if let Some(servings) = meal.servings {
+        return Some(servings);
+    }
+    meal.recipes
+        .iter()
+        .filter_map(|link| corpus.recipe(&link.target))
+        .map(|recipe| recipe.servings)
+        .max()
+}
+
+/// A whole, non-negative count: "2". Not "2.5", not "two".
+fn parse_count(raw: &str) -> Option<i128> {
+    let text = raw.trim();
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
 }
 
 // --- reading documents -----------------------------------------------------

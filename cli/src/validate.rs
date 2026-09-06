@@ -5,12 +5,13 @@
 
 use std::path::Path;
 
-use crate::corpus::{load, Corpus};
+use crate::corpus::{check_servings, load, Corpus};
 use crate::json;
 use crate::quantity::to_display_number;
 
 pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
-    let corpus = load(root, only);
+    let mut corpus = load(root, only);
+    check_servings(&mut corpus);
 
     if as_json {
         println!("{}", describe(&corpus));
@@ -18,6 +19,9 @@ pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
     }
 
     if corpus.problems.is_empty() {
+        for warning in &corpus.warnings {
+            eprintln!("warning: {}", warning.render());
+        }
         match only {
             Some(path) => println!("{path} is valid."),
             None => {
@@ -35,6 +39,9 @@ pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
 
     for problem in &corpus.problems {
         eprintln!("{}", problem.render());
+    }
+    for warning in &corpus.warnings {
+        eprintln!("warning: {}", warning.render());
     }
     eprintln!(
         "\n{} problem{} found.",
@@ -146,6 +153,24 @@ fn describe(corpus: &Corpus) -> String {
         })
         .collect();
 
+    let warnings = corpus
+        .warnings
+        .iter()
+        .map(|warning| {
+            json::object(vec![
+                json::field("file", json::string(&warning.file)),
+                json::field(
+                    "line",
+                    match warning.line {
+                        Some(line) => line.to_string(),
+                        None => json::null(),
+                    },
+                ),
+                json::field("message", json::string(&warning.message)),
+            ])
+        })
+        .collect();
+
     json::object(vec![
         json::field("valid", json::boolean(corpus.problems.is_empty())),
         json::field("recipes", json::array(recipes)),
@@ -155,5 +180,6 @@ fn describe(corpus: &Corpus) -> String {
             json::array(corpus.staples.iter().map(|item| json::string(item)).collect()),
         ),
         json::field("problems", json::array(problems)),
+        json::field("warnings", json::array(warnings)),
     ])
 }

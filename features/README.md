@@ -32,7 +32,8 @@ one of them:
 ├── README.md          the map, written for whichever agent opens it first
 ├── config/
 │   ├── kroger.md      which Kroger store, and whether it is picked up
-│   └── walmart.md     which Walmart store cart links are built for
+│   ├── walmart.md     which Walmart store cart links are built for
+│   └── household.md   how many adults + children to cook for (front matter)
 ├── recipes/           one document per recipe, filename = slugged name
 │   └── chicken-tacos.md
 ├── meals/           one document per day, filename = ISO date.
@@ -86,6 +87,12 @@ filesystem rather than something we have to enforce.
   meant to be rewritten. Every other document here has a shape that can be got
   wrong. This one deliberately does not, because a preference nobody can express
   is a preference nobody records.
+- **The household size is the one structured fact in `config/`:**
+  `config/household.md` carries `adults:` and `children:` in front matter, both
+  whole non-negative numbers. `mealplan validate` reads them to warn — without
+  failing — when a meal serves too few people, or more than double the
+  household. It lives apart from `preferences/household.md` so that document
+  can stay prose.
 - **`Given` steps may write files directly** — they are setup, and going the long
   way round adds nothing. **`When` steps must go through the real MCP server**:
   real transport, real sandbox, real command. The interface under test is never
