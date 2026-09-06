@@ -115,32 +115,32 @@ proxies to `127.0.0.1:8000`, with the core still nowhere in the file. That is a
 change of hosting, not a change of design, and it belongs in a record of its own
 when somebody makes it.
 
-## The other service
+## The one service
 
-Two services run on this VM: the meal planner and PostgreSQL. The SuperTokens
-core is the managed deployment (ADR 0029) and runs off the machine.
+One service runs on this VM: the meal planner. The SuperTokens core is the
+managed deployment (ADR 0029) and runs off the machine.
 
 ```bash
-systemctl --user status mealplan-elixir.service # the meal planner
-sudo systemctl status postgresql                # its state (ADR 0028)
+systemctl --user status mealplan-elixir.service
 ```
 
-### PostgreSQL, once
+### The state file
 
-One database, for the meal planner. (ADR 0028 gave it PostgreSQL because a
-self-hosted core needed the server anyway; ADR 0029 moved the core off the VM,
-and the state stays here for now.)
+No database server (ADR 0030). The state is one SQLite file, named by
+`MEALPLAN_STATE` — `deploy/mealplan-elixir.service` sets it to
+`~/.local/state/mealplan/mealplan.db`, and `config/runtime.exs` defaults to the
+same path. `Mealplan.Boot` creates the directory on first start and runs the
+migration itself.
+
+**The file must be outside `MEALPLAN_FOLDER`.** The sandbox mounts that folder,
+an agent reads every byte of it, and the file holds the household's Kroger
+refresh token in the clear. `Mealplan.Boot` refuses to start when the path is
+inside the folder, and names both paths when it refuses.
+
+The backup is a file copy:
 
 ```bash
-sudo -u postgres createuser --pwprompt mealplan
-sudo -u postgres createdb --owner=mealplan mealplan
-```
-
-Then its connection string, in the 0600 file the service reads:
-
-```bash
-# ~/kroger-mealplanner/.env          (the meal planner)
-DATABASE_URL=postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
+sqlite3 ~/.local/state/mealplan/mealplan.db ".backup '/some/backup/mealplan.db'"
 ```
 
 ### The SuperTokens core
@@ -283,7 +283,7 @@ code to the attacker's token endpoint.
 | `MEALPLAN_PUBLIC_URL` | — | the OAuth issuer. Required off loopback |
 | `MEALPLAN_OWNER` | `gordon@gordonburgett.net` | the only email that may approve a client |
 | `MEALPLAN_FOLDER` | `~/meal-plan` | the folder the sandbox mounts |
-| `MEALPLAN_STATE` | `~/.local/state/mealplan/auth.json` | clients and tokens. Refused if inside the meal-plan folder |
+| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, the Kroger credential. Refused if inside the meal-plan folder |
 | `MEALPLAN_SANDBOX` | `bubblewrap` | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
 | `MEALPLAN_MICROSANDBOX_IMAGE` | `sandbox-image/oci.tar` | the `.tar` the microsandbox backend `msb load`s, or a bare `msb` image reference. Only read under `MEALPLAN_SANDBOX=microsandbox` |
 | `MEALPLAN_MAX_LIVE_SESSIONS` | `16` (microsandbox); unbounded otherwise | how many live tenant microVMs before `open/3` evicts the least-recently-used one |
@@ -300,8 +300,9 @@ code to the attacker's token endpoint.
 | `WALMART_CART_BASE` | `https://www.walmart.com` | the second Walmart seam, for the add-to-cart link host. Leave it alone in production |
 
 **On the Elixir server, `MEALPLAN_STATE` names a SQLite file, not `auth.json`,**
-and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024). That one
-file holds what `auth.json` and `kroger.json` held between them, so
+and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024, restored by
+ADR 0030). That one file holds what `auth.json` and `kroger.json` held between
+them, so
 `MEALPLAN_KROGER_STATE` is gone with no replacement. The rule is unchanged and
 now enforced at start-up: the file must be outside `MEALPLAN_FOLDER`, and the
 server refuses to start rather than serve with the household's Kroger

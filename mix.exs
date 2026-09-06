@@ -42,11 +42,12 @@ defmodule Mealplan.MixProject do
       {:phoenix, "~> 1.8.13"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
-      # Server state is PostgreSQL again. ADR 0024 moved it to SQLite for a
-      # test run that needed nothing running; ADR 0028 moved it back, because
-      # the SuperTokens core (ADR 0027) accepts no other database and a
-      # PostgreSQL server therefore runs on the VM whatever this line says.
-      {:postgrex, ">= 0.0.0"},
+      # Server state is one SQLite file beside the meal-plan folder. ADR 0024
+      # chose it; ADR 0028 moved to PostgreSQL only because a self-hosted
+      # SuperTokens core needed that server; ADR 0029 moved the core to the
+      # managed service, and ADR 0030 returned the state to SQLite — one
+      # household, one writer, and a test run that needs nothing running.
+      {:ecto_sqlite3, "~> 0.24"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},

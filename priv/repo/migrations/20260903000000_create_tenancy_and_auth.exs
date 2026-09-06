@@ -6,16 +6,18 @@ defmodule Mealplan.Repo.Migrations.CreateTenancyAndAuth do
   flight, access and refresh tokens, and the household's Kroger tokens. It
   never holds the corpus.
 
-  It is PostgreSQL. ADR 0024 moved it to SQLite and ADR 0028 moved it back,
-  because the SuperTokens core (ADR 0027) accepts no other database. Two column
-  types went narrow for that trip and are wide again here: `:map` is `jsonb`
-  and `{:array, :string}` is a native array. Neither is queried by content — the
-  arrays are read back whole and the client document is read back whole — so
-  nothing in `lib/` changed in either direction.
+  It is SQLite (ADR 0024, restored by ADR 0030), which changes what two column
+  types mean rather than what they are called: `:map` and `{:array, :string}`
+  are JSON in a TEXT column instead of `jsonb` and a native array, and every
+  integer type is SQLite's 64-bit INTEGER, so `:bigint` and `:id` are the same
+  storage class. Neither is queried by content — the arrays are read back whole
+  and the client document is read back whole — so nothing here needed rewriting
+  when the storage under it moved (SQLite, then PostgreSQL for ADR 0028, then
+  SQLite again).
 
-  A machine that ran the SQLite build restores from a dump rather than replaying
-  this file. There is one schema and one migration; the storage under it moved
-  twice.
+  A machine that ran the PostgreSQL build restores from a dump rather than
+  replaying this file. There is one schema and one migration; the storage under
+  it moved three times.
 
   Every credential-bearing row carries a `tenant_id` from the start (ADR 0020),
   even though the sandbox boundary stays single-tenant until ADR 0008's

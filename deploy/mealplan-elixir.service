@@ -35,13 +35,11 @@
 # still needs ./sandbox-image/build.sh — unchanged by this migration.
 Description=Kroger meal planner MCP server (Elixir)
 Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md
-# One local service to wait for (ADR 0028): the state is a database in
-# PostgreSQL. The SuperTokens core is the managed deployment (ADR 0029), off
-# this VM, reached over the network — nothing to order against here. Neither
-# PostgreSQL nor the core is a hard requirement: the server starts and the
-# journal says what is missing.
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+# Nothing on this VM to order against. The state is one SQLite file (ADR 0024,
+# restored by ADR 0030) — no database server. The SuperTokens core is the
+# managed deployment (ADR 0029), off this VM, reached over the network.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -75,11 +73,13 @@ Environment=SUPERTOKENS_CONNECTION_URI=https://st-dev-ff40b340-a989-11f1-abbd-07
 # whichever one this names travel in .env, never here.
 Environment=MEALPLAN_SMS_PROVIDER=twilio
 
-# MEALPLAN_STATE is gone (ADR 0028). The state is a database in PostgreSQL
-# again, named by DATABASE_URL, which carries a password and therefore lives in
-# .env rather than in this world-readable file. It is outside the meal-plan
-# folder by construction — a connection string cannot name a path in the
-# sandbox mount — so the start-up guard that checked for that is gone too.
+# The server state, one SQLite file (ADR 0024, restored by ADR 0030). It has a
+# password-free path, so unlike DATABASE_URL it lives here rather than in .env.
+# It MUST be outside MEALPLAN_FOLDER — the sandbox mounts that folder and the
+# file holds the household's Kroger token in the clear — and `Mealplan.Boot`
+# refuses to start if it is not. ~/.local/state/mealplan/mealplan.db is the
+# default; this names it so a reader of the unit knows where the state is.
+Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
 Environment=PATH=/usr/bin:/bin
@@ -99,20 +99,19 @@ Environment=ELIXIR_ERL_OPTIONS=+fnu
 # else it signed before (ADR 0027), so rotating it signs everybody out.
 #
 # KROGER_CLIENT_ID / KROGER_CLIENT_SECRET and the Walmart credential travel the
-# same path. So do the four that arrived with ADR 0027, ADR 0028 and ADR 0029:
+# same path. So do the ones that arrived with ADR 0027 and ADR 0029:
 #
-#     DATABASE_URL=postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
 #     SUPERTOKENS_API_KEY=...          # the managed core's key, from its dashboard
 #     MEALPLAN_SMS_FROM=+1...          # the number codes are sent FROM
 #     TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
 #     # or, for Telnyx: TELNYX_API_KEY=... TELNYX_MESSAGING_PROFILE_ID=...
 #
-# DATABASE_URL is the one with no default: the server refuses to start without
-# it and names it, because a server that silently opens the wrong database is
-# worse than one that will not start. SUPERTOKENS_API_KEY has no default
-# either, but the server still starts without it — the "sign-in:" journal line
-# says NO API KEY and every code request then fails (ADR 0029). The SMS
-# credentials are optional the same way the Kroger ones are.
+# None of these has a default that fails loudly the way a database once did:
+# the state is a file with a default path (above), so there is no DATABASE_URL
+# to forget. SUPERTOKENS_API_KEY has no default, but the server still starts
+# without it — the "sign-in:" journal line says NO API KEY and every code
+# request then fails (ADR 0029). The SMS credentials are optional the same way
+# the Kroger ones are.
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env.elixir
 

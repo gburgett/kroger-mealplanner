@@ -4,22 +4,21 @@ defmodule Mealplan.Repo do
   household's Kroger credential. Never the corpus — the folder is the database
   for anything a person would want to read (AGENTS.md).
 
-  PostgreSQL (ADR 0028). ADR 0024 had moved this to one SQLite file, and the
-  reasons it gave are all still true; what changed is the constraint around
-  them. The SuperTokens core that authenticates the household (ADR 0027)
-  accepts PostgreSQL and nothing else, so a server runs on this VM either way,
-  and a second datastore beside it would buy nothing but a second backup to
-  forget.
+  SQLite, in one file (ADR 0024, restored by ADR 0030). One household on one
+  machine has one writer, and the file is easier to back up, to move and to
+  reason about than a server. ADR 0028 had moved this to PostgreSQL, but only
+  because a self-hosted SuperTokens core accepted no other database; ADR 0029
+  moved the core to the managed service, which brings its own database, so the
+  reason was spent and the state came back to a file.
 
-  The two databases in that server are `mealplan` (this) and `supertokens`
-  (the core). They share a process and a backup. They share no table.
-
-  The state is outside the meal-plan folder by construction: a connection
-  string does not name a path inside the sandbox mount. `Mealplan.Boot` used to
-  check that, and the check is deleted rather than maintained.
+  The file must live OUTSIDE the meal-plan folder; `Mealplan.Boot` refuses to
+  start when it does not, because the sandbox mounts that folder and an agent
+  can read every byte of it — including the household's Kroger refresh token,
+  which is stored in the clear because a hash cannot go in an Authorization
+  header.
   """
 
   use Ecto.Repo,
     otp_app: :mealplan,
-    adapter: Ecto.Adapters.Postgres
+    adapter: Ecto.Adapters.SQLite3
 end

@@ -88,7 +88,7 @@ sandbox.
 | Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
-| Server state | PostgreSQL arrived with the core (ADR 0029); the core left (ADR 0030), the state stayed | PostgreSQL, through Ecto | ADR 0029 |
+| Server state | one household, one writer; a test run that needs nothing running | SQLite, one file beside the folder, through Ecto | ADR 0031 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | a header is only worth the network path it arrived on | an SMS one-time code; the SuperTokens managed service is the code authority | ADR 0028, ADR 0030 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
@@ -164,9 +164,9 @@ Every command below is `systemctl --user`; `sudo systemctl` addresses a
 different manager and will not find it. Lingering is on, so it survives a logout
 and comes back after a reboot.
 
-**There are two services, not one.** `mealplan-elixir.service` is the product.
-PostgreSQL is a system service, under `sudo systemctl`, and holds the meal
-planner's state (ADR 0029).
+**There is one service.** `mealplan-elixir.service` is the product, and it is
+the only thing to start. The state is one SQLite file (ADR 0024, restored by
+ADR 0031) — no database server — and `MEALPLAN_STATE` names it.
 
 **The SuperTokens core is the managed deployment** (ADR 0030), off this VM, at
 `st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`. The meal
@@ -220,19 +220,18 @@ It is **concrete, not a template** — every path and address in it is this
 machine's, because the lens is one household on one machine and a template with
 placeholders would describe a story this product does not have. It carries
 `MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_OWNER_PHONE`,
-`MEALPLAN_FOLDER`, `SUPERTOKENS_CONNECTION_URI` and `MEALPLAN_PORT=8000`, which
-has to match what `ssh exe.dev share port` pinned. `MEALPLAN_STATE` is gone with
-ADR 0029: the state is a database named by `DATABASE_URL`, which carries a
-password and therefore does not live here.
+`MEALPLAN_FOLDER`, `MEALPLAN_STATE`, `SUPERTOKENS_CONNECTION_URI` and
+`MEALPLAN_PORT=8000`, which has to match what `ssh exe.dev share port` pinned.
+`MEALPLAN_STATE` is the state file's path (ADR 0031); it carries no password,
+so it lives in this file, and `Mealplan.Boot` refuses to start if it points
+inside `MEALPLAN_FOLDER`.
 
-**What it does not carry is anything secret.** `DATABASE_URL`,
-`SUPERTOKENS_API_KEY`, the SMS credentials and `KROGER_CLIENT_ID` /
-`KROGER_CLIENT_SECRET` all arrive through `EnvironmentFile=-.env`, because this
-unit is world-readable and in git, and `.env` is 0600 and is not. The leading
-`-` makes that file optional, and the failures are graded on purpose: a missing
-Kroger or SMS credential still starts the server and is named in the journal,
-while a missing `DATABASE_URL` refuses to start and says so, because a server
-that silently opens the wrong database is worse than one that will not open.
+**What it does not carry is anything secret.** `SUPERTOKENS_API_KEY`, the SMS
+credentials and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` all arrive through
+`EnvironmentFile=-.env`, because this unit is world-readable and in git, and
+`.env` is 0600 and is not. The leading `-` makes that file optional, and the
+failures are graded on purpose: a missing Kroger or SMS credential still starts
+the server and is named in the journal.
 
 **The start-up lines in the journal are the health check.** They name the folder,
 the folder, the household, the database, whether the household can sign in at
@@ -335,19 +334,12 @@ defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
 command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
 find `mealplan`, which is staged into that image rather than installed on PATH.
 
-**A PostgreSQL server has to be running.** That is what ADR 0024 bought and
-ADR 0029 spent. ADR 0029 spent it because a self-hosted SuperTokens core needed
-the server anyway; ADR 0030 moved the core to the managed service, but the
-state stays in PostgreSQL for now, so the requirement stands. One line first,
-in a fresh checkout:
-
-```bash
-sudo systemctl start postgresql       # or: docker compose up -d db
-```
-
-`mix test` then runs `ecto.create` and `ecto.migrate` itself. `PGUSER`,
-`PGPASSWORD`, `PGHOST`, `PGPORT` and `PGDATABASE` override the defaults, and
-`DATABASE_URL` overrides all of them. `mix ecto.reset` is the reset.
+**Nothing else has to be running.** The state is one SQLite file (ADR 0024,
+restored by ADR 0031), so a test run needs no server, no user, no password and
+no port. `mix test` runs `ecto.create` and `ecto.migrate` against
+`mealplan_test.db` beside the checkout; `mix ecto.reset` or `rm mealplan_test.db`
+is the reset. ADR 0029 had briefly needed a PostgreSQL server here — for a
+self-hosted SuperTokens core, which ADR 0030 moved off the machine.
 
 The SuperTokens core is **not** reached in a test run: it is a third-party HTTP
 API, which is the one kind of thing this suite mocks, and
@@ -387,12 +379,13 @@ After a run, both of these should print nothing:
 
 ```bash
 ls /tmp /dev/shm | grep mealplan
-psql -d mealplan_test -c 'select count(*) from oauth_clients'   # 0
+sqlite3 mealplan_test.db 'select count(*) from oauth_clients'   # 0
 ```
 
-The database itself DOES stay behind, on purpose: `ecto.create` made it and the
-next run reuses it. What must not stay behind is rows — the Ecto sandbox rolls
-every scenario back, so a count of anything but zero means a write escaped the
+The database file itself DOES stay behind, on purpose: `ecto.create` made it and
+the next run reuses it. What must not stay behind is rows — the Ecto sandbox
+rolls every scenario back, so a count of anything but zero means a write escaped
+the
 sandbox connection.
 
 Rules of thumb:

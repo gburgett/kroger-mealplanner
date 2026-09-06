@@ -181,10 +181,24 @@ if clock = System.get_env("MEALPLAN_CLOCK") do
   config :mealplan, :clock, clock
 end
 
-# MEALPLAN_STATE is gone with ADR 0028. The state is a database in a server,
-# named by DATABASE_URL, and it is outside the meal-plan folder by construction
-# rather than by a check — a connection string cannot name a path in the
-# sandbox mount. `Mealplan.Boot` lost `assert_database_outside_folder!` with it.
+# Where the server state lives: one SQLite file (ADR 0024, restored by
+# ADR 0030). MEALPLAN_STATE is the same variable the TypeScript server read for
+# `auth.json`, and it keeps the same rule — the file must be OUTSIDE the
+# meal-plan folder, because the sandbox mounts that folder and the agent reads
+# every byte of it. Under PostgreSQL (ADR 0028) that was true by construction;
+# with a file it is a check again, and `Mealplan.Boot` makes it, refusing to
+# start rather than serving with the household's Kroger credential inside the
+# agent's reach.
+#
+# Not in test. A developer who exports MEALPLAN_STATE for the dev server would
+# otherwise have `mix test` open it, and the Ecto sandbox would roll the
+# household's real clients and tokens back out from under the running server.
+# The test database is named in config/test.exs.
+if config_env() != :test do
+  if state = System.get_env("MEALPLAN_STATE") do
+    config :mealplan, Mealplan.Repo, database: state
+  end
+end
 
 # The TypeScript harness (features/support/world.ts) is still the only runner for
 # features/sandbox.feature, and it spawns this app as an OS process on a port it
@@ -199,7 +213,9 @@ if config_env() == :test and System.get_env("CUCUMBER") do
   # one request at a time, and does not need ten connections to do it.
   config :mealplan, Mealplan.Repo,
     pool: DBConnection.ConnectionPool,
-    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4")
+    pool_size: String.to_integer(System.get_env("MEALPLAN_POOL_SIZE") || "4"),
+    busy_timeout: 5_000,
+    journal_mode: :wal
 end
 
 # The scenarios run in this BEAM (ADR 0022), and the ones that walk the consent
@@ -223,24 +239,21 @@ if config_env() == :test and is_nil(System.get_env("CUCUMBER")) do
 end
 
 if config_env() == :prod do
-  # The state database (ADR 0028). No default: a server that silently opens the
-  # wrong database is worse than one that refuses to start and names the
-  # variable. The SuperTokens core is the managed deployment (ADR 0029) and
-  # brings its own database — nothing on this VM shares this one.
-  database_url =
-    System.get_env("DATABASE_URL") ||
-      raise """
-      environment variable DATABASE_URL is missing.
-      It names the meal planner's own database, for example:
-
-          postgresql://mealplan:PASSWORD@127.0.0.1:5432/mealplan
-      """
-
+  # No URL, no user, no port: the whole database is a path (ADR 0024, restored
+  # by ADR 0030). It has a default, unlike the PostgreSQL URL ADR 0028 gave it,
+  # because a server that will not start without a variable nobody set is a
+  # worse failure than one that opens a file in the state directory where the
+  # TypeScript server kept auth.json. `Mealplan.Boot` still refuses if that path
+  # is inside the meal-plan folder.
   config :mealplan, Mealplan.Repo,
-    url: database_url,
-    # One household, one writer. A large pool buys nothing here.
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    socket_options: if(System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: [])
+    database:
+      System.get_env("MEALPLAN_STATE") ||
+        Path.expand("~/.local/state/mealplan/mealplan.db"),
+    # One household, one writer. SQLite serialises writes whatever this says, and
+    # a large pool only buys more connections to queue behind the same lock.
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "5"),
+    busy_timeout: 5_000,
+    journal_mode: :wal
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

@@ -80,12 +80,17 @@ defmodule Mealplan.Boot do
     folder = Mealplan.Config.folder()
     owner = Mealplan.Config.owner()
 
-    # No `assert_database_outside_folder!` any more. It existed because ADR 0024
-    # made the state a FILE, and a file has a path that can be inside the
-    # sandbox mount. ADR 0028 put the state back in PostgreSQL, where a
-    # connection string cannot name a path in that mount at all, so the property
-    # is back to holding by construction and the guard is deleted rather than
-    # maintained.
+    # Server state in one SQLite file (ADR 0024, restored by ADR 0030).
+    # PostgreSQL put it outside the corpus by construction; a file does not, so
+    # the guard `src/auth/store.ts` made — `assertOutsideFolder` — is here
+    # again, before the first row is written.
+    :ok = assert_database_outside_folder!(folder)
+
+    # SQLite creates the FILE on first open but not the directory above it, and
+    # the default is under ~/.local/state, which a fresh machine does not have.
+    # Without this the first start fails with "unable to open database file",
+    # which names neither the path nor the reason.
+    File.mkdir_p!(Path.dirname(Path.expand(Mealplan.Config.database())))
 
     {:ok, _, _} =
       Ecto.Migrator.with_repo(Mealplan.Repo, &Ecto.Migrator.run(&1, :up, all: true))
@@ -115,6 +120,32 @@ defmodule Mealplan.Boot do
     )
 
     {:ok, %{session: session}}
+  end
+
+  # The agent can read every byte of the meal-plan folder — that is what the
+  # folder is for. The database holds the household's Kroger refresh token in
+  # the clear, because a hash cannot go in an Authorization header, so the file
+  # holding it must not be in there. Refuse to serve rather than serve with the
+  # credential inside the agent's reach.
+  defp assert_database_outside_folder!(folder) do
+    database = Mealplan.Config.database()
+    inside = Path.expand(database)
+    mount = Path.expand(folder)
+
+    if inside == mount or String.starts_with?(inside, mount <> "/") do
+      raise """
+      the state database is inside the meal-plan folder:
+
+          database: #{inside}
+          folder:   #{mount}
+
+      The sandbox mounts the folder, so an agent could read the household's
+      Kroger credential straight out of the file. Put the database somewhere
+      else, or set MEALPLAN_STATE to a path outside #{mount}.
+      """
+    end
+
+    :ok
   end
 
   # Named in the health check because a server nobody can sign in to is a

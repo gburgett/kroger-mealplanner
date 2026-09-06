@@ -1,11 +1,10 @@
 name: test
 
 # The scenarios under features/ run in host mode: no sandbox image to build, and
-# nothing spawned per scenario. See ADR 0022. The database is PostgreSQL again
-# (ADR 0028), so this job starts one service — that is the cost ADR 0024 had
-# bought and ADR 0028 spent. ADR 0028 spent it for a self-hosted SuperTokens
-# core; ADR 0029 moved the core to the managed service and the state stayed in
-# PostgreSQL, so the job still needs the service.
+# nothing spawned per scenario. See ADR 0022. The database is one SQLite file
+# (ADR 0024, restored by ADR 0030), so this job needs no service — ADR 0028's
+# PostgreSQL was only there for a self-hosted SuperTokens core, and ADR 0029
+# moved that core off the machine.
 #
 # The tool scenarios run in the test BEAM against the handlers. The ones about
 # the screens and the transport go over a real socket to an endpoint this same
@@ -41,26 +40,10 @@ jobs:
     name: application logic (host mode)
     runs-on: ubuntu-latest
 
-    # The state database (ADR 0028). The SuperTokens core is NOT here: it is a
-    # third-party HTTP API, which is the one kind of thing this suite mocks, and
-    # `Mealplan.Mock.SuperTokens` stands in for it and for the SMS provider on a
-    # port the operating system picks.
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        # Without this the job races the server's first start and fails on a
-        # connection refused that reads like a code defect.
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No service container. The state is a SQLite file `ecto.create` makes, and
+    # the SuperTokens core and the SMS provider are third-party HTTP APIs —
+    # `Mealplan.Mock.SuperTokens` stands in for both on a port the operating
+    # system picks.
 
     steps:
       - uses: actions/checkout@v4
@@ -106,13 +89,6 @@ jobs:
         env:
           MEALPLAN_SANDBOX: host
           MEALPLAN_CLI_PATH: cli/target/x86_64-unknown-linux-musl/release
-          # config/test.exs reads these, and falls back to the same values. They
-          # are named here anyway so the connection this job uses is visible in
-          # the job rather than only in a config file.
-          PGHOST: 127.0.0.1
-          PGPORT: "5432"
-          PGUSER: postgres
-          PGPASSWORD: postgres
         run: mix test
 
   # Not wired to run yet: it needs a runner that can build the sandbox image
