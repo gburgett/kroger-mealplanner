@@ -35,7 +35,9 @@
 # still needs ./sandbox-image/build.sh — unchanged by this migration.
 Description=Kroger meal planner MCP server (Elixir)
 Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md
-# No database service to wait for: the state is one SQLite file (ADR 0024).
+# Nothing on this VM to order against. The state is one SQLite file (ADR 0024,
+# restored by ADR 0030) — no database server. The SuperTokens core is the
+# managed deployment (ADR 0029), off this VM, reached over the network.
 After=network-online.target
 Wants=network-online.target
 
@@ -57,14 +59,26 @@ Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
 Environment=MEALPLAN_OWNER=gordon@gordonburgett.net
 # The real meal-plan folder — the one the Node server used to hold.
 Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan
-# The state database (ADR 0024): OAuth clients and tokens, and the household's
-# Kroger credential. It MUST be outside MEALPLAN_FOLDER — the sandbox mounts
-# that folder, and the Kroger refresh token is held in the clear because a hash
-# cannot go in an Authorization header. The server refuses to start if this path
-# is inside it. This is a fresh file: neither the Node server's auth.json nor
-# the migration's own mealplan-elixir.db carry into it, so every MCP client has
-# to register and authorise again, and the household has to relink Kroger at
-# /kroger once more. Accepted at cutover.
+# The household's telephone, in E.164 (ADR 0027). The one number that may
+# receive a sign-in code; every other number is refused before the core is
+# called, so a stranger at /login costs no message. Not a secret — it is one
+# fact about one household, and the journal redacts all but the last four
+# digits anyway — so it stays in this file beside MEALPLAN_OWNER.
+Environment=MEALPLAN_OWNER_PHONE=+15095550142
+# The SuperTokens core — the managed deployment (ADR 0029), over HTTPS. Its
+# API key travels in .env.elixir, not here: it is the whole of the lock on the
+# user store, and this file is world-readable and in git.
+Environment=SUPERTOKENS_CONNECTION_URI=https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io
+# "twilio" or "telnyx". Both are built; this picks. The credentials for
+# whichever one this names travel in .env, never here.
+Environment=MEALPLAN_SMS_PROVIDER=twilio
+
+# The server state, one SQLite file (ADR 0024, restored by ADR 0030). It has a
+# password-free path, so unlike DATABASE_URL it lives here rather than in .env.
+# It MUST be outside MEALPLAN_FOLDER — the sandbox mounts that folder and the
+# file holds the household's Kroger token in the clear — and `Mealplan.Boot`
+# refuses to start if it is not. ~/.local/state/mealplan/mealplan.db is the
+# default; this names it so a reader of the unit knows where the state is.
 Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
@@ -81,12 +95,23 @@ Environment=LC_ALL=C.UTF-8
 Environment=ELIXIR_ERL_OPTIONS=+fnu
 
 # SECRET_KEY_BASE, from the gitignored 0600 file — this unit is world-readable
-# and in git. KROGER_CLIENT_ID / KROGER_CLIENT_SECRET and the Walmart credential
-# travel the same path in .env. Both optional (leading "-"): a missing Kroger
-# credential just disables the cart, the same as the Node server.
+# and in git. It signs the household's session cookie now as well as everything
+# else it signed before (ADR 0027), so rotating it signs everybody out.
 #
-# There is no DATABASE_URL any more. The state is one SQLite file named by
-# MEALPLAN_STATE above, so there is no password to keep out of this file.
+# KROGER_CLIENT_ID / KROGER_CLIENT_SECRET and the Walmart credential travel the
+# same path. So do the ones that arrived with ADR 0027 and ADR 0029:
+#
+#     SUPERTOKENS_API_KEY=...          # the managed core's key, from its dashboard
+#     MEALPLAN_SMS_FROM=+1...          # the number codes are sent FROM
+#     TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
+#     # or, for Telnyx: TELNYX_API_KEY=... TELNYX_MESSAGING_PROFILE_ID=...
+#
+# None of these has a default that fails loudly the way a database once did:
+# the state is a file with a default path (above), so there is no DATABASE_URL
+# to forget. SUPERTOKENS_API_KEY has no default, but the server still starts
+# without it — the "sign-in:" journal line says NO API KEY and every code
+# request then fails (ADR 0029). The SMS credentials are optional the same way
+# the Kroger ones are.
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env
 EnvironmentFile=-/home/exedev/kroger-mealplanner/.env.elixir
 

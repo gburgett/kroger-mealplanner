@@ -3,12 +3,21 @@ defmodule MealplanWeb.Router do
 
   pipeline :browser do
     plug :accepts, ["html"]
+    # The household's sign-in keeps its state in the signed session cookie
+    # (ADR 0027): the login in flight on `/login`, and the `user_id` a
+    # completed sign-in leaves. Both `LoginController` and
+    # `MealplanWeb.Plugs.HouseholdSession` read it, so it has to be fetched
+    # before either runs.
+    plug :fetch_session
   end
 
-  # The exe.dev-gated pages: the only screens a person opens. See
-  # MealplanWeb.Plugs.ExedevGate and ADR 0009.
+  # The gated pages: the only screens a person opens. The gate is a session
+  # this server issued, after a code sent to the household's telephone. It was
+  # an exe.dev header until ADR 0027 — see MealplanWeb.Plugs.HouseholdSession
+  # for why a header could not carry it.
   pipeline :household do
-    plug MealplanWeb.Plugs.ExedevGate
+    plug :fetch_session
+    plug MealplanWeb.Plugs.HouseholdSession
   end
 
   # The bearer gate on the MCP endpoint. Opaque tokens verified against the
@@ -36,6 +45,20 @@ defmodule MealplanWeb.Router do
     post "/register", OAuthController, :register
     post "/token", OAuthController, :token
     post "/revoke", OAuthController, :revoke
+  end
+
+  # --- the household's sign-in, open for the same reason /register is ------
+  #
+  # A gate in front of the way in is a locked door with the key inside. What
+  # protects these is the allowlist in Mealplan.Auth.Otp: a number that is not
+  # the household's is refused before the core is called (ADR 0027).
+  scope "/", MealplanWeb do
+    pipe_through :browser
+
+    get "/login", LoginController, :index
+    post "/login", LoginController, :send_code
+    post "/login/code", LoginController, :verify
+    post "/logout", LoginController, :logout
   end
 
   # --- the gated pages: the only screens a person opens ---------------

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0028
 date: 2026-09-04
 decision-makers: gburgett
 consulted: ADR 0008, ADR 0009, ADR 0010, ADR 0020, ADR 0022, ADR 0023

@@ -109,6 +109,7 @@ defmodule Mealplan.Features.CorpusHooks do
     kroger = start_kroger_mock()
     {walmart, walmart_key_path} = start_walmart_mock(root_of(folder))
     llm = start_llm_mock()
+    supertokens = start_supertokens_mock()
 
     {:ok, session} = Mealplan.Sandbox.open(tenant, folder)
 
@@ -124,6 +125,7 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:walmart, walmart)
      |> Map.put(:walmart_key_path, walmart_key_path)
      |> Map.put(:llm, llm)
+     |> Map.put(:supertokens, supertokens)
      |> Map.put(:list_path, nil)}
   end
 
@@ -217,6 +219,27 @@ defmodule Mealplan.Features.CorpusHooks do
     mock = Mealplan.Mock.Llm.start()
     ExUnit.Callbacks.on_exit(fn -> Mealplan.Mock.Server.stop(mock) end)
     Application.put_env(:mealplan, :llm_base, mock.base)
+    mock
+  end
+
+  # The SuperTokens core and the SMS provider, stood in for, for EVERY scenario
+  # and not only the sign-in ones. The same two reasons as Kroger above: it
+  # costs a listener socket, and with the core base always pointed at
+  # 127.0.0.1 no scenario can reach a real core or send a real text message
+  # even by mistake.
+  #
+  # It is also what `Mealplan.Browser.signed_in/1` needs. Every screen scenario
+  # signs in for real now (ADR 0027), so a lazily started mock would mean a
+  # lazily authenticated suite.
+  defp start_supertokens_mock do
+    mock = Mealplan.Mock.SuperTokens.start()
+    Application.put_env(:mealplan, :supertokens_mock, mock)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      Application.delete_env(:mealplan, :supertokens_mock)
+      Mealplan.Mock.SuperTokens.stop(mock)
+    end)
+
     mock
   end
 

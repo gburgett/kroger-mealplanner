@@ -70,12 +70,14 @@ Consequences worth internalising before changing anything:
   not optional and not "later".
 
 **UI exists only for setup the MCP interface cannot do**, i.e. a flow that needs
-a browser and a human at a keyboard. There are exactly two, and both are built:
-**our own consent page**, where the household approves an assistant (ADR 0009),
-and **the `/kroger` screens**, where the household signs in to Kroger and picks
-which shop it walks into (ADR 0010). Both sit behind the same exe.dev gate —
-`/kroger/callback` included, because Kroger redirects a top-level browser
-navigation and the exe.dev session is on it. Anything else belongs behind the
+a browser and a human at a keyboard. There are three, and all are built: **the
+login screens**, where the household types a telephone number and the code that
+arrives (ADR 0028); **our own consent page**, where the household approves an
+assistant (ADR 0009); and **the `/kroger` screens**, where the household signs
+in to Kroger and picks which shop it walks into (ADR 0010). The last two sit
+behind the session the first one issues — `/kroger/callback` included, because
+Kroger redirects a top-level browser navigation and the cookie is on it.
+Anything else belongs behind the
 sandbox.
 
 ## The stack
@@ -86,9 +88,9 @@ sandbox.
 | Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
-| Server state | one household, one writer, and a test run that needs nothing running | SQLite in one file, through Ecto | ADR 0024 |
+| Server state | one household, one writer; a test run that needs nothing running | SQLite, one file beside the folder, through Ecto | ADR 0031 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
-| Who may approve | there is no user table to build | exe.dev identity headers, in front of the consent page only | ADR 0009 |
+| Who may approve | a header is only worth the network path it arrived on | an SMS one-time code; the SuperTokens managed service is the code authority | ADR 0028, ADR 0030 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
 | Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `:public_key` RSA, no package | ADR 0017 |
 
@@ -101,15 +103,23 @@ ADR 0009 and worth knowing before touching `MealplanWeb.Router` and
 - **Only one port can be public, and auth is one switch for the whole machine.**
   There is no per-path exclusion, so the "protected port for the login page, open
   port for MCP" design cannot be built. Every path decides for itself instead.
-- **The OAuth endpoints must stay open.** An MCP client has no browser and cannot
-  complete an exe.dev login, so a login on `/register` or `/token` makes a first
-  credential impossible to get. Only `/authorize` and `/consent` are gated.
+- **The OAuth endpoints must stay open**, and so must `/login`. An MCP client has
+  no browser, so a gate on `/register` or `/token` makes a first credential
+  impossible to get; a gate on `/login` is a locked door with the key inside.
+  What protects `/login` is the allowlist, not a gate: a number that is not
+  `MEALPLAN_OWNER_PHONE` is refused before the SuperTokens core is called, so it
+  costs no message and creates no user.
 - **The issuer is configuration, never a header.** An issuer read from `Host` is
   host-header injection into the metadata document.
 
-The identity headers are not yet proven unforgeable — see
-`docs/exedev-identity-header-study.md`, which is open, and which explains why the
-measurement cannot be made from the VM.
+The identity headers were never proven unforgeable —
+`docs/exedev-identity-header-study.md` is still open, and still explains why the
+measurement cannot be made from the VM. **It no longer decides anything.**
+ADR 0028 replaced that gate with an SMS one-time code, because of the study's
+other finding, which needed no measurement: anything that can route to
+`10.42.0.0/16` reaches the port with no proxy in front of it, so a header gate
+is worth exactly as much as a network boundary nobody documented. Nothing in
+`lib/` reads those headers now.
 
 **The lens is one household on one machine.** That is what ADR 0008 settled, and
 it is why the default sandbox is 3.3 ms of bubblewrap rather than a microVM per
@@ -154,6 +164,19 @@ Every command below is `systemctl --user`; `sudo systemctl` addresses a
 different manager and will not find it. Lingering is on, so it survives a logout
 and comes back after a reboot.
 
+**There is one service.** `mealplan-elixir.service` is the product, and it is
+the only thing to start. The state is one SQLite file (ADR 0024, restored by
+ADR 0031) — no database server — and `MEALPLAN_STATE` names it.
+
+**The SuperTokens core is the managed deployment** (ADR 0030), off this VM, at
+`st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`. The meal
+planner reaches it as an outbound HTTPS call and authenticates with
+`SUPERTOKENS_API_KEY`. Anything that can call the core can act on every user,
+and there is no network boundary in front of it now, so that key is the whole
+of the lock — it lives in the 0600 `.env.elixir`, never in the unit. There is
+no reverse proxy on this VM: exe.dev already is one, and the meal planner is
+the only listener. `docs/deploying-behind-exe-dev.md` works through why.
+
 ```bash
 systemctl --user restart mealplan-elixir.service   # deploy a built release
 systemctl --user status  mealplan-elixir.service   # is it up, and since when
@@ -196,21 +219,26 @@ diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.servi
 It is **concrete, not a template** — every path and address in it is this
 machine's, because the lens is one household on one machine and a template with
 placeholders would describe a story this product does not have. It carries
-`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_FOLDER`, `MEALPLAN_STATE` and
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_OWNER`, `MEALPLAN_OWNER_PHONE`,
+`MEALPLAN_FOLDER`, `MEALPLAN_STATE`, `SUPERTOKENS_CONNECTION_URI` and
 `MEALPLAN_PORT=8000`, which has to match what `ssh exe.dev share port` pinned.
+`MEALPLAN_STATE` is the state file's path (ADR 0031); it carries no password,
+so it lives in this file, and `Mealplan.Boot` refuses to start if it points
+inside `MEALPLAN_FOLDER`.
 
-**The one thing it does not carry is the Kroger credential.**
-`KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` arrive through
+**What it does not carry is anything secret.** `SUPERTOKENS_API_KEY`, the SMS
+credentials and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` all arrive through
 `EnvironmentFile=-.env`, because this unit is world-readable and in git, and
-`.env` is 0600 and is not. The leading `-` makes that file optional: without it
-the server still starts and the Kroger tools refuse by name, which is a better
-failure than the meal planner not starting at all.
+`.env` is 0600 and is not. The leading `-` makes that file optional, and the
+failures are graded on purpose: a missing Kroger or SMS credential still starts
+the server and is named in the journal.
 
 **The start-up lines in the journal are the health check.** They name the folder,
-the household, the token store, the sandbox mechanism, and whether Kroger is
-configured and linked. Read them after every restart rather than trusting
-`active (running)` — the process being up says nothing about which folder it
-opened.
+the folder, the household, the database, whether the household can sign in at
+all, the sandbox mechanism, and whether Kroger is configured and linked. Read
+them after every restart rather than trusting `active (running)` — the process
+being up says nothing about which folder it opened, and a server nobody can
+sign in to looks exactly as healthy as one they can.
 
 **The unit leaves `MEALPLAN_SANDBOX` unset, so this machine runs bubblewrap.**
 Setting `MEALPLAN_SANDBOX=microsandbox` switches the session layer to a libkrun
@@ -273,10 +301,17 @@ and nothing else.
 
 That is what ADR 0022 said it had lost and would need to pay back. It is paid.
 
-**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine that
-cannot build the sandbox image, such as a CI runner. Every `@security` scenario
-is EXCLUDED in that mode and `mix test` prints a banner saying so, because a
-green run that quietly skipped them would be the worst possible outcome.
+**`mix test` defaults to microsandbox** (ADR 0032). Each tenant runs in a libkrun
+microVM, so the default run asserts containment for real. It needs `msb` on
+`PATH`, read/write on `/dev/kvm` (`msb doctor`), and `sandbox-image/oci.tar`
+built with `./sandbox-image/build.sh --microsandbox`. It does not need
+`MEALPLAN_CLI_PATH`: the `mealplan` binary is staged into the image.
+
+**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, for a machine with no
+KVM, such as a CI runner. Every `@security` and `@microsandbox` scenario is
+EXCLUDED in that mode and `mix test` prints a banner saying so. Host mode was
+the old default, and it is why the full suite used to OOM this machine — see
+`docs/test-suite-oom-findings.md`.
 
 That exclusion is currently wider than it needs to be, and knowing so is worth
 more than pretending otherwise: `mix test --include security` passes 22 of the
@@ -286,43 +321,50 @@ Only "History cannot be pushed anywhere" needs real confinement. Narrowing the
 rule needs a second tag and changes what a green run claims, so it has not been
 done — see ADR 0023.
 
-Before a release, run them for real:
+**`MEALPLAN_SANDBOX=bubblewrap` is still the product**, and still the only mode
+that runs every `@security` scenario, the `@bubblewrap` ones included. Run it
+before a release:
 
 ```bash
-./sandbox-image/build.sh && ./cli/build.sh && mix test   # bubblewrap, @security included
+./sandbox-image/build.sh && ./cli/build.sh && MEALPLAN_SANDBOX=bubblewrap mix test
 ```
 
 ### Running the suite
 
 ```bash
-MEALPLAN_SANDBOX=host \
-MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release \
-  mix test
+mix test    # microsandbox, the default on a machine with KVM
 ```
 
-That is the command CI runs and the one to reach for while working. The two
-variables are not optional in a checkout with no sandbox image: `MEALPLAN_SANDBOX`
-defaults to `bubblewrap`, which binds `sandbox-image/rootfs/` and fails per
-command when it is not there, and without `MEALPLAN_CLI_PATH` the corpus cannot
-find `mealplan`, which is staged into that image rather than installed on PATH.
+On a machine with no KVM — CI is one — say so on purpose:
 
-**Nothing else has to be running.** The database is one SQLite file (ADR 0024):
-`mix test` runs `ecto.create` and `ecto.migrate` first and they write
-`mealplan_test<partition>.db` in the checkout. There is no server to start, no
-user, no password and no port. `rm mealplan_test*.db` is the reset.
+```bash
+MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
+```
+
+`MEALPLAN_CLI_PATH` is a host-mode need only: under microsandbox and bubblewrap
+the binary is staged into the image. A machine with no KVM and no image built
+has no mode that works, and the preflight raise names the piece that is missing.
+
+**Nothing else has to be running.** The state is one SQLite file (ADR 0024,
+restored by ADR 0031), so a test run needs no server, no user, no password and
+no port. `mix test` runs `ecto.create` and `ecto.migrate` against
+`mealplan_test.db` beside the checkout; `mix ecto.reset` or `rm mealplan_test.db`
+is the reset. ADR 0029 had briefly needed a PostgreSQL server here — for a
+self-hosted SuperTokens core, which ADR 0030 moved off the machine.
+
+The SuperTokens core is **not** reached in a test run: it is a third-party HTTP
+API, which is the one kind of thing this suite mocks, and
+`Mealplan.Mock.SuperTokens` stands in for it and for the SMS provider on one
+port. No scenario can reach the managed core or send a real text message.
 
 Narrowing a run:
 
 ```bash
-mix test test/mealplan/sandbox/scratch_test.exs   # a unit test file
-mix test --only security                          # containment, needs bubblewrap
-mix test --include security                       # host mode: 22 of 23 pass, ADR 0023
-mix test --partitions 4                           # a database FILE and a port per partition
+mix test test/mealplan/sandbox/scratch_test.exs     # a unit test file
+mix test test/mealplan/sandbox/microsandbox_test.exs # the microVM backend, real KVM
+mix test --only security                            # @security scenarios only
+mix test test/mealplan/auth/sms_test.exs            # the Twilio and Telnyx request shapes
 ```
-
-One file per partition is not an optimisation: SQLite takes one writer per
-file, so partitions sharing one would queue behind each other and lose exactly
-what partitioning buys.
 
 Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
 in `test/test_helper.exs` compiles every feature in `config :cucumber, :features`
@@ -354,7 +396,8 @@ sqlite3 mealplan_test.db 'select count(*) from oauth_clients'   # 0
 The database file itself DOES stay behind, on purpose: `ecto.create` made it and
 the next run reuses it. What must not stay behind is rows — the Ecto sandbox
 rolls every scenario back, so a count of anything but zero means a write escaped
-the sandbox connection.
+the
+sandbox connection.
 
 Rules of thumb:
 
@@ -368,8 +411,9 @@ Rules of thumb:
 - **A bug gets a failing scenario before it gets a fix.**
 - `@core` and `@security` must pass before any release. `@future` documents
   intent and is excluded from the default run. `@security` cannot pass under
-  `MEALPLAN_SANDBOX=host`, where it does not run at all — a release needs the
-  bubblewrap run.
+  `MEALPLAN_SANDBOX=host`, where it does not run at all; microsandbox covers the
+  `@microsandbox` half, and a release still runs bubblewrap for the
+  `@bubblewrap` scenarios.
 
 See `features/README.md` for the conventions the scenarios follow.
 

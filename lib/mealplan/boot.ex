@@ -80,10 +80,10 @@ defmodule Mealplan.Boot do
     folder = Mealplan.Config.folder()
     owner = Mealplan.Config.owner()
 
-    # Server state in one SQLite file (ADR 0024). PostgreSQL put it outside the
-    # corpus by construction; a file does not, so the guard `src/auth/store.ts`
-    # made — `assertOutsideFolder` — comes back here, before the first row is
-    # written.
+    # Server state in one SQLite file (ADR 0024, restored by ADR 0030).
+    # PostgreSQL put it outside the corpus by construction; a file does not, so
+    # the guard `src/auth/store.ts` made — `assertOutsideFolder` — is here
+    # again, before the first row is written.
     :ok = assert_database_outside_folder!(folder)
 
     # SQLite creates the FILE on first open but not the directory above it, and
@@ -102,6 +102,7 @@ defmodule Mealplan.Boot do
     Logger.info("meal-plan folder: #{folder}")
     Logger.info("state database: #{Mealplan.Config.database()}")
     Logger.info("the household is #{owner}")
+    Logger.info("sign-in: " <> sign_in_status())
 
     {:ok, session, _scaffolded} = open_corpus(tenant_slug, folder)
 
@@ -138,11 +139,50 @@ defmodule Mealplan.Boot do
           database: #{inside}
           folder:   #{mount}
 
-      The sandbox mounts the folder, so an agent could read the household's       Kroger credential straight out of the file. Put the database somewhere       else, or set MEALPLAN_STATE to a path outside #{mount}.
+      The sandbox mounts the folder, so an agent could read the household's
+      Kroger credential straight out of the file. Put the database somewhere
+      else, or set MEALPLAN_STATE to a path outside #{mount}.
       """
     end
 
     :ok
+  end
+
+  # Named in the health check because a server nobody can sign in to is a
+  # server that looks healthy and is not. Says which telephone, which core and
+  # which SMS provider, and says what is missing when something is (ADR 0027,
+  # ADR 0029).
+  defp sign_in_status do
+    phone = Mealplan.Config.owner_phone()
+    core = Mealplan.Config.supertokens_base()
+
+    cond do
+      is_nil(phone) ->
+        "NOT CONFIGURED. Set MEALPLAN_OWNER_PHONE to the household's number in " <>
+          "E.164, or nobody can reach the consent page."
+
+      is_nil(Mealplan.Config.supertokens_api_key()) ->
+        "telephone #{redact(phone)}, core #{core} — but SUPERTOKENS_API_KEY is " <>
+          "not set. That key is the whole of the lock on the managed core " <>
+          "(ADR 0029), so no code can be made or checked without it."
+
+      not Mealplan.Auth.Sms.configured?() ->
+        "telephone #{redact(phone)}, core #{core} — but the SMS provider is not " <>
+          "configured: #{Mealplan.Auth.Sms.why_not()}"
+
+      true ->
+        "telephone #{redact(phone)}, core #{core}, messages by " <>
+          Mealplan.Config.sms_provider()
+    end
+  end
+
+  # The journal is world-readable on this machine. The last four digits are
+  # enough to tell one number from another, and are not enough to send to.
+  defp redact(phone) do
+    case String.length(phone) do
+      n when n > 4 -> String.duplicate("*", n - 4) <> String.slice(phone, -4, 4)
+      _ -> "****"
+    end
   end
 
   # Named in the health check because a server running unconfined must never be

@@ -33,9 +33,20 @@ authorisation itself:
 
 | Path | Guarded by | Why |
 | --- | --- | --- |
-| `/.well-known/*`, `/register`, `/token`, `/revoke` | nothing at the proxy | an MCP client has no browser and cannot complete an exe.dev login |
-| `/authorize`, `/consent`, `/kroger/*` | exe.dev identity | the only pages a person opens |
+| `/.well-known/*`, `/register`, `/token`, `/revoke` | nothing | an MCP client has no browser and cannot complete a login |
+| `/login`, `/login/code` | nothing | a gate in front of the way in is a locked door with the key inside |
+| `/authorize`, `/consent`, `/kroger/*` | a session, after an SMS code | the pages a person opens |
 | `/mcp` | our bearer token | the shell |
+
+The middle row used to say "exe.dev identity". ADR 0027 changed it to a session
+this server issues after a code sent to the household's telephone, because a
+header only means something on a request that came through the proxy and this
+VM's port is reachable without one.
+
+`/login` is open, and it is not a hole: `Mealplan.Auth.Otp.start/1` refuses
+every number that is not `MEALPLAN_OWNER_PHONE`, **before** it calls the core.
+A stranger who finds the page costs no message, creates no user and cannot tell
+from the answer whether the number they typed was the right one.
 
 `/kroger/callback` is in the guarded group on purpose, even though Kroger is the
 one that redirects to it. Kroger redirects a top-level browser navigation, so the
@@ -64,6 +75,123 @@ ssh exe.dev share set-public gb-kroger-mealplanner
 ```
 
 To undo the last one: `ssh exe.dev share set-private gb-kroger-mealplanner`.
+
+## Does anything need a public HTTPS route? And does this need a reverse proxy?
+
+Two questions, and they have different answers.
+
+**The browser needs HTTPS routes, and it already has them.** Signing in is two
+screens — `/login` takes a telephone number, `/login/code` takes the code — and
+they are routes on the meal planner, on port 8000, behind the TLS exe.dev
+already terminates. Nothing new is published. The session cookie is `Secure`,
+which is another way of saying these routes only work over HTTPS, which they
+already are.
+
+**The SuperTokens core needs no route on this VM at all.** It is the managed
+deployment (ADR 0029): SuperTokens runs it, at
+`https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`, and the
+meal planner reaches it as an outbound HTTPS call. Nothing on this machine
+listens for it and nothing forwards to it.
+
+Anything that can call the core can act on every user. There is no per-user
+authorisation inside it, and no network boundary in front of it now, so
+`SUPERTOKENS_API_KEY` is the whole of the lock. It lives in the 0600
+`.env.elixir`.
+
+**So there is no reverse proxy here, and adding one would be a mistake.**
+The usual reason to put Caddy or nginx in front of two applications is to give
+them one public address and route by path. That reason is absent twice over:
+
+* exe.dev **is** the reverse proxy. It terminates TLS, it holds the certificate,
+  and it forwards one port. A second proxy behind it is a third hop that
+  terminates nothing and routes nothing.
+* There is no second application to route to. The only listener on this VM is
+  the meal planner. The core is somewhere else entirely.
+
+**When a proxy would earn its place**, and it does not yet: if this ever leaves
+exe.dev and has to terminate TLS itself, Caddy is the one to reach for — one
+`Caddyfile` with a domain in it gets a certificate, renews it, and reverse
+proxies to `127.0.0.1:8000`, with the core still nowhere in the file. That is a
+change of hosting, not a change of design, and it belongs in a record of its own
+when somebody makes it.
+
+## The one service
+
+One service runs on this VM: the meal planner. The SuperTokens core is the
+managed deployment (ADR 0029) and runs off the machine.
+
+```bash
+systemctl --user status mealplan-elixir.service
+```
+
+### The state file
+
+No database server (ADR 0030). The state is one SQLite file, named by
+`MEALPLAN_STATE` — `deploy/mealplan-elixir.service` sets it to
+`~/.local/state/mealplan/mealplan.db`, and `config/runtime.exs` defaults to the
+same path. `Mealplan.Boot` creates the directory on first start and runs the
+migration itself.
+
+**The file must be outside `MEALPLAN_FOLDER`.** The sandbox mounts that folder,
+an agent reads every byte of it, and the file holds the household's Kroger
+refresh token in the clear. `Mealplan.Boot` refuses to start when the path is
+inside the folder, and names both paths when it refuses.
+
+The backup is a file copy:
+
+```bash
+sqlite3 ~/.local/state/mealplan/mealplan.db ".backup '/some/backup/mealplan.db'"
+```
+
+### The SuperTokens core
+
+Nothing to install. Point the meal planner at the managed deployment and give
+it the key from that deployment's dashboard, in `.env.elixir` (0600, gitignored):
+
+```bash
+# ~/kroger-mealplanner/.env.elixir
+SUPERTOKENS_API_KEY=<the key from the SuperTokens dashboard>
+```
+
+The URL is `deploy/mealplan-elixir.service`'s `SUPERTOKENS_CONNECTION_URI` and
+defaults to the same value in `config/runtime.exs`. Check the core and the key
+from this VM — not from the sandbox, which has no network:
+
+```bash
+curl -sS "$SUPERTOKENS_CONNECTION_URI/hello"                         # -> Hello
+curl -sS -H "api-key: $SUPERTOKENS_API_KEY" "$SUPERTOKENS_CONNECTION_URI/apiversion"
+```
+
+`/hello` answers with no key. `/apiversion` answers `Invalid API key` when the
+key is wrong or missing, and a JSON version list when it is right. A wrong key
+shows up in the meal planner as every sign-in failing, and the start-up
+`sign-in:` journal line says `NO API KEY` when the variable is unset.
+
+### The SMS provider
+
+Sign up with Twilio or with Telnyx, buy a number, and put the credentials in
+`.env`. Both are built; `MEALPLAN_SMS_PROVIDER` picks.
+
+```bash
+# Twilio
+MEALPLAN_SMS_PROVIDER=twilio
+MEALPLAN_SMS_FROM=+15095550100
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+
+# or Telnyx
+MEALPLAN_SMS_PROVIDER=telnyx
+MEALPLAN_SMS_FROM=+15095550100
+TELNYX_API_KEY=KEY...
+TELNYX_MESSAGING_PROFILE_ID=...        # only needed for an alphanumeric sender
+```
+
+`MEALPLAN_SMS_FROM` takes a Twilio Messaging Service SID as well as a number;
+Twilio accepts either in the same field.
+
+The journal line that begins `sign-in:` names the telephone (redacted to its
+last four digits), the core and the provider, and says which variable is missing
+when one is. Read it after a restart.
 
 ## Running it
 
@@ -155,7 +283,7 @@ code to the attacker's token endpoint.
 | `MEALPLAN_PUBLIC_URL` | — | the OAuth issuer. Required off loopback |
 | `MEALPLAN_OWNER` | `gordon@gordonburgett.net` | the only email that may approve a client |
 | `MEALPLAN_FOLDER` | `~/meal-plan` | the folder the sandbox mounts |
-| `MEALPLAN_STATE` | `~/.local/state/mealplan/auth.json` | clients and tokens. Refused if inside the meal-plan folder |
+| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, the Kroger credential. Refused if inside the meal-plan folder |
 | `MEALPLAN_SANDBOX` | `bubblewrap` | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
 | `MEALPLAN_MICROSANDBOX_IMAGE` | `sandbox-image/oci.tar` | the `.tar` the microsandbox backend `msb load`s, or a bare `msb` image reference. Only read under `MEALPLAN_SANDBOX=microsandbox` |
 | `MEALPLAN_MAX_LIVE_SESSIONS` | `16` (microsandbox); unbounded otherwise | how many live tenant microVMs before `open/3` evicts the least-recently-used one |
@@ -172,8 +300,9 @@ code to the attacker's token endpoint.
 | `WALMART_CART_BASE` | `https://www.walmart.com` | the second Walmart seam, for the add-to-cart link host. Leave it alone in production |
 
 **On the Elixir server, `MEALPLAN_STATE` names a SQLite file, not `auth.json`,**
-and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024). That one
-file holds what `auth.json` and `kroger.json` held between them, so
+and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024, restored by
+ADR 0030). That one file holds what `auth.json` and `kroger.json` held between
+them, so
 `MEALPLAN_KROGER_STATE` is gone with no replacement. The rule is unchanged and
 now enforced at start-up: the file must be outside `MEALPLAN_FOLDER`, and the
 server refuses to start rather than serve with the household's Kroger

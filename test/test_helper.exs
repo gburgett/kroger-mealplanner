@@ -1,4 +1,9 @@
-ExUnit.start()
+# `max_cases: 1` runs one test at a time. The default is one per scheduler,
+# and each scenario copies a git repository, spawns a `bwrap` (or a host
+# command) and runs the `mealplan` binary — four of those at once is a real
+# memory spike, and this VM has 3.9 GB and a small swapfile. The suite takes
+# longer this way; run time is not the constraint here, headroom is.
+ExUnit.start(max_cases: 1)
 Ecto.Adapters.SQL.Sandbox.mode(Mealplan.Repo, :manual)
 
 # `mix test` ends the BEAM with `System.halt/1`, which does not run application

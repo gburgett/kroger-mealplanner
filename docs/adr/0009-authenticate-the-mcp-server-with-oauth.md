@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; the exe.dev gate is superseded by ADR-0027
 date: 2026-08-23
 decision-makers: gburgett
 consulted: exe.dev identity header study (docs/exedev-identity-header-study.md), exe.dev proxy documentation

@@ -6,7 +6,7 @@ defmodule MealplanWeb.OAuthController do
   Open at the proxy by necessity (`/register`, `/token`, `/revoke`,
   `/.well-known/*`): an MCP client cannot complete a browser login, so a login
   here would make a first credential impossible. `/authorize` and `/consent`
-  sit behind `MealplanWeb.Plugs.ExedevGate`.
+  sit behind `MealplanWeb.Plugs.HouseholdSession`.
 
   The issuer is `Mealplan.Config.public_url/0` — configuration, never a `Host`
   header (ADR 0009).
@@ -14,7 +14,7 @@ defmodule MealplanWeb.OAuthController do
 
   use MealplanWeb, :controller
 
-  alias Mealplan.Auth.{ConsentDesk, Exedev, Provider}
+  alias Mealplan.Auth.{ConsentDesk, Provider}
   alias Mealplan.Kroger
   alias Mealplan.Kroger.LinkDesk
   alias MealplanWeb.ConsentPage
@@ -131,7 +131,7 @@ defmodule MealplanWeb.OAuthController do
     kroger = Kroger.Api.for_household()
 
     cond do
-      not Exedev.same_email?(identity.email, pending.identity.email) ->
+      not Mealplan.Accounts.same_email?(identity.email, pending.identity.email) ->
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(

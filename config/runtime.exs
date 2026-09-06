@@ -57,19 +57,53 @@ config :mealplan,
   walmart_cart_base: System.get_env("WALMART_CART_BASE"),
   walmart_key_version: get.("WALMART_KEY_VERSION", "1"),
   walmart_publisher_id: System.get_env("WALMART_PUBLISHER_ID"),
-  llm_base: System.get_env("MEALPLAN_LLM_BASE")
+  llm_base: System.get_env("MEALPLAN_LLM_BASE"),
+  # --- the household's sign-in (ADR 0027) --------------------------------
+  #
+  # The one telephone that may receive a code, in E.164. The same shape as
+  # MEALPLAN_OWNER: one household, one number. A request for any other number
+  # is refused BEFORE the core is called, so a stranger costs no message.
+  owner_phone: System.get_env("MEALPLAN_OWNER_PHONE"),
+  # The SuperTokens core — the managed deployment (ADR 0029), reached over
+  # HTTPS. `SUPERTOKENS_API_KEY` is the whole of the lock: the core is a
+  # trusted component, anything that can call it can act on every user, and
+  # there is no network boundary in front of it. A missing key is no sign-in
+  # at all, and `Mealplan.Boot` says so in the start-up health line.
+  supertokens_base:
+    get.(
+      "SUPERTOKENS_CONNECTION_URI",
+      "https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io"
+    ),
+  supertokens_api_key: System.get_env("SUPERTOKENS_API_KEY"),
+  # "twilio" or "telnyx". The core makes the code and hands it back; this
+  # server posts it. Neither provider is a package — one signed call each,
+  # through Req, the same as Kroger and Walmart.
+  sms_provider: get.("MEALPLAN_SMS_PROVIDER", "twilio"),
+  sms_from: System.get_env("MEALPLAN_SMS_FROM"),
+  twilio_account_sid: System.get_env("TWILIO_ACCOUNT_SID"),
+  twilio_auth_token: System.get_env("TWILIO_AUTH_TOKEN"),
+  twilio_api_base: System.get_env("TWILIO_API_BASE"),
+  telnyx_api_key: System.get_env("TELNYX_API_KEY"),
+  telnyx_messaging_profile_id: System.get_env("TELNYX_MESSAGING_PROFILE_ID"),
+  telnyx_api_base: System.get_env("TELNYX_API_BASE")
 
-# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
-# default; "host" runs commands unconfined and is for testing application logic
-# where no sandbox image can be built; "microsandbox" gives each tenant its own
-# libkrun microVM (ADR 0027), for more than one household on one machine, and
-# needs read/write on /dev/kvm. Anything else is a typo, and a typo that
-# silently disabled the security boundary would be the worst possible failure,
-# so it raises. See ADR 0022, ADR 0027 and Mealplan.Sandbox.mode/0.
+# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and stays
+# the default for dev and prod; "host" runs commands unconfined and is only for
+# a machine with no KVM, such as a CI runner; "microsandbox" gives each tenant
+# its own libkrun microVM (ADR 0027), for more than one household on one
+# machine, and needs read/write on /dev/kvm. Tests default to "microsandbox"
+# (ADR 0032): a test run that says nothing about containment was the point of
+# ADR 0022, and a test run that OOMs the host with accumulated bash trees is
+# not a test run at all. Anything else is a typo, and a typo that silently
+# disabled the security boundary would be the worst possible failure, so it
+# raises. See ADR 0022, ADR 0027, ADR 0032 and Mealplan.Sandbox.mode/0.
+default_sandbox_mode =
+  if config_env() == :test, do: :microsandbox, else: :bubblewrap
+
 sandbox_mode =
   case System.get_env("MEALPLAN_SANDBOX") do
-    nil -> :bubblewrap
-    "" -> :bubblewrap
+    nil -> default_sandbox_mode
+    "" -> default_sandbox_mode
     "bubblewrap" -> :bubblewrap
     "host" -> :host
     "microsandbox" -> :microsandbox
@@ -153,18 +187,19 @@ if clock = System.get_env("MEALPLAN_CLOCK") do
   config :mealplan, :clock, clock
 end
 
-# Where the server state lives: one SQLite file (ADR 0024). MEALPLAN_STATE is
-# the same variable the TypeScript server read for `auth.json`, and it keeps the
-# same rule — the file must be OUTSIDE the meal-plan folder, because the sandbox
-# mounts that folder and the agent reads every byte of it. Under PostgreSQL that
-# was true by construction; with a file it is a check again, and
-# `Mealplan.Boot` makes it, refusing to start rather than serving with the
-# household's Kroger credential inside the agent's reach.
+# Where the server state lives: one SQLite file (ADR 0024, restored by
+# ADR 0030). MEALPLAN_STATE is the same variable the TypeScript server read for
+# `auth.json`, and it keeps the same rule — the file must be OUTSIDE the
+# meal-plan folder, because the sandbox mounts that folder and the agent reads
+# every byte of it. Under PostgreSQL (ADR 0028) that was true by construction;
+# with a file it is a check again, and `Mealplan.Boot` makes it, refusing to
+# start rather than serving with the household's Kroger credential inside the
+# agent's reach.
 #
 # Not in test. A developer who exports MEALPLAN_STATE for the dev server would
 # otherwise have `mix test` open it, and the Ecto sandbox would roll the
 # household's real clients and tokens back out from under the running server.
-# The test database is named in config/test.exs, one file per partition.
+# The test database is named in config/test.exs.
 if config_env() != :test do
   if state = System.get_env("MEALPLAN_STATE") do
     config :mealplan, Mealplan.Repo, database: state
@@ -210,12 +245,12 @@ if config_env() == :test and is_nil(System.get_env("CUCUMBER")) do
 end
 
 if config_env() == :prod do
-  # No URL, no user, no port: the whole database is a path (ADR 0024). It has a
-  # default, unlike the PostgreSQL URL it replaces, because a server that will
-  # not start without a variable nobody set is a worse failure than one that
-  # opens a file in the state directory where the TypeScript server kept
-  # auth.json. `Mealplan.Boot` still refuses if that path is inside the
-  # meal-plan folder.
+  # No URL, no user, no port: the whole database is a path (ADR 0024, restored
+  # by ADR 0030). It has a default, unlike the PostgreSQL URL ADR 0028 gave it,
+  # because a server that will not start without a variable nobody set is a
+  # worse failure than one that opens a file in the state directory where the
+  # TypeScript server kept auth.json. `Mealplan.Boot` still refuses if that path
+  # is inside the meal-plan folder.
   config :mealplan, Mealplan.Repo,
     database:
       System.get_env("MEALPLAN_STATE") ||

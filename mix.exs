@@ -42,8 +42,11 @@ defmodule Mealplan.MixProject do
       {:phoenix, "~> 1.8.13"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
-      # Server state is SQLite, in one file beside the meal-plan folder rather
-      # than in a server beside the VM. See ADR 0024.
+      # Server state is one SQLite file beside the meal-plan folder. ADR 0024
+      # chose it; ADR 0028 moved to PostgreSQL only because a self-hosted
+      # SuperTokens core needed that server; ADR 0029 moved the core to the
+      # managed service, and ADR 0030 returned the state to SQLite — one
+      # household, one writer, and a test run that needs nothing running.
       {:ecto_sqlite3, "~> 0.24"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},

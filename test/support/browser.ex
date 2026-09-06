@@ -3,11 +3,12 @@ defmodule Mealplan.Browser do
   A person at a keyboard, stood in for. A port of the browser half of
   `features/support/world.ts`.
 
-  The consent page and the `/kroger` screens are the only two flows in this
-  product that need a browser and a human (ADR 0009, ADR 0010), so they are the
-  only two the scenarios walk this way. It is a real request over a real socket
-  to the endpoint this BEAM is running: the exe.dev gate, the router, the
-  controllers, the redirects and the form encoding are all the real ones.
+  The login screens, the consent page and the `/kroger` screens are the flows
+  in this product that need a browser and a human (ADR 0009, ADR 0010,
+  ADR 0027), so they are the ones the scenarios walk this way. It is a real
+  request over a real socket to the endpoint this BEAM is running: the session
+  gate, the router, the controllers, the redirects and the form encoding are
+  all the real ones.
 
   ADR 0022 moved the tool scenarios in process and recorded what that cost —
   the authorisation server was no longer exercised by any scenario. This is how
@@ -17,16 +18,122 @@ defmodule Mealplan.Browser do
   of these scenarios, and following one would hide it.
   """
 
-  @doc "The identity headers exe.dev adds for a signed-in person. See `Mealplan.Auth.Exedev`."
-  def signed_in(email, user_id \\ nil) do
-    [
-      {"x-exedev-email", email},
-      {"x-exedev-userid", user_id || "exedev-#{:erlang.phash2(email)}"}
-    ]
+  @doc """
+  A signed-in household, as a `cookie` header.
+
+  This used to return the two headers exe.dev added, and returning a cookie
+  instead is the whole of what ADR 0027 changed in this file. The cookie is a
+  REAL one: this walks `/login` and `/login/code` against the running endpoint,
+  reads the code out of the message the SMS mock recorded, and hands back what
+  the server set. No scenario forges a session, so none of them can pass
+  against a server that would refuse a real one.
+
+  `email` is accepted and ignored for the number: one household has one
+  telephone, and `MEALPLAN_OWNER_PHONE` names it. It is still the argument,
+  because every existing caller passes an email and because the email is what
+  the consent page shows.
+  """
+  def signed_in(email \\ nil, _user_id \\ nil) do
+    _ = email
+    phone = Mealplan.Config.owner_phone() || "+15095550142"
+
+    sent = post("/login", %{"phone" => phone, "return_to" => "/"})
+
+    code =
+      Mealplan.Mock.SuperTokens.last_code(mock()) ||
+        raise """
+        no sign-in code reached the telephone, so there is no session to hand back.
+
+        `Mealplan.Mock.SuperTokens.start/1` has to be running for this — the
+        corpus hooks start it for every scenario. The login page answered
+        #{sent.status}.
+        """
+
+    verified =
+      post("/login/code", %{"code" => code, "return_to" => "/"}, cookie_header(sent))
+
+    case session_cookie(verified) do
+      nil ->
+        raise """
+        the sign-in did not set a session cookie (status #{verified.status}).
+
+        The body was:
+
+        #{String.slice(verified.body, 0, 400)}
+        """
+
+      cookie ->
+        [{"cookie", cookie}]
+    end
   end
 
-  @doc "Nobody is signed in: exe.dev adds no headers at all."
+  @doc "Nobody is signed in: no cookie at all."
   def anonymous, do: []
+
+  @doc """
+  A session for somebody who is not the household.
+
+  Signs in the normal way, then turns the row behind that session into a
+  stranger: the owner membership is removed and the identifiers the real owner
+  keeps — telephone, SuperTokens id — are cleared, then the email is changed.
+  The live cookie still points here, so the gate now sees a session this server
+  issued for a user who owns nothing, which is the branch under test.
+
+  Renaming alone is not enough since `Mealplan.Accounts.owner?/2` resolves the
+  owner by membership, not by a configured string: the row would keep its owner
+  membership and still pass the gate.
+
+  The login flow cannot produce this session on its own, because one telephone
+  belongs to one household.
+  """
+  def signed_in_as_stranger(email) do
+    headers = signed_in()
+    owner = Mealplan.Config.owner() |> String.trim() |> String.downcase()
+
+    user = Mealplan.Repo.get_by!(Mealplan.Accounts.User, email: owner)
+
+    user
+    |> Mealplan.Repo.preload(:memberships)
+    |> Map.fetch!(:memberships)
+    |> Enum.each(&Mealplan.Repo.delete!/1)
+
+    user
+    |> Ecto.Changeset.change(%{
+      email: email |> String.trim() |> String.downcase(),
+      phone: nil,
+      supertokens_user_id: nil
+    })
+    |> Mealplan.Repo.update!()
+
+    headers
+  end
+
+  @doc "A cookie this server never issued."
+  def forged_session,
+    do: [{"cookie", "_mealplan_key=" <> Base.url_encode64("not a real session")}]
+
+  # The scenario's own mock, put here by the corpus hook that started it. This
+  # module needs it to read the code out of the message, and a scenario should
+  # not have to pass one in to ask for a signed-in browser.
+  defp mock, do: Application.get_env(:mealplan, :supertokens_mock)
+
+  # `set-cookie` comes back as a full attribute string; a request sends only
+  # the name and value.
+  defp session_cookie(%{set_cookie: cookies}) do
+    Enum.find_value(cookies, fn cookie ->
+      case String.split(cookie, ";", parts: 2) do
+        ["_mealplan_key=" <> _ = pair | _] -> pair
+        _ -> nil
+      end
+    end)
+  end
+
+  defp cookie_header(response) do
+    case session_cookie(response) do
+      nil -> []
+      cookie -> [{"cookie", cookie}]
+    end
+  end
 
   @doc "GET `path`, without following the redirect."
   def get(path, headers \\ []), do: request(:get, path, headers, nil)
@@ -73,9 +180,9 @@ defmodule Mealplan.Browser do
       status: response.status,
       body: to_string(response.body),
       location: response |> Req.Response.get_header("location") |> List.first(),
+      set_cookie: Req.Response.get_header(response, "set-cookie"),
       session_id: response |> Req.Response.get_header("mcp-session-id") |> List.first(),
-      www_authenticate:
-        response |> Req.Response.get_header("www-authenticate") |> List.first()
+      www_authenticate: response |> Req.Response.get_header("www-authenticate") |> List.first()
     }
   end
 

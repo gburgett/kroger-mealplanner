@@ -1,9 +1,11 @@
 import Config
 
-# The database is one SQLite file (ADR 0024), so a test run needs NOTHING
-# running: no server, no user, no password, no port. That is the whole reason
-# the adapter changed — `mix test` in a fresh checkout used to fail on a
-# database that was not up, which said nothing about the code under test.
+# The database is one SQLite file (ADR 0024, restored by ADR 0030), so a test
+# run needs NOTHING running: no server, no user, no password, no port. That is
+# the whole reason the adapter went back — ADR 0028 had made `mix test` in a
+# fresh checkout fail on a PostgreSQL server that was not up, which said nothing
+# about the code under test, and ADR 0029 removed the reason that server was
+# there.
 #
 # One file, always. `mix test --partitions N` looked like the obvious way to
 # get N BEAMs running at once, and this file used to carry a MIX_TEST_PARTITION
@@ -21,7 +23,7 @@ config :mealplan, Mealplan.Repo,
   # A scenario holds one connection through a whole HTTP round trip, and the
   # endpoint answers on another process. Five seconds of waiting for the write
   # lock is generous next to that, and it turns a lost race into a wait rather
-  # than an "database is busy" that reads like a product bug.
+  # than a "database is busy" that reads like a product bug.
   busy_timeout: 5_000,
   # Readers do not block the writer. The scenarios drive the endpoint while
   # holding the sandbox connection, which is exactly the shape WAL is for.
@@ -42,6 +44,13 @@ config :phoenix, :plug_init_mode, :runtime
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# The SuperTokens core and the SMS provider are third-party HTTP APIs, so they
+# are the one kind of thing this suite mocks (AGENTS.md). They are NOT set here:
+# each scenario starts its own `Mealplan.Mock.Server` on a port the operating
+# system picks, and puts the base into the application environment itself, the
+# same way the Kroger and Walmart mocks do. `MEALPLAN_OWNER_PHONE` travels with
+# them, from `Mealplan.Mock.SuperTokens`.
 
 # ExUnit does not open the one household's corpus at application start. There is
 # no one household under test: each scenario opens its own tenant over its own
@@ -74,7 +83,8 @@ config :cucumber,
     "features/auth.feature",
     "features/walmart.feature",
     "features/consumable_recheck.feature",
-    "features/onboarding.feature"
+    "features/onboarding.feature",
+    "features/sms_otp.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

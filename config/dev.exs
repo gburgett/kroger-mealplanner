@@ -1,9 +1,9 @@
 import Config
 
-# Server state, in one SQLite file (ADR 0024). Beside the checkout rather than
-# in ~/.local/state, so `rm mealplan_dev.db` is the whole reset and a developer
-# never wonders which database they are looking at. MEALPLAN_STATE overrides it,
-# the same variable the deployed server reads.
+# Server state, in one SQLite file (ADR 0024, restored by ADR 0030). Beside the
+# checkout rather than in ~/.local/state, so `rm mealplan_dev.db` is the whole
+# reset and a developer never wonders which database they are looking at.
+# MEALPLAN_STATE overrides it, the same variable the deployed server reads.
 #
 # It must not be inside the meal-plan folder: the sandbox mounts that folder and
 # the agent reads every byte of it. `Mealplan.Boot` refuses to start if it is.

@@ -3,7 +3,7 @@ defmodule MealplanWeb.KrogerController do
   The Kroger screens. Ported from `mountKroger` in `src/mcp/server.ts`.
 
   The second and last flow that needs a browser and a person, behind the same
-  `MealplanWeb.Plugs.ExedevGate` as the consent page — `/kroger/callback`
+  `MealplanWeb.Plugs.HouseholdSession` as the consent page — `/kroger/callback`
   included, because Kroger redirects a top-level browser navigation and the
   exe.dev session is on it (ADR 0009 / ADR 0010).
 
