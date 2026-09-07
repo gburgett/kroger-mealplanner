@@ -133,6 +133,24 @@ picks one, and you write the file. `cat config/walmart.md` answers "which
 Walmart". The cart is a LINK the household opens, built by
 `walmart_cart_link` — building it adds nothing.
 
+`config/household.md` holds the one structured fact about who is cooked for:
+how many adults and how many children the household usually feeds. It is two
+front-matter fields, `adults:` and `children:`, both whole non-negative
+numbers, and together they are the household size:
+
+```markdown
+---
+adults: 2
+children: 2
+---
+```
+
+`mealplan validate` compares every meal's servings against that sum and WARNS —
+it does not fail — when a meal serves too few people, or more than double the
+household. The household's *preferences* stay prose-only in
+`preferences/household.md`; this file exists only because the validator needs
+one number family it can read.
+
 ## shopping-lists/
 
 One document per range of nights, named for the range:

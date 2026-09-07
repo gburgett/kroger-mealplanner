@@ -70,6 +70,7 @@ config :mealplan, boot_household: false
 config :cucumber,
   features: [
     "features/corpus.feature",
+    "features/family_size.feature",
     "features/history.feature",
     "features/meals.feature",
     "features/migrations.feature",
