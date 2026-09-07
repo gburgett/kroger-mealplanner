@@ -2,6 +2,8 @@ defmodule MealplanWeb.ConsentPage do
   @moduledoc """
   The consent page: the one screen in this product a person ever looks at, and
   the "not the household" page beside it. Ported from `src/auth/consent.ts`.
+  Themed to match `MealplanWeb.SitePages` and `MealplanWeb.LoginPage`
+  (`MealplanWeb.Theme`) as part of the Plantrify rebrand.
 
   Everything interpolated here is attacker-controlled — `client_name`,
   `client_uri` and the scopes all come from the open registration endpoint. The
@@ -11,6 +13,8 @@ defmodule MealplanWeb.ConsentPage do
   sandbox in the process that holds the household's tokens is a bad trade for
   two paragraphs of markup. The redirect URI is shown as text, not as a link.
   """
+
+  alias MealplanWeb.Theme
 
   @doc """
   `opts` keys: `:consent_id`, `:client` (map), `:params` (map), `:phone`,
@@ -55,21 +59,26 @@ defmodule MealplanWeb.ConsentPage do
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Let #{e(name)} into the meal plan?</title>
+    #{Theme.fonts()}
     <style>
-      body { font: 16px/1.6 system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
-      h1 { font-size: 1.4rem; line-height: 1.3; }
-      dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1.5rem 0; }
-      dt { color: #666; }
-      dd { margin: 0; overflow-wrap: anywhere; }
-      code { background: #f2f2f2; padding: .1rem .3rem; border-radius: 3px; }
-      .warn { background: #fff8e5; border-left: 3px solid #e0a800; padding: .75rem 1rem; }
-      form { margin-top: 2rem; }
-      button { font: inherit; padding: .6rem 1.4rem; border-radius: 5px; border: 1px solid #bbb; cursor: pointer; margin-right: .75rem; }
-      button.approve { background: #1a6b3c; border-color: #1a6b3c; color: #fff; }
-      .quiet { color: #666; font-size: .9rem; }
+    #{Theme.css()}
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1.5rem; }
+    .card { width: 100%; max-width: 30rem; }
+    h1 { font-size: 1.6rem; line-height: 1.3; margin: 0 0 1.25rem; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; margin: 1.5rem 0; font-size: .95rem; }
+    dt { color: var(--label); }
+    dd { margin: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
+    .warn { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: .85rem 1.1rem; color: var(--ink-soft); }
+    form { margin-top: 2rem; }
+    .actions { display: flex; gap: .75rem; margin-top: 1.5rem; }
+    button { font: 500 15px/1 system-ui, sans-serif; padding: .8rem 1.4rem; border-radius: 4px; border: 1px solid var(--border); background: #fff; color: var(--ink); cursor: pointer; }
+    button.approve { background: var(--green); border-color: var(--green); color: #f7fbf8; }
+    button.approve:hover { background: var(--green-dark); }
+    .quiet { color: var(--label); font-size: .9rem; }
     </style>
     </head>
     <body>
+    <div class="card">
     <h1>Let <strong>#{e(name)}</strong> into the meal plan?</h1>
 
     <p class="warn">Approving gives this program a shell over your meal-plan folder:
@@ -88,9 +97,12 @@ defmodule MealplanWeb.ConsentPage do
 
     <form method="post" action="/consent">
       <input type="hidden" name="consent_id" value="#{e(opts[:consent_id])}">
-    #{kroger}  <button type="submit" name="decision" value="approve" class="approve">Approve</button>
-      <button type="submit" name="decision" value="deny">Deny</button>
+    #{kroger}  <div class="actions">
+        <button type="submit" name="decision" value="approve" class="approve">Approve</button>
+        <button type="submit" name="decision" value="deny">Deny</button>
+      </div>
     </form>
+    </div>
     </body>
     </html>
     """
@@ -106,16 +118,29 @@ defmodule MealplanWeb.ConsentPage do
     """
     <!doctype html>
     <html lang="en">
-    <head><meta charset="utf-8"><title>No meal plan for this number</title>
-    <style>body { font: 16px/1.6 system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem; }</style>
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>No meal plan for this number</title>
+    #{Theme.fonts()}
+    <style>
+    #{Theme.css()}
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1.5rem; }
+    .card { width: 100%; max-width: 28rem; }
+    h1 { font-size: 1.5rem; line-height: 1.3; margin: 0 0 1rem; }
+    p { color: var(--ink-soft); }
+    button { font: 500 15px/1 system-ui, sans-serif; padding: .7rem 1.2rem; border-radius: 4px; border: 1px solid var(--border); background: #fff; color: var(--ink); cursor: pointer; }
+    </style>
     </head>
     <body>
+    <div class="card">
     <h1>There is no meal plan for this number</h1>
     <p>You are signed in as <strong>#{e(phone)}</strong>, but this number does
     not own a meal plan. An invitation may have been withdrawn.</p>
     <p>Ask whoever runs the meal planner to invite this number, then sign in again:
     <form method="post" action="/logout"><button type="submit">Sign out</button></form>
     </p>
+    </div>
     </body>
     </html>
     """

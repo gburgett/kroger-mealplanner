@@ -3,22 +3,78 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Privacy Policy &mdash; MealPlanAgent</title>
+  <title>Privacy Policy &mdash; Plantrify</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
-    h2 { margin-top: 2.25rem; }
-    footer { margin-top: 3rem; border-top: 1px solid #ddd; padding-top: 1rem; font-size: 0.9rem; }
+    :root {
+      --paper: #faf7f0;
+      --paper-alt: #f4efe4;
+      --ink: #241f19;
+      --ink-soft: #4a4238;
+      --label: #6f6252;
+      --border: #e3dbcc;
+      --green: #2f6b45;
+      --green-dark: #26593a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 300 16px/1.6 'Newsreader', Georgia, serif; }
+    main { max-width: 44rem; margin: 0 auto; padding: 0 1.25rem 3rem; }
+    a { color: inherit; }
+    h1, h2 { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; }
+    h1 { font-size: 2rem; margin: 0 0 .35rem; }
+    h2 { font-size: 1.25rem; margin-top: 2.25rem; }
+    p, li { color: var(--ink-soft); }
+    code { background: rgba(0, 0, 0, .05); padding: .1rem .3rem; border-radius: 3px; overflow-wrap: anywhere; }
+    .updated { font: 400 12px/1 'Space Mono', monospace; letter-spacing: .04em; color: var(--label); text-transform: uppercase; }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 22px 1.25rem 2.5rem;
+    }
+    .nav .brand { font: 400 20px/1 'Instrument Serif', Georgia, serif; text-decoration: none; color: var(--ink); }
+    .pill {
+      font: 500 12.5px/1 system-ui, sans-serif;
+      text-decoration: none;
+      padding: 10px 14px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+    .pill:hover { background: var(--green); color: #f7fbf8; }
+
+    footer {
+      max-width: 44rem;
+      margin: 3rem auto 0;
+      padding: 1.25rem 1.25rem 2rem;
+      border-top: 1px solid var(--border);
+      font: 400 11px/1.6 'Space Mono', monospace;
+      color: var(--label);
+    }
+    footer a { text-decoration: none; }
   </style>
 </head>
 <body>
+  <nav class="nav">
+    <a href="/" class="brand">plantrify</a>
+    <a href="/contact.html" class="pill">Get invited</a>
+  </nav>
+
+  <main>
   <h1>Privacy Policy</h1>
-  <p><strong>Last updated:</strong> September 5, 2026</p>
+  <p class="updated">Last updated: September 5, 2026</p>
 
   <p>
-    This Privacy Policy explains how MealPlanAgent ("MealPlanAgent", "we", "us",
+    This Privacy Policy explains how Plantrify ("Plantrify", "we", "us",
     or "our") collects, uses, and shares information when you use the
-    MealPlanAgent software, server, connector, and related services (the
-    "Services"). MealPlanAgent is designed for one household on one server. If
+    Plantrify software, server, connector, and related services (the
+    "Services"). Plantrify is designed for one household on one server. If
     you do not agree with this policy, do not use the Services.
   </p>
 
@@ -63,7 +119,7 @@
 
   <p><strong>Grocery-retailer credentials.</strong> If you connect Kroger or
   Walmart, we store the access and refresh tokens that retailer issues, the store
-  or location you select, and a record of what MealPlanAgent sent to a cart. We
+  or location you select, and a record of what Plantrify sent to a cart. We
   do not receive or store your grocery-retailer password.</p>
 
   <p><strong>Technical and log information.</strong> The server records ordinary
@@ -110,7 +166,7 @@
     </li>
     <li>
       <strong>Legal and safety.</strong> We may disclose information if required
-      by law or to protect the rights, safety, or property of MealPlanAgent or
+      by law or to protect the rights, safety, or property of Plantrify or
       others.
     </li>
     <li>
@@ -198,6 +254,7 @@
     For questions or privacy requests, use the
     <a href="/contact.html">contact form</a>.
   </p>
+  </main>
 
   <footer>
     <p><a href="/">Home</a> &middot; <a href="/terms.html">Terms of Service</a> &middot; <a href="/contact.html">Contact</a></p>
