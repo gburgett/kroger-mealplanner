@@ -165,19 +165,44 @@ defmodule Mealplan.Features.OnboardingSteps do
     {:ok, context}
   end
 
-  step "the page carries a block addressed to an assistant fetching it", context do
-    assert String.contains?(page_body(context), "If you are an assistant"),
-           "the page carries no block addressed to an assistant"
+  step "the page describes itself as an MCP server for assistants", context do
+    assert String.contains?(page_body(context), "MCP server for AI assistants"),
+           "the page never describes itself as an MCP server for assistants"
 
     {:ok, context}
   end
 
-  step "that block names the exact MCP address to paste into the connector's URL field",
-       context do
+  step "the visible page content names the exact MCP address", context do
     body = page_body(context)
     mcp_url = String.replace(Mealplan.Config.public_url(), ~r{/+$}, "") <> "/mcp"
 
-    assert String.contains?(body, mcp_url), "the assistant block never names #{mcp_url}:\n#{body}"
+    assert String.contains?(body, mcp_url), "the page never names #{mcp_url}:\n#{body}"
+
+    refute String.contains?(body, "<details"),
+           "the MCP address is tucked inside a collapsed <details>, not in plain sight:\n#{body}"
+
+    {:ok, context}
+  end
+
+  step "the page carries no block addressed only to an assistant", context do
+    body = page_body(context)
+
+    for phrase <- ["If you are an assistant", "Note for AI assistants"] do
+      refute String.contains?(body, phrase),
+             "the page still carries an assistant-only block: #{inspect(phrase)}"
+    end
+
+    {:ok, context}
+  end
+
+  step "the page never tells an assistant to connect or sign the household in on its own",
+       context do
+    body = page_body(context)
+
+    for phrase <- ["authenticate the user when prompted", "Add it as a custom connector"] do
+      refute String.contains?(body, phrase),
+             "the page still tells an assistant to act unprompted: #{inspect(phrase)}"
+    end
 
     {:ok, context}
   end

@@ -139,18 +139,25 @@ address (`<public_url>/mcp`), and, for each app, the actual current path
 Business, Enterprise or Edu workspace for full tool access; Customize →
 Connectors → + → Add custom connector for Claude, web or desktop only —
 mobile can use a connector already added there but cannot add one). The page
-also carries a block addressed to an assistant that fetches the URL on the
-household's behalf — the same idea as the `llms.txt` convention, scoped to
-one page rather than a site root — so that "ask ChatGPT to help you install
-this" gets the exact menu path and the exact plan caveat back, rather than
-the model's own training data, which is exactly what the research behind this
-record found to be stale in places (Developer Mode's workspace restriction,
-mobile's inability to add a connector, are each dated developments). Neither
-app can register a connector FOR the household through a tool call or a
-fetched page — that step is an account-level action a person takes in
-Settings on both sides — so the page's job is arming whichever assistant
-reads it with the right words to say back, not performing the registration
-itself.
+states, in its visible body, that it is an MCP server and gives the endpoint,
+so that "ask ChatGPT to help you install this" gets the exact menu path and
+the exact plan caveat back, rather than the model's own training data, which
+is exactly what the research behind this record found to be stale in places
+(Developer Mode's workspace restriction, mobile's inability to add a
+connector, are each dated developments). Neither app can register a connector
+FOR the household through a tool call or a fetched page — that step is an
+account-level action a person takes in Settings on both sides — so the page's
+job is arming whichever assistant reads it with the right words to say back,
+not performing the registration itself.
+
+An earlier draft carried a collapsed "Note for AI assistants" block, modelled
+on the `llms.txt` convention, that told the assistant to add the connector and
+authenticate the household. That is withdrawn. A hidden addressee other than
+the human reader is a prompt-injection signature, and the assistants this page
+is meant to help flag the page as suspicious because of it. The endpoint and
+the steps now sit in one section every reader sees, and the copy is
+descriptive throughout: it says what the household does, never what the
+assistant should do unprompted.
 
 This is not a third screen in AGENTS.md's count. The consent page and
 `/kroger` each authorise something and change state behind the exe.dev gate;
@@ -168,8 +175,10 @@ origin instead of read from a checkout.
   a real line; writing only one of the two keeps the note showing.
 * A scenario against `GET /` names the MCP endpoint and both apps' current
   connector steps, including the ChatGPT Developer Mode / workspace
-  restriction and the Claude mobile restriction, and closes with the block
-  addressed to an assistant.
+  restriction and the Claude mobile restriction. A second scenario checks the
+  page describes itself as an MCP server in its visible body, carries no block
+  addressed only to an assistant, and never tells an assistant to add the
+  connector or sign the household in on its own.
 * `features/sandbox.feature`'s tool count is unchanged at eight — this record
   adds no tool.
 

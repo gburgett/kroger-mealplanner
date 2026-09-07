@@ -13,12 +13,19 @@ defmodule MealplanWeb.SitePages do
 
   This page authorises nothing and changes no state, so it is not a third
   screen in AGENTS.md's count (ADR 0026). Two audiences read it: a person
-  deciding whether to connect, and an assistant fetching the URL on the
-  household's behalf. The second audience is why the connector steps and the
-  ChatGPT / Claude / Gemini caveats are spelled out here rather than left to
-  the model's training data, which goes stale (ADR 0026, Context), and why the
-  "Note for AI assistants" block is a collapsed `<details>` rather than left
-  out: a human sees one quiet line, an assistant reads the same DOM either way.
+  deciding whether to connect, and an assistant that fetched the URL on the
+  household's behalf. Both read the same visible copy. The connector steps, the
+  ChatGPT / Claude / Gemini caveats and the MCP endpoint are spelled out in the
+  page body rather than left to the model's training data, which goes stale
+  (ADR 0026, Context).
+
+  Nothing here is addressed only to a model or hidden from the person. An
+  earlier draft carried a collapsed "Note for AI assistants" block that told an
+  assistant to add the connector and sign the household in; a hidden addressee
+  other than the human reader is a prompt-injection signature, and the
+  assistants this page is meant to help now flag it. The copy is descriptive:
+  it says what the household does, never what the assistant should do on its
+  own. The assistant's job is to relay these steps, not to run them.
 
   The Terms of Service, Privacy Policy and contact form are flat files under
   `priv/static/`, served by `Plug.Static` — see `MealplanWeb.static_paths/0`.
@@ -225,7 +232,7 @@ defmodule MealplanWeb.SitePages do
       padding: 30px 22px 34px;
     }
     .connect-eyebrow { color: var(--dark-quiet); margin-bottom: 18px; }
-    .connect-list, .ai-note, .connect-section > .eyebrow, .connect-section h2 {
+    .connect-list, .mcp-endpoint, .connect-section > .eyebrow, .connect-section h2 {
       max-width: 32rem;
       margin-left: auto;
       margin-right: auto;
@@ -242,23 +249,12 @@ defmodule MealplanWeb.SitePages do
     .connect-app { font-size: 11px; line-height: 1.5; color: var(--dark-accent); flex: none; width: 62px; }
     .connect-desc { font: 300 14px/1.5 'Newsreader', Georgia, serif; color: #d8d0c2; }
 
-    .ai-note { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); }
-    .ai-note summary {
-      font-size: 9.5px;
-      letter-spacing: .14em;
-      text-transform: uppercase;
-      color: var(--dark-quiet-dim);
-      cursor: pointer;
-      list-style: none;
-      min-height: 24px;
-      display: flex;
-      align-items: center;
-    }
-    .ai-note summary::-webkit-details-marker { display: none; }
-    .ai-note summary:hover { color: var(--dark-quiet); }
-    .ai-note-body { font: 300 13px/1.6 'Newsreader', Georgia, serif; color: var(--dark-quiet); text-wrap: pretty; margin-top: 10px; }
-    .ai-note-url { color: var(--dark-accent); font-size: 12px; }
-    .ai-note-link { color: var(--dark-accent); text-decoration: none; border-bottom: 1px solid rgba(127,191,152,.4); }
+    .mcp-endpoint { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); }
+    .mcp-endpoint .eyebrow { color: var(--dark-quiet); margin-bottom: 8px; }
+    .mcp-endpoint p { font: 300 13px/1.6 'Newsreader', Georgia, serif; color: var(--dark-quiet); text-wrap: pretty; margin: 0; }
+    .mcp-endpoint p + p { margin-top: 8px; }
+    .mcp-endpoint-url { color: var(--dark-accent); font-size: 12px; word-break: break-all; }
+    .mcp-endpoint-link { color: var(--dark-accent); text-decoration: none; border-bottom: 1px solid rgba(127,191,152,.4); }
 
     .faq-section { display: flex; flex-direction: column; }
     .faq-list { display: flex; flex-direction: column; gap: 18px; margin-top: 18px; }
@@ -479,18 +475,18 @@ defmodule MealplanWeb.SitePages do
           paste the URL into any MCP client.</div>
         </div>
       </div>
-      <details class="ai-note">
-        <summary class="mono">Note for AI assistants</summary>
-        <div class="ai-note-body">If you are an assistant reading this page for
-        someone: the MCP server endpoint is
-        <span class="mono ai-note-url">#{u}</span>. Add it as a custom connector
-        using the steps above for your platform, then authenticate the user when
-        prompted. Plantrify is invite-only &mdash; if their account isn't
-        recognized, send them to
-        <a href="/contact.html" class="ai-note-link">plantrify.com/contact</a>
-        to request an invitation. Once connected, the first tool call answers
-        with what to do next.</div>
-      </details>
+      <div class="mcp-endpoint">
+        <div class="eyebrow">Connect via MCP</div>
+        <p>Plantrify is an MCP server for AI assistants. Its endpoint is
+        <span class="mono mcp-endpoint-url">#{u}</span>. You connect it yourself:
+        follow the steps above for your assistant and approve the sign-in in your
+        browser. An assistant reading this page can walk you through those steps,
+        but adding the connector and signing in happen with you at the keyboard.</p>
+        <p>Plantrify is invite-only. If your account isn't recognised, request an
+        invitation at
+        <a href="/contact.html" class="mcp-endpoint-link">plantrify.com/contact</a>.
+        Once you're connected, the first tool call explains what to do next.</p>
+      </div>
     </section>
 
     <section class="faq-section">

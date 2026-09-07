@@ -134,7 +134,9 @@ Feature: Onboarding a new household through whichever assistant it picked
     And the page tells a Claude household to add a custom connector under Customize
     And the page says Claude's mobile app cannot add a new connector by itself
 
-  Scenario: The landing page also speaks to an assistant reading it on the household's behalf
+  Scenario: The landing page documents the MCP endpoint in plain sight, not as an aside to a model
     When a browser asks for the meal planner's landing page
-    Then the page carries a block addressed to an assistant fetching it
-    And that block names the exact MCP address to paste into the connector's URL field
+    Then the page describes itself as an MCP server for assistants
+    And the visible page content names the exact MCP address
+    And the page carries no block addressed only to an assistant
+    And the page never tells an assistant to connect or sign the household in on its own
