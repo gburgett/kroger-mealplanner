@@ -90,7 +90,9 @@ Environment=MEALPLAN_SMS_PROVIDER=twilio
 Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
 # systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
 # environment regardless: `env -i` sits between prlimit and bwrap.
-Environment=PATH=/usr/bin:/bin
+# ~/.local/bin carries `msb` (microsandbox, a mise-managed install); the
+# microVM backend below shells out to it by name, so it has to resolve here.
+Environment=PATH=/home/exedev/.local/bin:/usr/bin:/bin
 # ADR 0033: the deployed server admits more than one household, so each one
 # runs in its own libkrun microVM (ADR 0027). bubblewrap between tenants is one
 # UID namespace, not a kernel. This needs `msb` on PATH, /dev/kvm read/write
