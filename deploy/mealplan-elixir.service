@@ -56,9 +56,11 @@ ExecStop=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan s
 Environment=PHX_SERVER=true
 # The port exe.dev's proxy reaches this VM on (`ssh exe.dev share port`).
 Environment=MEALPLAN_PORT=8000
-# The OAuth issuer. Configuration, never the Host header (ADR 0009). This is
-# now the address exe.dev points the public hostname at.
-Environment=MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz
+# The OAuth issuer. Configuration, never the Host header (ADR 0009). The
+# custom domain plantrify.com is a CNAME onto the gb-kroger-mealplanner.exe.xyz
+# share (`ssh exe.dev domain add`), so the exe.xyz name still reaches the same
+# server; this is the name registered with Kroger and pasted into connectors.
+Environment=MEALPLAN_PUBLIC_URL=https://plantrify.com
 # ADR 0033: there is no configured owner and no bootstrap household. Every
 # household is invited by hand — `bin/mealplan eval
 # 'Mealplan.Invitations.create("+15095550142", label: "...")'` — and the first

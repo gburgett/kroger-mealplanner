@@ -77,6 +77,28 @@ ssh exe.dev share set-public gb-kroger-mealplanner
 
 To undo the last one: `ssh exe.dev share set-private gb-kroger-mealplanner`.
 
+## The public name is `plantrify.com`
+
+The share answers on `gb-kroger-mealplanner.exe.xyz`. The product's public name
+is `plantrify.com`, a custom domain pointed at that share:
+
+```bash
+# DNS, at the registrar for plantrify.com. exe.dev flattens the apex.
+#   plantrify.com      ALIAS/CNAME  gb-kroger-mealplanner.exe.xyz
+#   www.plantrify.com  CNAME        gb-kroger-mealplanner.exe.xyz
+
+# Then register it, from a machine with your exe.dev SSH key (not the VM):
+ssh exe.dev domain add gb-kroger-mealplanner plantrify.com
+ssh exe.dev domain ls  gb-kroger-mealplanner
+```
+
+exe.dev checks the DNS resolves, then issues the certificate and accepts
+traffic. Until it is registered the hostname answers `421 Misdirected Request`.
+`MEALPLAN_PUBLIC_URL=https://plantrify.com` in the unit is the OAuth issuer and
+the base for the Kroger redirect URI, so the domain has to be live before the
+issuer means anything to a client. The `exe.xyz` share name keeps working and
+is the CNAME target.
+
 ## Does anything need a public HTTPS route? And does this need a reverse proxy?
 
 Two questions, and they have different answers.
@@ -350,7 +372,7 @@ Make an application at <https://developer.kroger.com>. It needs the
 **exactly** as:
 
 ```
-https://gb-kroger-mealplanner.exe.xyz/kroger/callback
+https://plantrify.com/kroger/callback
 ```
 
 Kroger matches that string exactly. The server builds it from
@@ -364,7 +386,7 @@ With no `KROGER_CLIENT_ID` the server starts and works normally. The consent pag
 does not offer the Kroger checkbox, `/kroger` says the server has no credentials,
 and the two Kroger tools refuse and say what is missing.
 
-Once it is running, open `https://gb-kroger-mealplanner.exe.xyz/kroger` in a
+Once it is running, open `https://plantrify.com/kroger` in a
 browser as the owner, sign in to Kroger and choose the shop you walk into. The
 shop is written into `config/kroger.md` in the meal-plan folder and committed.
 The credential is written outside it, mode 0600, where the sandbox cannot reach
@@ -410,7 +432,7 @@ and the assistant writes `config/walmart.md`. There is no browser step.
 
 ## Connecting an assistant
 
-Give it the URL `https://gb-kroger-mealplanner.exe.xyz/mcp` and nothing else. It
+Give it the URL `https://plantrify.com/mcp` and nothing else. It
 finds the metadata, registers itself, and sends you to a consent page. Sign in to
 exe.dev as the owner, read what the page says the client will be able to do, and
 press Approve.
@@ -425,7 +447,7 @@ address from inside it, so a `curl` run on the VM never goes through the proxy
 and proves nothing.
 
 ```bash
-BASE=https://gb-kroger-mealplanner.exe.xyz
+BASE=https://plantrify.com   # or the gb-kroger-mealplanner.exe.xyz share name
 
 # Open, on purpose: this is how a client learns where to authenticate.
 curl -sS $BASE/.well-known/oauth-protected-resource/mcp
