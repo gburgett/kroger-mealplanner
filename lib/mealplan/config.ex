@@ -52,7 +52,7 @@ defmodule Mealplan.Config do
   """
   def supertokens_api_key, do: presence(get(:supertokens_api_key))
 
-  @doc ~S'"twilio" or "telnyx". Anything else is a typo and `Mealplan.Auth.Sms` says so.'
+  @doc ~S'"twilio", "telnyx", or "log" (write the code to the journal, send nothing — see `Mealplan.Auth.Sms`). Anything else is a typo and `Mealplan.Auth.Sms` says so.'
   def sms_provider, do: (get(:sms_provider) || "twilio") |> to_string() |> String.downcase()
 
   @doc "The number a code is sent FROM, in E.164 or a Twilio messaging service id."

@@ -176,6 +176,10 @@ defmodule Mealplan.Boot do
       not Mealplan.Auth.Sms.configured?() ->
         "core #{core} — but the SMS provider is not configured: #{Mealplan.Auth.Sms.why_not()}"
 
+      Mealplan.Config.sms_provider() == "log" ->
+        "core #{core} — SMS delivery is OFF (MEALPLAN_SMS_PROVIDER=log): codes " <>
+          "are written to this journal, not sent. Development and stuck-registration only."
+
       true ->
         "core #{core}, messages by #{Mealplan.Config.sms_provider()}"
     end

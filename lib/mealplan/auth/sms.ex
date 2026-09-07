@@ -15,10 +15,22 @@ defmodule Mealplan.Auth.Sms do
   | --- | --- | --- |
   | Twilio | form post to `/2010-04-01/Accounts/<sid>/Messages.json` | basic, sid and token |
   | Telnyx | JSON post to `/v2/messages` | bearer token |
+  | `log` | none — writes the message to the journal | none |
 
   Writing one and not the other would have saved thirty lines and made the
   choice a code change instead of a variable, at the point in the product where
   the household has not opened an account with either yet.
+
+  ## The `log` backend
+
+  `MEALPLAN_SMS_PROVIDER=log` sends nothing. It writes the whole message —
+  code and all — to the journal at `warning`, and an operator reads it out with
+  `journalctl`. It exists because a carrier that has not finished 10DLC or
+  toll-free registration accepts a message over the API and then never delivers
+  it, which leaves an invited household unable to sign in at all. It is a
+  development and stuck-registration backend, it is never the default, and the
+  start-up health line says loudly when it is on. It is the one deliberate
+  exception to the rule below.
 
   ## The message
 
@@ -28,7 +40,8 @@ defmodule Mealplan.Auth.Sms do
   cannot sign in.
 
   The code appears here, in the message body, and nowhere else. It is never
-  logged, never rendered into a page and never put in a session.
+  rendered into a page and never put in a session, and it is never logged
+  unless `MEALPLAN_SMS_PROVIDER` is `log`, which exists to do exactly that.
   """
 
   alias Mealplan.Config
@@ -100,10 +113,23 @@ defmodule Mealplan.Auth.Sms do
       "telnyx" ->
         telnyx(phone, text)
 
+      "log" ->
+        log_only(phone, text)
+
       other ->
         {:error,
-         Error.not_configured(~s(MEALPLAN_SMS_PROVIDER is "#{other}", not "twilio" or "telnyx"))}
+         Error.not_configured(
+           ~s(MEALPLAN_SMS_PROVIDER is "#{other}", not "twilio", "telnyx" or "log")
+         )}
     end
+  end
+
+  # The development and stuck-registration backend. See the moduledoc. The
+  # message holds the code; that is the point, and the health line warns the
+  # operator that it is on.
+  defp log_only(phone, text) do
+    Logger.warning("SMS[log] to #{phone}: #{text}")
+    :ok
   end
 
   @doc """
@@ -143,8 +169,11 @@ defmodule Mealplan.Auth.Sms do
           true -> nil
         end
 
+      "log" ->
+        nil
+
       other ->
-        ~s(MEALPLAN_SMS_PROVIDER is "#{other}", not "twilio" or "telnyx")
+        ~s(MEALPLAN_SMS_PROVIDER is "#{other}", not "twilio", "telnyx" or "log")
     end
   end
 
