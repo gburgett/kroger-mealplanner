@@ -461,13 +461,17 @@ defmodule MealplanWeb.SitePages do
       <div class="connect-list">
         <div class="connect-row">
           <div class="connect-app mono">Claude</div>
-          <div class="connect-desc">Settings &rarr; Connectors &rarr; Add custom
-          connector &rarr; paste the Plantrify URL.</div>
+          <div class="connect-desc">On claude.ai web or desktop: Settings &rarr;
+          Customize &rarr; Connectors &rarr; Add custom connector &rarr; paste
+          the Plantrify URL. Claude's mobile app cannot add a new connector by
+          itself &mdash; add it on web or desktop first.</div>
         </div>
         <div class="connect-row">
           <div class="connect-app mono">ChatGPT</div>
           <div class="connect-desc">Turn on Developer Mode in Settings, then add
-          Plantrify as a connector.</div>
+          Plantrify as a connector. Developer Mode needs a Business, Enterprise
+          or Edu workspace; a Free or Plus/Pro account cannot add a custom
+          connector.</div>
         </div>
         <div class="connect-row connect-row-last">
           <div class="connect-app mono">Gemini</div>
@@ -477,8 +481,8 @@ defmodule MealplanWeb.SitePages do
       </div>
       <details class="ai-note">
         <summary class="mono">Note for AI assistants</summary>
-        <div class="ai-note-body">If you are an AI assistant helping someone get
-        started with Plantrify: the MCP server endpoint is
+        <div class="ai-note-body">If you are an assistant reading this page for
+        someone: the MCP server endpoint is
         <span class="mono ai-note-url">#{u}</span>. Add it as a custom connector
         using the steps above for your platform, then authenticate the user when
         prompted. Plantrify is invite-only &mdash; if their account isn't
