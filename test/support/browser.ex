@@ -42,7 +42,7 @@ defmodule Mealplan.Browser do
   def signed_in(who \\ nil, _user_id \\ nil) do
     phone = if is_binary(who) and String.match?(who, ~r/^\+?\d[\d ()-]+$/), do: who, else: household_phone()
 
-    sent = post("/login", %{"phone" => phone, "return_to" => "/"})
+    sent = post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
 
     code =
       Mealplan.Mock.SuperTokens.last_code(mock()) ||

@@ -276,7 +276,12 @@ defmodule Mealplan.Features.SmsOtpSteps do
   # --- helpers ---------------------------------------------------------------
 
   defp ask_for_code(context, phone) do
-    response = Browser.post("/login", %{"phone" => phone, "return_to" => "/"}, headers(context))
+    response =
+      Browser.post(
+        "/login",
+        %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"},
+        headers(context)
+      )
 
     context
     |> Map.put(:response, response)

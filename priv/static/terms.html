@@ -3,22 +3,77 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Terms of Service &mdash; MealPlanAgent</title>
+  <title>Terms of Service &mdash; Plantrify</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
-    h2 { margin-top: 2.25rem; }
-    ol.toc { font-size: 0.95rem; }
-    footer { margin-top: 3rem; border-top: 1px solid #ddd; padding-top: 1rem; font-size: 0.9rem; }
+    :root {
+      --paper: #faf7f0;
+      --paper-alt: #f4efe4;
+      --ink: #241f19;
+      --ink-soft: #4a4238;
+      --label: #6f6252;
+      --border: #e3dbcc;
+      --green: #2f6b45;
+      --green-dark: #26593a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 300 16px/1.6 'Newsreader', Georgia, serif; }
+    main { max-width: 44rem; margin: 0 auto; padding: 0 1.25rem 3rem; }
+    a { color: inherit; }
+    h1, h2 { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; }
+    h1 { font-size: 2rem; margin: 0 0 .35rem; }
+    h2 { font-size: 1.25rem; margin-top: 2.25rem; }
+    p, li { color: var(--ink-soft); }
+    code { background: rgba(0, 0, 0, .05); padding: .1rem .3rem; border-radius: 3px; overflow-wrap: anywhere; }
+    .updated { font: 400 12px/1 'Space Mono', monospace; letter-spacing: .04em; color: var(--label); text-transform: uppercase; }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 22px 1.25rem 2.5rem;
+    }
+    .nav .brand { font: 400 20px/1 'Instrument Serif', Georgia, serif; text-decoration: none; color: var(--ink); }
+    .pill {
+      font: 500 12.5px/1 system-ui, sans-serif;
+      text-decoration: none;
+      padding: 10px 14px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+    .pill:hover { background: var(--green); color: #f7fbf8; }
+
+    footer {
+      max-width: 44rem;
+      margin: 3rem auto 0;
+      padding: 1.25rem 1.25rem 2rem;
+      border-top: 1px solid var(--border);
+      font: 400 11px/1.6 'Space Mono', monospace;
+      color: var(--label);
+    }
+    footer a { text-decoration: none; }
   </style>
 </head>
 <body>
+  <nav class="nav">
+    <a href="/" class="brand">plantrify</a>
+    <a href="/contact.html" class="pill">Get invited</a>
+  </nav>
+
+  <main>
   <h1>Terms of Service</h1>
-  <p><strong>Last updated:</strong> September 5, 2026</p>
+  <p class="updated">Last updated: September 5, 2026</p>
 
   <p>
     These Terms of Service ("Terms") are a binding agreement between you and
-    MealPlanAgent ("MealPlanAgent", "we", "us", or "our") governing your access
-    to and use of the MealPlanAgent software, server, connector, and related
+    Plantrify ("Plantrify", "we", "us", or "our") governing your access
+    to and use of the Plantrify software, server, connector, and related
     services (together, the "Services"). By adding the connector, signing in to
     the consent screen, or otherwise using the Services, you agree to these
     Terms. If you do not agree, do not use the Services.
@@ -26,7 +81,7 @@
 
   <h2>1. Our Services</h2>
   <p>
-    MealPlanAgent is a meal-planning tool for a single household. It stores your
+    Plantrify is a meal-planning tool for a single household. It stores your
     recipes and meal plans as plain-text files in a private folder, derives a
     consolidated shopping list from those files on demand, and can send that
     list to a third-party grocery cart (currently Kroger and Walmart). You reach
@@ -35,7 +90,7 @@
     commands and edits files inside a restricted sandbox on your behalf.
   </p>
   <p>
-    MealPlanAgent is not a grocery retailer, a delivery service, or a payment
+    Plantrify is not a grocery retailer, a delivery service, or a payment
     processor. We do not sell groceries, set prices, guarantee product
     availability, place orders, or complete any purchase. Any transaction with a
     grocery retailer is solely between you and that retailer, under that
@@ -79,7 +134,7 @@
     The Services are operated through an AI assistant that you choose and
     control. That assistant decides which commands to run, which files to write,
     which products to propose, and what to send to a grocery cart, based on your
-    instructions to it. MealPlanAgent executes those commands inside the sandbox;
+    instructions to it. Plantrify executes those commands inside the sandbox;
     it does not independently review them for correctness or intent.
   </p>
   <p>
@@ -97,7 +152,7 @@
   </p>
   <ul>
     <li>
-      You authorize MealPlanAgent to submit product searches and cart additions
+      You authorize Plantrify to submit product searches and cart additions
       to that retailer using the access you granted.
     </li>
     <li>
@@ -106,7 +161,7 @@
       completing.
     </li>
     <li>
-      MealPlanAgent cannot read, modify, or delete the contents of a retailer
+      Plantrify cannot read, modify, or delete the contents of a retailer
       cart. It can report only what it attempted to send.
     </li>
     <li>
@@ -159,7 +214,7 @@
   <p>
     The Services, including the server software, the command-line tools, the
     document conventions, and all associated marks and text, are owned by
-    MealPlanAgent or its licensors and are protected by intellectual property
+    Plantrify or its licensors and are protected by intellectual property
     law. We grant you a limited, revocable, non-exclusive, non-transferable
     license to use the Services for their intended purpose. All rights not
     expressly granted are reserved. This does not restrict any separate
@@ -200,7 +255,7 @@
 
   <h2>13. Limitation of Liability</h2>
   <p>
-    TO THE MAXIMUM EXTENT PERMITTED BY LAW, MEALPLANAGENT AND ITS OWNERS,
+    TO THE MAXIMUM EXTENT PERMITTED BY LAW, PLANTRIFY AND ITS OWNERS,
     OPERATORS, AND SUPPLIERS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
     SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS,
     LOST DATA, OR THE COST OF SUBSTITUTE GOODS OR SERVICES, ARISING OUT OF OR
@@ -214,7 +269,7 @@
 
   <h2>14. Indemnification</h2>
   <p>
-    You agree to defend, indemnify, and hold harmless MealPlanAgent and its
+    You agree to defend, indemnify, and hold harmless Plantrify and its
     owners and operators from any claim, loss, liability, or expense (including
     reasonable legal fees) arising out of your use of the Services, your Content,
     your instructions to an AI assistant, your use of a third-party grocery
@@ -228,7 +283,7 @@
     contact us and attempt to resolve the dispute informally for at least 30
     days. If the dispute is not resolved, it will be settled by binding
     arbitration on an individual basis under the rules of the American
-    Arbitration Association, seated in Texas. You and MealPlanAgent waive any
+    Arbitration Association, seated in Texas. You and Plantrify waive any
     right to a jury trial and to participate in a class action. This section does
     not prevent either party from seeking injunctive relief in court for
     infringement or misuse of intellectual property, or from bringing an
@@ -266,6 +321,7 @@
     Questions about these Terms: use the
     <a href="/contact.html">contact form</a>.
   </p>
+  </main>
 
   <footer>
     <p><a href="/">Home</a> &middot; <a href="/privacy.html">Privacy Policy</a> &middot; <a href="/contact.html">Contact</a></p>

@@ -2,6 +2,10 @@ defmodule MealplanWeb.KrogerPages do
   @moduledoc """
   The Kroger screens. The second and last flow in this product that needs a
   browser and a person at a keyboard. Ported from `src/kroger/pages.ts`.
+  Themed to match `MealplanWeb.SitePages`, `MealplanWeb.LoginPage` and
+  `MealplanWeb.ConsentPage` (`MealplanWeb.Theme`) as part of the Plantrify
+  rebrand — only `page/2`'s markup and `@style` changed; every content
+  function below is untouched.
 
   Plain HTML in heredocs, for the reason `MealplanWeb.ConsentPage` gives: a
   template engine that renders strings, running outside the sandbox in the
@@ -13,23 +17,28 @@ defmodule MealplanWeb.KrogerPages do
   browser session for this machine is on the other side of a mistake here.
   """
 
+  alias MealplanWeb.Theme
+
   @style """
 
-    body { font: 16px/1.6 system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
-    h1 { font-size: 1.4rem; line-height: 1.3; }
-    dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1.5rem 0; }
-    dt { color: #666; }
-    dd { margin: 0; overflow-wrap: anywhere; }
-    code { background: #f2f2f2; padding: .1rem .3rem; border-radius: 3px; }
-    .warn { background: #fff8e5; border-left: 3px solid #e0a800; padding: .75rem 1rem; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1.5rem; }
+    .card { width: 100%; max-width: 30rem; }
+    h1 { font-size: 1.5rem; line-height: 1.3; margin: 0 0 1.1rem; }
+    p { color: var(--ink-soft); }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; margin: 1.5rem 0; font-size: .95rem; }
+    dt { color: var(--label); }
+    dd { margin: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
+    .warn { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: .85rem 1.1rem; color: var(--ink-soft); }
     form { margin-top: 1.5rem; }
     form.row { display: flex; gap: .75rem; align-items: baseline; }
-    button { font: inherit; padding: .6rem 1.4rem; border-radius: 5px; border: 1px solid #bbb; cursor: pointer; }
-    button.go { background: #1a6b3c; border-color: #1a6b3c; color: #fff; }
-    input[type=text] { font: inherit; padding: .5rem; border: 1px solid #bbb; border-radius: 5px; }
+    button { font: 500 15px/1 system-ui, sans-serif; padding: .7rem 1.3rem; border-radius: 4px; border: 1px solid var(--border); background: #fff; color: var(--ink); cursor: pointer; }
+    button.go { background: var(--green); border-color: var(--green); color: #f7fbf8; }
+    button.go:hover { background: var(--green-dark); }
+    input[type=text] { font: 300 15px/1.5 'Newsreader', Georgia, serif; padding: .55rem .6rem; border: 1px solid var(--border); border-radius: 4px; background: #fff; color: var(--ink); }
+    input[type=text]:focus { outline: 2px solid var(--green); outline-offset: 1px; }
     ul.stores { list-style: none; padding: 0; }
     ul.stores li { padding: .4rem 0; }
-    .quiet { color: #666; font-size: .9rem; }
+    .quiet { color: var(--label); font-size: .9rem; }
   """
 
   @modalities Mealplan.Kroger.Config.modalities()
@@ -42,10 +51,16 @@ defmodule MealplanWeb.KrogerPages do
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>#{e(title)}</title>
-    <style>#{@style}</style>
+    #{Theme.fonts()}
+    <style>
+    #{Theme.css()}
+    #{@style}
+    </style>
     </head>
     <body>
+    <div class="card">
     #{body}
+    </div>
     </body>
     </html>
     """

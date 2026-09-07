@@ -124,11 +124,11 @@ defmodule Mealplan.Features.InvitationsSteps do
   # --- a household's sign-in --------------------------------------------
 
   step "someone asks for a code for {string}", %{args: [phone]} = context do
-    {:ok, Map.put(context, :response, Browser.post("/login", %{"phone" => phone, "return_to" => "/"}))}
+    {:ok, Map.put(context, :response, Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"}))}
   end
 
   step "the household {string} asks for a code", %{args: [phone]} = context do
-    response = Browser.post("/login", %{"phone" => phone, "return_to" => "/"})
+    response = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
 
     {:ok,
      context
@@ -153,7 +153,7 @@ defmodule Mealplan.Features.InvitationsSteps do
   end
 
   step "the household {string} signs in again", %{args: [phone]} = context do
-    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/"})
+    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
     context = put_login(context, phone, login_cookie: cookie_of(asked))
     {:ok, enter_code(context, phone)}
   end
@@ -178,7 +178,7 @@ defmodule Mealplan.Features.InvitationsSteps do
   end
 
   step "{string} signs in with the code that arrives", %{args: [phone]} = context do
-    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/"})
+    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
     context = put_login(context, phone, login_cookie: cookie_of(asked))
     {:ok, enter_code(context, phone)}
   end

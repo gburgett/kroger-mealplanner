@@ -49,10 +49,32 @@ defmodule MealplanWeb.LoginController do
   Answers the same page whether or not the number was the household's. An
   answer that distinguished them would turn this form into an oracle for the
   household's telephone number.
+
+  The Terms of Service / Privacy Policy checkbox is checked here, before
+  `Otp.start/1` is ever called, for every phone number alike. Nothing at this
+  point can tell a new household from a returning one without becoming that
+  same oracle, so the requirement has to apply uniformly rather than only to
+  a "first" sign-in.
   """
   def send_code(conn, params) do
     return_to = HouseholdSession.safe_return_to(params["return_to"])
 
+    if params["agreed_to_terms"] == "yes" do
+      start_code(conn, params, return_to)
+    else
+      conn
+      |> put_status(:bad_request)
+      |> html(
+        LoginPage.phone_form(
+          return_to: return_to,
+          phone: params["phone"],
+          error: "You must agree to the Terms of Service and Privacy Policy to continue."
+        )
+      )
+    end
+  end
+
+  defp start_code(conn, params, return_to) do
     case Otp.start(params["phone"] || "") do
       {:ok, :ignored} ->
         # Nothing was sent. Show the code form anyway, and let it fail at the
