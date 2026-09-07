@@ -50,7 +50,7 @@ decision, write a new record. Give the old record the status
 | [0033](0033-admit-invited-households-with-their-own-tenant-and-corpus.md) | Admit invited households, each with its own tenant and corpus | accepted |
 | [0034](0034-reap-each-host-mode-command-process-group.md) | Reap each host-mode command's process group, and take the test default back from microsandbox | accepted |
 | [0035](0035-warm-start-the-microsandbox-microvm.md) | Warm-start the microsandbox microVM, and idle it out after ten minutes | proposed |
-| [0036](0036-reduce-a-shopping-list-line-to-a-search-term-before-the-retailer-call.md) | Reduce a shopping-list line to a search term before the retailer call | proposed |
+| [0036](0036-reduce-a-shopping-list-line-to-a-search-term-before-the-retailer-call.md) | Reduce a shopping-list line to a search term before the retailer call, and record it on the line | proposed |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
