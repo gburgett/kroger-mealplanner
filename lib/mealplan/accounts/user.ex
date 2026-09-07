@@ -36,12 +36,27 @@ defmodule Mealplan.Accounts.User do
     |> unique_constraint(:supertokens_user_id)
   end
 
-  @doc "E.164 as far as a form field can be made into one: keep digits and a leading `+`."
+  @doc """
+  E.164, as far as a form field can be made into one.
+
+  Keep the digits, keep a leading `+`, drop everything a person types for
+  legibility. A number with no `+` is assumed to be North American, because
+  that is what this household's providers route: ten digits gets `+1`, and
+  eleven digits that already start with `1` just gets the `+`. Someone with an
+  international number types the `+` and it is left alone. The result is
+  idempotent — normalising it again is a no-op.
+  """
   def normalise_phone(nil), do: nil
 
   def normalise_phone(phone) do
     trimmed = String.trim(phone)
     digits = String.replace(trimmed, ~r/[^0-9]/, "")
-    if String.starts_with?(trimmed, "+"), do: "+" <> digits, else: digits
+
+    cond do
+      String.starts_with?(trimmed, "+") -> "+" <> digits
+      String.length(digits) == 10 -> "+1" <> digits
+      String.length(digits) == 11 and String.starts_with?(digits, "1") -> "+" <> digits
+      true -> digits
+    end
   end
 end

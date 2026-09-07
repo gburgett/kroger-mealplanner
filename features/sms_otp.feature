@@ -44,6 +44,23 @@ Feature: The household signs in with a code sent to their telephone
     Then the household is signed in
     And the browser is sent on to the page it asked for
 
+  Scenario Outline: The household types its number without the leading "+1"
+    A person types the number the way they say it, not in E.164. The server
+    assumes North America when there is no "+": ten digits gets a "+1", and
+    eleven digits that already start with "1" gets the "+". The allowlist
+    check and the message both see the same canonical number.
+
+    Given nobody is signed in
+    When the household asks for a code for "<typed>"
+    Then a message is sent to "+15095550142"
+    And the message holds a six-digit code
+
+    Examples:
+      | typed          |
+      | 5095550142     |
+      | 1 509 555 0142 |
+      | (509) 555-0142 |
+
   Scenario: The login page is reachable with no session
     Given nobody is signed in
     When a browser asks for the login page

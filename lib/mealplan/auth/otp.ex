@@ -131,22 +131,19 @@ defmodule Mealplan.Auth.Otp do
   def invited?(phone), do: Invitations.invited?(normalise(phone))
 
   @doc """
-  E.164, as far as a form field can be made into one: keep the digits, keep a
-  leading `+`, drop everything a person types for legibility.
+  E.164, as far as a form field can be made into one.
+
+  Delegates to `Mealplan.Accounts.normalise_phone/1` so the allowlist check
+  here and the user primary key downstream cannot disagree about what a typed
+  number means — a number with no `+` is assumed North American there (ten
+  digits gets `+1`).
 
   This is not a validator. Twilio and Telnyx both reject a number that is not
   routable, and their refusal names the number, which is a better message than
   one written here.
   """
   @spec normalise(String.t() | nil) :: String.t()
-  def normalise(nil), do: ""
-
-  def normalise(phone) do
-    trimmed = String.trim(phone)
-    digits = String.replace(trimmed, ~r/[^0-9]/, "")
-
-    if String.starts_with?(trimmed, "+"), do: "+" <> digits, else: digits
-  end
+  def normalise(phone), do: Accounts.normalise_phone(phone)
 
   defp send_code(phone) do
     with {:ok, created} <- SuperTokens.create_code(phone),
