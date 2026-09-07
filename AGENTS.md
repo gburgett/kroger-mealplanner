@@ -234,6 +234,14 @@ follow-up migration), `SUPERTOKENS_CONNECTION_URI` and `MEALPLAN_PORT=8000`,
 which has to match what `ssh exe.dev share port` pinned. There is no
 `MEALPLAN_OWNER` or `MEALPLAN_OWNER_PHONE` any more — every household is invited
 with `mix mealplan.invite` (or `bin/mealplan eval` in a release).
+
+**The public domain is `plantrify.com`.** The household opens
+`https://plantrify.com/` and an assistant connects to the MCP entrypoint at
+`https://plantrify.com/mcp`. That name fronts the exe.dev share and is the
+value `MEALPLAN_PUBLIC_URL` — the OAuth issuer — carries. The default share
+name `https://gb-kroger-mealplanner.exe.xyz` reaches the same server; what is
+registered with Kroger or pasted into a connector uses `plantrify.com`.
+
 `MEALPLAN_STATE` is the state file's path (ADR 0031); it carries no password,
 so it lives in this file, and `Mealplan.Boot` refuses to start if it points
 inside `MEALPLAN_CORPUS_ROOT` or any tenant's folder.
