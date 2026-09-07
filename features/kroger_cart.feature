@@ -55,11 +55,11 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search                  | upc           | description                          | size | price |
-      | boneless chicken thighs | 0001111070023 | Kroger Boneless Skinless Chicken Thighs | 1 lb | 4.99 |
-      | shredded cheddar        | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-      | shredded cheddar        | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
-      | corn tortillas          | 0007225003733 | Mission White Corn Tortillas         | 30 ct | 3.49 |
+      | search                  | upc           | description                             | size  | price |
+      | boneless chicken thighs | 0001111070023 | Kroger Boneless Skinless Chicken Thighs | 1 lb  | 4.99  |
+      | cheddar                 | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese    | 8 oz  | 2.00  |
+      | cheddar                 | 0001111050170 | Kroger Mild Cheddar Shredded Cheese     | 8 oz  | 2.00  |
+      | corn tortillas          | 0007225003733 | Mission White Corn Tortillas            | 30 ct | 3.49  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Kroger for the products on the shopping list
     Then the shopping list has 2 candidates for "shredded cheddar"
@@ -76,12 +76,12 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-      | shredded cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Kroger for the products on the shopping list
-    Then every product Kroger offered for "shredded cheddar" is still on the shopping list
+    Then every product Kroger offered for "cheddar" is still on the shopping list
     And my Kroger cart was sent nothing
 
   @core
@@ -89,9 +89,9 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-      | shredded cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I keep only the candidate "0001111050158" for "shredded cheddar"
     Then the shopping list has 1 candidate for "shredded cheddar"
@@ -102,8 +102,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then my Kroger cart was sent:
@@ -122,8 +122,8 @@ Feature: Sending the list to Kroger
     And my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I run:
       """
@@ -141,8 +141,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the file "pantry/consumables.md" does not exist in the meal-plan folder
@@ -158,8 +158,8 @@ Feature: Sending the list to Kroger
     And my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
@@ -175,8 +175,8 @@ Feature: Sending the list to Kroger
     And my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I run:
       """
@@ -195,9 +195,9 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-      | shredded cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
@@ -208,8 +208,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Kroger for the products on the shopping list
     Then the shopping list lists "corn tortillas" as not found at this store
@@ -223,8 +223,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     And the shopping list has been sent to my Kroger cart
     When I send the product "0001111050158" from the shopping list to my Kroger cart
@@ -252,8 +252,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     And my Kroger access token has expired
     When I send the shopping list to my Kroger cart
@@ -279,8 +279,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the product "0009999999999" from the shopping list to my Kroger cart
     Then the meal planner refuses, and names the UPC "0009999999999"
@@ -316,8 +316,8 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
-      | search           | upc           | description                          | size | price |
-      | shredded cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
+      | search  | upc           | description                          | size | price |
+      | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     And the shopping list has been sent to my Kroger cart
     When I send the shopping list to my Kroger cart

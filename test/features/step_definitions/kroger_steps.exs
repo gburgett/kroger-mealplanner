@@ -138,6 +138,7 @@ defmodule Mealplan.Features.KrogerSteps do
         beneath = if Regex.match?(~r/^-\s/, line), do: String.contains?(line, item), else: beneath
 
         if beneath and Regex.match?(~r/^\s+-\s/, line) and
+             not Regex.match?(~r/^\s+-\s+search:/i, line) and
              not String.contains?(line, "`#{upc}`") do
           {nil, beneath}
         else
@@ -228,7 +229,11 @@ defmodule Mealplan.Features.KrogerSteps do
 
   step "every candidate on the shopping list is written as a count of 1", context do
     candidates =
-      context |> list_text() |> String.split("\n") |> Enum.filter(&Regex.match?(~r/^\s+-\s/, &1))
+      context
+      |> list_text()
+      |> String.split("\n")
+      |> Enum.filter(&Regex.match?(~r/^\s+-\s/, &1))
+      |> Enum.reject(&Regex.match?(~r/^\s+-\s+search:/i, &1))
 
     assert candidates != [], "there are no candidates on the list at all"
 
@@ -259,7 +264,9 @@ defmodule Mealplan.Features.KrogerSteps do
   step "every product Kroger offered for {string} is still on the shopping list",
        %{args: [term]} = context do
     document = list_text(context)
-    offered = Map.get(Mealplan.Mock.Server.state(context.kroger).catalogue, String.downcase(term), [])
+
+    offered =
+      Map.get(Mealplan.Mock.Server.state(context.kroger).catalogue, String.downcase(term), [])
 
     assert length(offered) > 1,
            ~s("#{term}" has only #{length(offered)} product, so nothing is being chosen between)
@@ -275,7 +282,10 @@ defmodule Mealplan.Features.KrogerSteps do
   step "the shopping list lists {string} as not found at this store",
        %{args: [item]} = context do
     after_heading = section(context, "## Not found at this store")
-    assert String.contains?(after_heading, item), ~s("#{item}" is not listed there:\n#{after_heading})
+
+    assert String.contains?(after_heading, item),
+           ~s("#{item}" is not listed there:\n#{after_heading})
+
     {:ok, context}
   end
 
@@ -595,7 +605,9 @@ defmodule Mealplan.Features.KrogerSteps do
   end
 
   step "Kroger sends me back with the same state a second time", context do
-    url = context[:kroger_callback_url] || flunk("no Kroger callback has happened in this scenario")
+    url =
+      context[:kroger_callback_url] || flunk("no Kroger callback has happened in this scenario")
+
     {:ok, Browser.visit(context, url)}
   end
 
@@ -614,7 +626,8 @@ defmodule Mealplan.Features.KrogerSteps do
     held = Store.tokens(tenant_id(context))
     assert held, "no Kroger token is held, so this scenario proves nothing"
 
-    context = run_bash(context, "grep -rl #{shell_quote(held.access_token)} . 2>/dev/null || true")
+    context =
+      run_bash(context, "grep -rl #{shell_quote(held.access_token)} . 2>/dev/null || true")
 
     assert String.trim(context.last.stdout) == "",
            "the Kroger credential is inside the folder, which the agent can read:\n#{context.last.stdout}"
@@ -869,6 +882,7 @@ defmodule Mealplan.Features.KrogerSteps do
     |> Enum.reduce({[], false}, fn line, {found, beneath} ->
       cond do
         Regex.match?(~r/^-\s/, line) -> {found, String.contains?(line, item)}
+        beneath and Regex.match?(~r/^\s+-\s+search:/i, line) -> {found, beneath}
         beneath and Regex.match?(~r/^\s+-\s/, line) -> {[line | found], beneath}
         Regex.match?(~r/^#/, line) -> {found, false}
         true -> {found, beneath}
@@ -879,7 +893,10 @@ defmodule Mealplan.Features.KrogerSteps do
   end
 
   defp wanted_items(context) do
-    Enum.map(context.datatable.maps, &%{upc: &1["upc"], quantity: String.to_integer(&1["quantity"])})
+    Enum.map(
+      context.datatable.maps,
+      &%{upc: &1["upc"], quantity: String.to_integer(&1["quantity"])}
+    )
   end
 
   defp simple(items), do: Enum.map(items, &%{upc: &1.upc, quantity: &1.quantity})

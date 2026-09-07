@@ -52,10 +52,10 @@ Feature: Shopping at Walmart through the affiliate API
   Scenario: The products that match each line are written in
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search                  | item id | name                                              | price |
-      | boneless chicken thighs | 945193065 | Great Value Boneless Skinless Chicken Thighs    | 5.48  |
-      | shredded cheddar        | 10449042  | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-      | shredded cheddar        | 10315005  | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
+      | search                  | item id   | name                                             | price |
+      | boneless chicken thighs | 945193065 | Great Value Boneless Skinless Chicken Thighs     | 5.48  |
+      | cheddar                 | 10449042  | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | cheddar                 | 10315005  | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
       | corn tortillas          | 23983284  | Mission White Corn Tortillas                     | 2.94  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Walmart for the products on the shopping list
@@ -67,21 +67,21 @@ Feature: Shopping at Walmart through the affiliate API
   Scenario: Nothing is chosen for me
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-      | shredded cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Walmart for the products on the shopping list
-    Then every product Walmart offered for "shredded cheddar" is still on the shopping list
+    Then every product Walmart offered for "cheddar" is still on the shopping list
     And my Walmart cart received nothing
 
   @core
   Scenario: I choose a product by deleting the ones I do not want
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-      | shredded cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I keep only the candidate "walmart:10449042" for "shredded cheddar"
     Then the shopping list has 1 candidate for "shredded cheddar"
@@ -96,8 +96,8 @@ Feature: Shopping at Walmart through the affiliate API
 
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner says nothing was added to the cart
@@ -115,8 +115,8 @@ Feature: Shopping at Walmart through the affiliate API
 
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I ask for the Walmart cart link
     Then the cart link carries the Walmart store "5435"
@@ -127,8 +127,8 @@ Feature: Shopping at Walmart through the affiliate API
     cart for whatever fulfilment their Walmart account defaults to.
 
     Given Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     And I ask Walmart for the products on the shopping list
     When I ask for the Walmart cart link
@@ -142,9 +142,9 @@ Feature: Shopping at Walmart through the affiliate API
 
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-      | shredded cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
@@ -154,8 +154,8 @@ Feature: Shopping at Walmart through the affiliate API
   Scenario: A line Walmart has nothing for is listed rather than guessed at
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Walmart for the products on the shopping list
     Then the shopping list lists "corn tortillas" as not found at this store
@@ -169,8 +169,8 @@ Feature: Shopping at Walmart through the affiliate API
     Given the pantry consumable "shredded cheddar" is "needs recheck"
     And I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
@@ -187,8 +187,8 @@ Feature: Shopping at Walmart through the affiliate API
     Given the pantry consumable "shredded cheddar" is "needs recheck"
     And I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I run:
       """
@@ -303,8 +303,8 @@ Feature: Shopping at Walmart through the affiliate API
 
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart sells:
-      | search           | item id  | name                                             | price |
-      | shredded cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
+      | search  | item id  | name                                             | price |
+      | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
     When I ask for a Walmart cart link with the item "walmart:999999999"
     Then the meal planner refuses, and names the item "walmart:999999999"

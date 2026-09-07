@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-07
 decision-makers: gburgett
 consulted: ADR 0007, ADR 0010, ADR 0017, preferences/household.md

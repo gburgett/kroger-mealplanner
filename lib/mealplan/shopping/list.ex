@@ -41,6 +41,11 @@ defmodule Mealplan.Shopping.List do
   # A Walmart item id, prefixed so it can never be mistaken for a UPC.
   @walmart_item ~r/^walmart:[0-9]{1,20}$/
 
+  # An indented `- search: <term>` sub-line, recognised BEFORE the candidate
+  # rule so it is never read as a malformed candidate. It is the term the server
+  # searched a retailer with, and the agent may edit it and re-run (ADR 0036).
+  @search_sub ~r/^\s+-\s+search:\s*(.*)$/i
+
   @candidate ~r/^\s+-\s+(\S+)\s+`([^`]*)`\s*(.*)$/
   # A line under `## Sent`, as append_sent writes it:
   #     - 2026-08-26T12:54:35Z — 2 `0001111050158` Kroger Sharp Cheddar
@@ -113,7 +118,8 @@ defmodule Mealplan.Shopping.List do
               text: raw |> String.replace(@dash_line, "") |> String.trim(),
               section: section,
               line: number,
-              candidates: []
+              candidates: [],
+              search: nil
             }
 
             {[item | items], sent, section, item}
@@ -128,9 +134,16 @@ defmodule Mealplan.Shopping.List do
                     )
             end
 
-            candidate = parse_candidate(file, number, raw)
-            updated = %{current | candidates: current.candidates ++ [candidate]}
-            {replace_item(items, current, updated), sent, section, updated}
+            case Regex.run(@search_sub, raw) do
+              [_, term] ->
+                updated = %{current | search: String.trim(term)}
+                {replace_item(items, current, updated), sent, section, updated}
+
+              nil ->
+                candidate = parse_candidate(file, number, raw)
+                updated = %{current | candidates: current.candidates ++ [candidate]}
+                {replace_item(items, current, updated), sent, section, updated}
+            end
 
           String.trim(raw) == "" ->
             {items, sent, section, nil}
@@ -210,24 +223,56 @@ defmodule Mealplan.Shopping.List do
   # --- writing ----------------------------------------------------------
 
   @doc """
-  Write candidate blocks beneath the item lines they belong to.
+  Write the search sub-line and the candidate block beneath the item lines they
+  belong to.
 
-  `found` is keyed by the item line's exact text. An anchor that is no longer
-  in the document is skipped rather than guessed at.
+  `found` is keyed by the item line's exact text; `searches` likewise, and it
+  holds the term the server searched with for the lines that had no `- search:`
+  sub-line of their own. An anchor no longer in the document is skipped rather
+  than guessed at. A `- search:` line the agent wrote by hand is left in place
+  and the candidates go under it — the tool owns the candidate block, not the
+  search term (ADR 0036).
   """
-  def attach_candidates(text, found) do
-    text
-    |> String.split("\n")
-    |> Enum.flat_map(fn raw ->
-      with true <- Regex.match?(@dash_line, raw),
-           anchor = raw |> String.replace(@dash_line, "") |> String.trim(),
-           [_ | _] = candidates <- Map.get(found, anchor, []) do
-        [raw | Enum.map(candidates, &render_candidate/1)]
-      else
-        _ -> [raw]
-      end
-    end)
+  def attach_candidates(text, found, searches \\ %{}) do
+    {rows, pending} =
+      text
+      |> String.split("\n")
+      |> Enum.reduce({[], nil}, fn raw, {rows, pending} ->
+        cond do
+          Regex.match?(@dash_line, raw) ->
+            rows = emit_pending(rows, pending)
+            anchor = raw |> String.replace(@dash_line, "") |> String.trim()
+            candidates = Map.get(found, anchor, [])
+            term = Map.get(searches, anchor)
+
+            if candidates == [] and is_nil(term) do
+              {[raw | rows], nil}
+            else
+              {[raw | rows], %{term: term, candidates: candidates}}
+            end
+
+          not is_nil(pending) and Regex.match?(@search_sub, raw) ->
+            # The agent already has a search line here. Keep it; drop ours.
+            {[raw | rows], %{pending | term: nil}}
+
+          true ->
+            rows = emit_pending(rows, pending)
+            {[raw | rows], nil}
+        end
+      end)
+
+    rows
+    |> emit_pending(pending)
+    |> Enum.reverse()
     |> Enum.join("\n")
+  end
+
+  defp emit_pending(rows, nil), do: rows
+
+  defp emit_pending(rows, %{term: term, candidates: candidates}) do
+    search_rows = if term in [nil, ""], do: [], else: ["  - search: #{term}"]
+    added = search_rows ++ Enum.map(candidates, &render_candidate/1)
+    Enum.reverse(added) ++ rows
   end
 
   def render_candidate(candidate) do
@@ -239,20 +284,16 @@ defmodule Mealplan.Shopping.List do
   defp blank_to(value, _fallback), do: value
 
   @doc """
-  Move the item lines the shop had nothing for into their own section.
-  Listed rather than guessed at.
+  Move the item lines the shop had nothing for into their own section, each with
+  its `- search:` sub-line so the section shows what was tried. Listed rather
+  than guessed at.
   """
   def move_to_not_found(text, []), do: text
 
   def move_to_not_found(text, anchors) do
     wanted = MapSet.new(anchors)
     lines = String.split(text, "\n")
-
-    {moved, kept} =
-      Enum.split_with(lines, fn raw ->
-        Regex.match?(@dash_line, raw) and
-          MapSet.member?(wanted, raw |> String.replace(@dash_line, "") |> String.trim())
-      end)
+    {moved, kept} = split_blocks(lines, wanted)
 
     if moved == [] do
       text
@@ -267,6 +308,133 @@ defmodule Mealplan.Shopping.List do
         ] ++ moved,
         ["## #{@left_out_heading}", "## #{@sent_heading}", "## #{@cart_link_heading}"]
       )
+    end
+  end
+
+  @doc """
+  Move the named lines back out of "## Not found at this store" and under their
+  own aisle heading, keeping each line's `- search:` sub-line. `moves` is
+  `%{anchor_text => section_name}`. Used when an edited search term finds a
+  product for a line that had been listed as not found (ADR 0036).
+  """
+  def move_out_of_not_found(text, moves) when map_size(moves) == 0, do: text
+
+  def move_out_of_not_found(text, moves) do
+    lines = String.split(text, "\n")
+    heading = "## #{@not_found_heading}"
+
+    case Enum.find_index(lines, &(String.trim(&1) == heading)) do
+      nil ->
+        text
+
+      at ->
+        rest = Enum.drop(lines, at + 1)
+        rel = Enum.find_index(rest, &Regex.match?(@section_heading, String.trim(&1)))
+        section_end = if rel == nil, do: length(lines), else: at + 1 + rel
+
+        section_lines = Enum.slice(lines, at, section_end - at)
+        {kept_section, blocks} = extract_blocks(section_lines, MapSet.new(Map.keys(moves)))
+
+        rebuilt =
+          (Enum.take(lines, at) ++ kept_section ++ Enum.drop(lines, section_end))
+          |> drop_empty_sections()
+          |> Enum.join("\n")
+          |> String.replace(~r/\n+$/, "\n")
+
+        Enum.reduce(blocks, rebuilt, fn {anchor, block}, acc ->
+          reinsert_block(acc, Map.fetch!(moves, anchor), block)
+        end)
+    end
+  end
+
+  # An anchor line plus the indented sub-lines that follow it, for each wanted
+  # anchor. Everything else stays in `kept`, in document order.
+  defp split_blocks(lines, wanted) do
+    indexed = Enum.with_index(lines)
+
+    move_indices =
+      for {raw, i} <- indexed,
+          Regex.match?(@dash_line, raw),
+          MapSet.member?(wanted, anchor_of(raw)),
+          idx <- [i | trailing_indented(lines, i + 1)],
+          into: MapSet.new(),
+          do: idx
+
+    {moved, kept} =
+      indexed
+      |> Enum.split_with(fn {_raw, i} -> MapSet.member?(move_indices, i) end)
+
+    {Enum.map(moved, &elem(&1, 0)), Enum.map(kept, &elem(&1, 0))}
+  end
+
+  defp extract_blocks(section_lines, wanted) do
+    indexed = Enum.with_index(section_lines)
+
+    blocks =
+      for {raw, i} <- indexed,
+          Regex.match?(@dash_line, raw),
+          MapSet.member?(wanted, anchor_of(raw)) do
+        idxs = [i | trailing_indented(section_lines, i + 1)]
+        {anchor_of(raw), Enum.map(idxs, &Enum.at(section_lines, &1))}
+      end
+
+    remove =
+      blocks
+      |> Enum.flat_map(fn {anchor, _} ->
+        for {raw, i} <- indexed,
+            Regex.match?(@dash_line, raw),
+            anchor_of(raw) == anchor,
+            idx <- [i | trailing_indented(section_lines, i + 1)],
+            do: idx
+      end)
+      |> MapSet.new()
+
+    kept = for {raw, i} <- indexed, not MapSet.member?(remove, i), do: raw
+    {kept, blocks}
+  end
+
+  defp trailing_indented(lines, i) do
+    case Enum.at(lines, i) do
+      nil ->
+        []
+
+      line ->
+        if Regex.match?(@indented_dash, line),
+          do: [i | trailing_indented(lines, i + 1)],
+          else: []
+    end
+  end
+
+  defp anchor_of(raw), do: raw |> String.replace(@dash_line, "") |> String.trim()
+
+  defp reinsert_block(text, section_name, block) do
+    lines = String.split(text, "\n")
+    heading = "## #{section_name}"
+
+    case Enum.find_index(lines, &(String.trim(&1) == heading)) do
+      nil ->
+        insert_new_section(
+          lines,
+          section_name,
+          block,
+          [
+            "## #{@not_found_heading}",
+            "## #{@left_out_heading}",
+            "## #{@sent_heading}",
+            "## #{@cart_link_heading}"
+          ]
+        )
+
+      at ->
+        rest = Enum.drop(lines, at + 1)
+        rel = Enum.find_index(rest, &Regex.match?(@section_heading, String.trim(&1)))
+        section_end = if rel == nil, do: length(lines), else: at + 1 + rel
+        above = lines |> Enum.take(section_end) |> drop_trailing_blanks()
+        below = Enum.drop(lines, section_end)
+
+        (above ++ block ++ [""] ++ below)
+        |> Enum.join("\n")
+        |> String.replace(~r/\n+$/, "\n")
     end
   end
 
@@ -365,7 +533,13 @@ defmodule Mealplan.Shopping.List do
       |> Enum.find_index(&Regex.match?(@section_heading, String.trim(&1)))
 
     end_ = if next_at == nil, do: length(lines), else: heading_at + 1 + next_at
-    items = Enum.filter(body, &String.starts_with?(&1, "- "))
+    # Item lines and their indented sub-lines (a `- search:` line rides along);
+    # the prose blurb is only for a section being created, not appended to.
+    items =
+      Enum.filter(body, fn line ->
+        String.starts_with?(line, "- ") or Regex.match?(@indented_dash, line)
+      end)
+
     above = lines |> Enum.take(end_) |> drop_trailing_blanks()
 
     (above ++ items ++ [""] ++ Enum.drop(lines, end_))

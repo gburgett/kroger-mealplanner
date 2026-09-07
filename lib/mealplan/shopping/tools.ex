@@ -19,6 +19,7 @@ defmodule Mealplan.Shopping.Tools do
   alias Mealplan.Sandbox.Session
   alias Mealplan.Kroger
   alias Mealplan.Walmart
+  alias Mealplan.Retail.Query
 
   defmodule Refusal do
     @moduledoc "A tool refusal: caught and rendered as `isError: true` text."
@@ -45,52 +46,39 @@ defmodule Mealplan.Shopping.Tools do
 
     before = read_corpus!(session, requested)
     list = List.parse(requested, before)
-    waiting = List.unmatched(list)
     items = structure_by_line(session, list.front, requested)
 
-    {found, not_found, searched} =
-      Enum.reduce(waiting, {%{}, [], 0}, fn item, {found, not_found, searched} ->
-        case Map.get(items, item.text) do
-          nil ->
-            {found, not_found, searched}
+    search_fn = fn term ->
+      if String.trim(term) == "" do
+        []
+      else
+        Kroger.Api.search_products(kroger,
+          term: term,
+          location_id: config.store,
+          limit: @candidates_per_line
+        )
+      end
+    end
 
-          known ->
-            products =
-              Kroger.Api.search_products(kroger,
-                term: known.item,
-                location_id: config.store,
-                limit: @candidates_per_line
-              )
+    to_candidate = fn product ->
+      %{
+        count: 1,
+        product_id: product.upc,
+        description: product.description,
+        size: product.size,
+        price: price_text(product.price),
+        line: 0
+      }
+    end
 
-            if products == [] do
-              {found, [item.text | not_found], searched + 1}
-            else
-              candidates =
-                Enum.map(products, fn product ->
-                  %{
-                    count: 1,
-                    product_id: product.upc,
-                    description: product.description,
-                    size: product.size,
-                    price: price_text(product.price),
-                    line: 0
-                  }
-                end)
-
-              {Map.put(found, item.text, candidates), not_found, searched + 1}
-            end
-        end
-      end)
-
-    not_found = Enum.reverse(not_found)
-    after_text = List.move_to_not_found(List.attach_candidates(before, found), not_found)
-    write_and_commit!(session, requested, after_text, message, now)
+    result = match_products(before, list, items, search_fn, to_candidate)
+    write_and_commit!(session, requested, result.text, message, now)
 
     %{
       path: requested,
-      matched: map_size(found),
-      not_found: Enum.map(not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
-      searched: searched
+      matched: result.matched,
+      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
+      searched: result.searched
     }
   end
 
@@ -294,48 +282,35 @@ defmodule Mealplan.Shopping.Tools do
 
     before = read_corpus!(session, requested)
     list = List.parse(requested, before)
-    waiting = List.unmatched(list)
     items = structure_by_line(session, list.front, requested)
 
-    {found, not_found, searched} =
-      Enum.reduce(waiting, {%{}, [], 0}, fn item, {found, not_found, searched} ->
-        case Map.get(items, item.text) do
-          nil ->
-            {found, not_found, searched}
+    search_fn = fn term ->
+      if String.trim(term) == "" do
+        []
+      else
+        Walmart.Api.search_products(walmart, term: term, limit: @candidates_per_line)
+      end
+    end
 
-          known ->
-            products =
-              Walmart.Api.search_products(walmart, term: known.item, limit: @candidates_per_line)
+    to_candidate = fn product ->
+      %{
+        count: 1,
+        product_id: "walmart:#{product.item_id}",
+        description: product.name,
+        size: "",
+        price: price_text(product.price),
+        line: 0
+      }
+    end
 
-            if products == [] do
-              {found, [item.text | not_found], searched + 1}
-            else
-              candidates =
-                Enum.map(products, fn product ->
-                  %{
-                    count: 1,
-                    product_id: "walmart:#{product.item_id}",
-                    description: product.name,
-                    size: "",
-                    price: price_text(product.price),
-                    line: 0
-                  }
-                end)
-
-              {Map.put(found, item.text, candidates), not_found, searched + 1}
-            end
-        end
-      end)
-
-    not_found = Enum.reverse(not_found)
-    after_text = List.move_to_not_found(List.attach_candidates(before, found), not_found)
-    write_and_commit!(session, requested, after_text, message, now)
+    result = match_products(before, list, items, search_fn, to_candidate)
+    write_and_commit!(session, requested, result.text, message, now)
 
     %{
       path: requested,
-      matched: map_size(found),
-      not_found: Enum.map(not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
-      searched: searched
+      matched: result.matched,
+      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
+      searched: result.searched
     }
   end
 
@@ -519,16 +494,115 @@ defmodule Mealplan.Shopping.Tools do
       end
 
     (parsed["sections"] || [])
-    |> Enum.flat_map(fn section -> section["items"] || [] end)
-    |> Map.new(fn item ->
+    |> Enum.flat_map(fn section ->
+      Enum.map(section["items"] || [], &{section["section"] || "", &1})
+    end)
+    |> Map.new(fn {section, item} ->
       {item["line"] || "",
        %{
          item: item["item"] || "",
          line: item["line"] || "",
          quantity: item["quantity"] || "",
-         unit: item["unit"]
+         unit: item["unit"],
+         section: section
        }}
     end)
+  end
+
+  # The search loop shared by kroger_find_products and walmart_find_products.
+  # `search_fn` runs one retailer search and returns a product list; `to_candidate`
+  # turns one product into a candidate map. Reduces the coupling to ADR 0036 to
+  # one place: two passes, the derived term recorded on the line, and a not-found
+  # line retried only when its `- search:` term was changed by hand.
+  defp match_products(before, list, items, search_fn, to_candidate) do
+    waiting = List.unmatched(list)
+
+    {found, not_found, searches, searched} =
+      Enum.reduce(waiting, {%{}, [], %{}, 0}, fn item, {found, not_found, searches, searched} ->
+        case Map.get(items, item.text) do
+          nil ->
+            {found, not_found, searches, searched}
+
+          known ->
+            {term_used, products} = search_for(item, known, search_fn)
+
+            searches =
+              if is_nil(item.search),
+                do: Map.put(searches, item.text, term_used),
+                else: searches
+
+            if products == [] do
+              {found, [item.text | not_found], searches, searched + 1}
+            else
+              {Map.put(found, item.text, Enum.map(products, to_candidate)), not_found, searches,
+               searched + 1}
+            end
+        end
+      end)
+
+    retry =
+      for item <- list.items,
+          item.section == List.not_found_heading(),
+          is_binary(item.search),
+          known = Map.get(items, item.text),
+          known != nil,
+          Query.to_search_term(known.item) != item.search,
+          do: {item, known}
+
+    {found, moved_back, retried} =
+      Enum.reduce(retry, {found, %{}, 0}, fn {item, known}, {found, moved_back, retried} ->
+        case search_fn.(item.search) do
+          [] ->
+            {found, moved_back, retried + 1}
+
+          products ->
+            {Map.put(found, item.text, Enum.map(products, to_candidate)),
+             Map.put(moved_back, item.text, known.section), retried + 1}
+        end
+      end)
+
+    after_text =
+      before
+      |> List.move_out_of_not_found(moved_back)
+      |> List.attach_candidates(found, searches)
+      |> List.move_to_not_found(Enum.reverse(not_found))
+
+    %{
+      text: after_text,
+      matched: map_size(found),
+      not_found: Enum.reverse(not_found),
+      searched: searched + retried
+    }
+  end
+
+  # A line that carries its own `- search:` term is searched with it verbatim and
+  # once — the agent's term is authoritative (ADR 0036). Otherwise pass one uses
+  # the derived term, and pass two the fallback only if pass one came back empty.
+  # The term returned is the one that produced the candidates shown, or the
+  # pass-one term when nothing matched.
+  defp search_for(%{search: term}, _known, search_fn) when is_binary(term) and term != "" do
+    {term, search_fn.(term)}
+  end
+
+  defp search_for(_item, known, search_fn) do
+    pass_one = Query.to_search_term(known.item)
+
+    case search_fn.(pass_one) do
+      [] ->
+        fallback = Query.fallback_term(pass_one)
+
+        if fallback != "" and fallback != pass_one do
+          case search_fn.(fallback) do
+            [] -> {pass_one, []}
+            products -> {fallback, products}
+          end
+        else
+          {pass_one, []}
+        end
+
+      products ->
+        {pass_one, products}
+    end
   end
 
   defp candidates_by_id(list) do
