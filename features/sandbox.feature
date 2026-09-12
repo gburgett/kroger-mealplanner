@@ -16,20 +16,24 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Given a meal-plan folder mounted at "/workspace"
 
   Scenario: Discovering the interface
-    Eight tools, and the split between them is the design. Three ARE the
-    sandbox. Four are the network the sandbox does not have, and they exist
-    for that reason alone: a tool exists only when the sandbox cannot do the
-    job by construction. "Is Kroger set up" is not such a job —
+    Ten tools, and the split between them is the design. Three ARE the
+    sandbox. Two are the sandbox session's own lifecycle — `open` boots the
+    session and hands back the folder tree and recent history, `close` tears
+    it down now. Four are the network the sandbox does not have, and they
+    exist for that reason alone: a tool exists only when the sandbox cannot
+    do the job by construction. "Is Kroger set up" is not such a job —
     `cat config/kroger.md` answers it — which is why there is no tool for it.
-    See ADR 0010. The eighth, walmart_cart_link, makes no network call: it is
-    the choke point where "nothing unchosen reaches the household's cart" is
-    enforced, and ADR 0017 records why that is a tool rather than a shell
-    command.
+    See ADR 0010 and ADR 0035. The tenth, walmart_cart_link, makes no
+    network call: it is the choke point where "nothing unchosen reaches the
+    household's cart" is enforced, and ADR 0017 records why that is a tool
+    rather than a shell command.
 
     When a client connects to the meal planner over MCP
     Then the handshake succeeds
     And the server reports the tools:
       | tool                  | purpose                                          |
+      | open                  | open the sandbox session and show the folder     |
+      | close                 | close the sandbox session now                    |
       | bash                  | run a shell command in the sandbox               |
       | read_file             | read a file from the meal-plan folder            |
       | write_file            | create or overwrite a file in the folder         |
@@ -40,6 +44,57 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | walmart_cart_link     | build the link that fills the Walmart cart       |
     And every tool has a description and a JSON schema for its input
     And the "bash" tool description explains the folder layout
+
+  Scenario: The session is opened before the sandbox is used
+    `open` is the verb that starts a session and the verb that recovers one
+    that has ended — an idle close or a restart. Until it has run, the three
+    sandbox tools have nothing to run against, and they refuse by naming it,
+    the same one word the restart refusal gives.
+
+    Given no sandbox session is open
+    When I call the "bash" tool
+    Then the meal planner refuses, and points me at "open"
+    When I call the "open" tool
+    Then the reply carries the folder tree
+    And the reply carries the recent commits
+    And the reply tells me README is the schema
+
+  Scenario: open returns the current tree after a write
+    A burst of writes leaves the tree the agent was handed at open stale.
+    Calling open again is the supported way to see the folder as it is now.
+
+    Given an open sandbox session
+    When I write the file "recipes/omelette.md":
+      """
+      ---
+      name: Omelette
+      servings: 1
+      ---
+      ## Ingredients
+      - 3 eggs
+      """
+    And I call the "open" tool
+    Then the tree in the reply lists "omelette.md"
+
+  @idle-close
+  Scenario: A session that idled out tells the agent to call open
+    A session ends on its own after a spell with no command, so an agent that
+    comes back to a connection it still holds can find the session gone. The
+    refusal is the same one word a restart gives: open.
+
+    Given an open sandbox session
+    When the idle window passes with no command
+    And I call the "read_file" tool
+    Then the meal planner refuses, and points me at "open"
+
+  Scenario: close ends the session
+    A well-behaved agent that has finished a request frees the session at
+    once rather than leaving it for the idle clock.
+
+    Given an open sandbox session
+    When I call the "close" tool
+    And I call the "bash" tool
+    Then the meal planner refuses, and points me at "open"
 
   Scenario: Listing what is there
     Given the meal-plan folder contains the recipes "Chicken Tacos" and "Pancakes"
@@ -415,3 +470,45 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the output describes the "recipes/" folder
     And the output describes the "meals/" folder
     And the output describes the ingredient line format
+
+  @microsandbox
+  Scenario: The microVM boots once for a burst of commands
+    After open the microVM stays warm — `msb touch` on every command refreshes
+    its idle clock — so only the first command of a session pays a libkrun
+    boot. Under microsandbox a cold command is 6 to 20 seconds; a warm bash
+    tool call (a command, its auto-commit check and the touch) is a small
+    fraction of a second, which is what keeps the connector proxy from timing
+    out. See ADR 0035.
+
+    Given a tenant with no live session
+    When I call the "open" tool
+    And I run "true" 5 times
+    Then the microVM booted once
+    And each command after the first returned in under 1000 ms
+
+  @microsandbox @idle-close
+  Scenario: An idle tenant's microVM is released
+    Ten minutes with no command and the session closes itself, which under
+    microsandbox means `msb remove` and the VM's RAM back in the pool — sooner
+    than eviction at the live-session ceiling, much sooner than a BEAM restart.
+
+    Given an open sandbox session
+    When the idle window passes with no command
+    Then the tenant's microVM has been removed
+
+  @microsandbox
+  Scenario: close releases the microVM at once
+    Given an open sandbox session
+    When I call the "close" tool
+    Then the tenant's microVM has been removed
+
+  @microsandbox
+  Scenario: A stopped VM under a live session is re-opened, not surfaced as an error
+    The `--idle-timeout` backstop or `--max-duration` can stop a VM inside the
+    ten-minute window. The backend restarts it and retries the command once, so
+    the household sees one slow command rather than a failure.
+
+    Given an open sandbox session whose microVM has been stopped
+    When I run "echo warm"
+    Then the command succeeds
+    And the output is "warm"

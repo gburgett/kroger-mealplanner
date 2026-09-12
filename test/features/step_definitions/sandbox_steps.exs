@@ -28,6 +28,8 @@ defmodule Mealplan.Features.SandboxSteps do
   # argument is refused before any tool reads the corpus.
   @list "shopping-lists/2026-08-25--2026-08-31.md"
   @valid_args %{
+    "open" => %{},
+    "close" => %{},
     "bash" => %{"command" => "true", "message" => "sandbox scenario"},
     "read_file" => %{"path" => "README.md"},
     "write_file" => %{
@@ -66,8 +68,15 @@ defmodule Mealplan.Features.SandboxSteps do
       schema = Map.get(tool, "inputSchema") || %{}
       assert schema["type"] == "object", ~s(the "#{tool["name"]}" input schema is not an object)
 
-      assert is_map(schema["properties"]) and map_size(schema["properties"]) > 0,
-             ~s(the "#{tool["name"]}" input schema names no arguments)
+      assert is_map(schema["properties"]),
+             ~s(the "#{tool["name"]}" input schema has no properties map)
+
+      # `open` and `close` take no arguments (ADR 0035); every other tool names
+      # at least one, and every required argument is described.
+      for name <- schema["required"] || [] do
+        assert Map.has_key?(schema["properties"], name),
+               ~s(the "#{tool["name"]}" schema requires "#{name}" but does not describe it)
+      end
     end
 
     {:ok, context}
@@ -91,6 +100,130 @@ defmodule Mealplan.Features.SandboxSteps do
     {:ok, response} = Tools.call("read_file", %{"path" => path}, context.tenant, context.now)
     refute response["isError"], "read_file #{path} failed: #{text_of(response)}"
     assert get_in(response, ["structuredContent", "content"]) == written.content
+    {:ok, context}
+  end
+
+  # --- the explicit session: open / close (ADR 0035) ------------------------
+
+  step "no sandbox session is open", context do
+    Mealplan.Features.CorpusHooks.close_session(context.tenant)
+    refute live_session(context.tenant), "a session is still open"
+    {:ok, context}
+  end
+
+  step "an open sandbox session", context do
+    {:ok, _pid} = Mealplan.Sandbox.open(context.tenant, context.folder)
+    {:ok, context}
+  end
+
+  step "I call the {string} tool", %{args: [tool]} = context do
+    {:ok, call_tool(context, tool, valid_args(tool))}
+  end
+
+  step "the meal planner refuses, and points me at {string}", %{args: [word]} = context do
+    said = refusal(context)
+
+    assert String.contains?(said, word),
+           "the refusal does not point at #{inspect(word)}:\n#{said}"
+
+    {:ok, context}
+  end
+
+  step "the reply carries the folder tree", context do
+    text = reply_text(context)
+    assert text =~ "the meal plan:", "the reply carries no folder tree:\n#{text}"
+    {:ok, context}
+  end
+
+  step "the reply carries the recent commits", context do
+    text = reply_text(context)
+    assert text =~ "recent commits:", "the reply carries no recent history:\n#{text}"
+    {:ok, context}
+  end
+
+  step "the reply tells me README is the schema", context do
+    text = reply_text(context)
+
+    assert text =~ "README" and text =~ ~r/schema/i,
+           "the reply gives no orientation to README:\n#{text}"
+
+    {:ok, context}
+  end
+
+  step "the tree in the reply lists {string}", %{args: [name]} = context do
+    text = reply_text(context)
+    assert text =~ name, "the tree in the reply does not list #{inspect(name)}:\n#{text}"
+    {:ok, context}
+  end
+
+  step "the idle window passes with no command", context do
+    deadline = System.monotonic_time(:millisecond) + 8_000
+
+    wait = fn wait ->
+      cond do
+        is_nil(live_session(context.tenant)) -> :ok
+        System.monotonic_time(:millisecond) > deadline -> flunk("the session never idled out")
+        true -> Process.sleep(20) && wait.(wait)
+      end
+    end
+
+    wait.(wait)
+    {:ok, context}
+  end
+
+  # --- microsandbox: the warm VM and its idle close -------------------------
+
+  step "a tenant with no live session", context do
+    Mealplan.Features.CorpusHooks.close_session(context.tenant)
+    {:ok, context}
+  end
+
+  step "I run {string} {int} times", %{args: [command, times]} = context do
+    durations =
+      for _ <- 1..times do
+        {micros, {:ok, response}} =
+          :timer.tc(fn ->
+            Tools.call(
+              "bash",
+              %{"command" => command, "message" => "burst"},
+              context.tenant,
+              context.now
+            )
+          end)
+
+        refute response["isError"], "a burst command failed: #{text_of(response)}"
+        micros / 1000
+      end
+
+    {:ok, Map.put(context, :burst_durations, durations)}
+  end
+
+  step "the microVM booted once", context do
+    name = microvm_name(context.tenant)
+    listed = Enum.count(msb_names(), &(&1 == name))
+    assert listed == 1, "expected exactly one #{name} microVM, msb lists #{listed}"
+    {:ok, context}
+  end
+
+  step "each command after the first returned in under {int} ms", %{args: [ms]} = context do
+    [_first | rest] = context.burst_durations || flunk("no burst was run")
+
+    assert Enum.all?(rest, &(&1 < ms)),
+           "a warm command was slower than #{ms} ms: #{inspect(rest)}"
+
+    {:ok, context}
+  end
+
+  step "the tenant's microVM has been removed", context do
+    name = microvm_name(context.tenant)
+    refute name in msb_names(), "#{name} is still listed by `msb ls`"
+    {:ok, context}
+  end
+
+  step "an open sandbox session whose microVM has been stopped", context do
+    {:ok, _} = Mealplan.Sandbox.open(context.tenant, context.folder)
+    name = microvm_name(context.tenant)
+    {_out, 0} = System.cmd("msb", ["stop", name], stderr_to_stdout: true)
     {:ok, context}
   end
 
@@ -320,6 +453,39 @@ defmodule Mealplan.Features.SandboxSteps do
   # --- helpers ------------------------------------------------------------------
 
   defp valid_args(tool), do: Map.fetch!(@valid_args, tool)
+
+  # The text of the last `I call the ... tool`, refusal or not.
+  defp reply_text(context) do
+    case context[:last_tool] do
+      %{text: text} when is_binary(text) and text != "" -> text
+      %{error: error} when is_binary(error) -> error
+      _ -> flunk("no tool has been called in this scenario yet")
+    end
+  end
+
+  defp live_session(tenant) do
+    case Mealplan.Sandbox.whereis(tenant) do
+      pid when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+      _ -> nil
+    end
+  end
+
+  defp microvm_name(tenant) do
+    "mealplan-" <> String.replace(to_string(tenant), ~r/[^a-zA-Z0-9_-]/, "-")
+  end
+
+  defp msb_names do
+    case System.cmd("msb", ["ls", "--format", "json"], stderr_to_stdout: true) do
+      {json, 0} ->
+        case Jason.decode(json) do
+          {:ok, entries} -> Enum.map(entries, &Map.get(&1, "name"))
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
 
   defp call_tool(context, name, args) do
     {:ok, response} = Tools.call(name, args, context.tenant, context.now)

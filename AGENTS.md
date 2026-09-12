@@ -61,6 +61,17 @@ Consequences worth internalising before changing anything:
   be trusted to keep that property from memory. That exception is recorded in
   ADR 0017, and it is the only one. See ADR 0010, and `Mealplan.Mcp.Tools`
   (`lib/mealplan/mcp/tools.ex`), where the test is written down.
+- **`open` and `close` are the session lifecycle, not a job in the folder.**
+  ADR 0035 made the sandbox session addressable. `open` boots it and hands the
+  agent the folder tree and recent history on the tool-result channel every
+  client shows the model (ADR 0026); `close` tears it down now. `bash`,
+  `read_file` and `write_file` refuse with "call `open` first" until it has
+  run — the same one word the restart refusal gives — and a session also
+  closes itself after `MEALPLAN_SESSION_IDLE_TIMEOUT` (ten minutes) with no
+  command. That is a third tool category, between the three sandbox tools and
+  the five non-sandbox ones, so `tools/list` now reports ten. ADR 0010 admits
+  it for the reason it admits the cart choke point: the seam cannot be a shell
+  command. The network tools still auto-open; the gate is those three alone.
 - **Error messages are the documentation.** An agent recovers from "line 7 of
   recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`". It cannot recover
   from "invalid input". Name the file, the line, or the argument.

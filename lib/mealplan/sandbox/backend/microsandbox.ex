@@ -128,7 +128,7 @@ defmodule Mealplan.Sandbox.Backend.Microsandbox do
         "--tmpfs",
         "/run/mealplan:32M",
         "--idle-timeout",
-        "15m",
+        idle_timeout_arg(),
         "--max-duration",
         "2h"
       ]
@@ -150,6 +150,15 @@ defmodule Mealplan.Sandbox.Backend.Microsandbox do
       {out, code} ->
         raise "msb create failed for #{name} (exit #{code}): #{String.trim(out)}"
     end
+  end
+
+  # `msb`'s own idle clock is the backstop, not the primary control (ADR 0035).
+  # The Elixir session closes the VM after `MEALPLAN_SESSION_IDLE_TIMEOUT`; this
+  # is set a few minutes longer so it only ever bites if the session layer has
+  # lost track. `msb touch` on every command keeps it from measuring from boot.
+  defp idle_timeout_arg do
+    minutes = div(Mealplan.Sandbox.session_idle_timeout_ms(), 60_000) + 5
+    "#{max(minutes, 6)}m"
   end
 
   defp await_ready(name), do: await_ready(name, 0)
@@ -181,16 +190,56 @@ defmodule Mealplan.Sandbox.Backend.Microsandbox do
     started = System.monotonic_time(:microsecond)
     dir = Scratch.command_dir!()
 
+    o = %{cap: cap, env: env, input: input, timeout_ms: timeout_ms, started: started}
+
     try do
-      do_run(dir, handle.name, command, %{
-        cap: cap,
-        env: env,
-        input: input,
-        timeout_ms: timeout_ms,
-        started: started
-      })
+      result = do_run(dir, handle.name, command, o)
+
+      # Refresh `msb`'s idle clock so a burst of commands keeps the VM warm
+      # rather than measuring from boot (ADR 0035).
+      _ = run_msb(["touch", handle.name])
+
+      recover_if_stopped(result, dir, handle.name, command, o)
     after
       File.rm_rf(dir)
+    end
+  end
+
+  # `--idle-timeout` (the backstop) or `--max-duration` can stop a VM inside the
+  # Elixir idle window. `msb exec` against a stopped VM fails before the guest
+  # runs — a non-zero exit with no guest output and no timeout. Start it and try
+  # the command once more, so the household sees one slow command, not an error.
+  defp recover_if_stopped(
+         %{exit_code: code, timed_out: false, stdout: "", stderr: ""} = result,
+         dir,
+         name,
+         command,
+         o
+       )
+       when code != 0 do
+    # Empty output and a non-zero exit can also be a normal `false` or `exit 1`.
+    # A failed `msb ping` is what tells the two apart: the VM is really down.
+    case run_msb(["ping", name]) do
+      {_out, 0} ->
+        result
+
+      _ ->
+        Logger.warning("microsandbox: #{name} did not answer; restarting and retrying once")
+        restart_and_retry(result, dir, name, command, o)
+    end
+  end
+
+  defp recover_if_stopped(result, _dir, _name, _command, _o), do: result
+
+  defp restart_and_retry(result, dir, name, command, o) do
+    case run_msb(["start", name]) do
+      {_out, 0} ->
+        :ok = await_ready(name)
+        do_run(dir, name, command, o)
+
+      {out, _code} ->
+        Logger.error("microsandbox: `msb start #{name}` failed: #{String.trim(out)}")
+        result
     end
   end
 

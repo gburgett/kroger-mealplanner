@@ -162,6 +162,20 @@ defmodule Mealplan.Sandbox do
     if mode() == :microsandbox, do: config()[:max_live_sessions] || 16, else: nil
   end
 
+  @default_session_idle_timeout_ms 10 * 60 * 1000
+
+  @doc """
+  How long a `Mealplan.Sandbox.Session` may sit with no command before it
+  closes itself (ADR 0035). `MEALPLAN_SESSION_IDLE_TIMEOUT` (seconds) sets it;
+  the default is ten minutes. It applies in every mode — under microsandbox the
+  close frees a libkrun microVM, under bubblewrap and host a GenServer stops —
+  and the recovery is the same `open` call in all of them.
+  """
+  @spec session_idle_timeout_ms() :: pos_integer()
+  def session_idle_timeout_ms do
+    config()[:session_idle_timeout_ms] || @default_session_idle_timeout_ms
+  end
+
   defp config, do: Application.get_env(:mealplan, __MODULE__, [])
 
   # In dev/test this is the repository. Under a release the systemd unit sets

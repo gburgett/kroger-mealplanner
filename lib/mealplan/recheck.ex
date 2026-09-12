@@ -78,7 +78,10 @@ defmodule Mealplan.Recheck do
     max_turns = Keyword.get(opts, :max_turns, @default_max_turns)
 
     session_opts =
-      [folder: folder, tenant: tenant]
+      # This unattended job holds one session across LLM turns that can each
+      # take a while; the ten-minute idle close (ADR 0035) is for a live agent,
+      # not for this, so disable it here.
+      [folder: folder, tenant: tenant, idle_timeout_ms: nil]
       |> maybe_put(:image_root, Keyword.get(opts, :image_root))
       |> maybe_put(:seccomp_filter, Keyword.get(opts, :seccomp_filter))
 

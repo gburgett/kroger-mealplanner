@@ -12,9 +12,14 @@ defmodule Mealplan.Sandbox.Session do
   Exactly one session process exists per tenant — see `Mealplan.Sandbox` — which
   is what keeps that guarantee true when the weekly recheck job checks out the
   tenant's existing session instead of opening a second one over the same folder.
+
+  `restart: :transient` (ADR 0035): an idle close, an LRU eviction and a `close`
+  tool call all stop the process `:normal`, and the `DynamicSupervisor` must let
+  it stay stopped — the tenant re-`open`s to get a new one. A genuine crash is
+  still restarted.
   """
 
-  use GenServer
+  use GenServer, restart: :transient
 
   alias Mealplan.Sandbox.Limits
   alias Mealplan.Corpus.Paths
@@ -35,7 +40,9 @@ defmodule Mealplan.Sandbox.Session do
     :timeout_ms,
     :max_output_bytes,
     :use_user_scope,
-    :nproc_budget
+    :nproc_budget,
+    :idle_timeout_ms,
+    :idle_timer
   ]
 
   # --- client ---------------------------------------------------------------
@@ -76,6 +83,13 @@ defmodule Mealplan.Sandbox.Session do
   def transaction(pid, fun) when is_function(fun, 1),
     do: GenServer.call(pid, {:transaction, fun}, @call_timeout)
 
+  @doc """
+  Restart the idle window (ADR 0035). The `open` tool calls this so that
+  re-opening a live session is what resumes it, and the tree it returns starts
+  a fresh ten-minute clock. `run/3` and every corpus operation already reset it.
+  """
+  def reset_idle_timer(pid), do: GenServer.call(pid, :reset_idle_timer, @call_timeout)
+
   def config(pid), do: GenServer.call(pid, :config, @call_timeout)
   def folder(pid), do: config(pid).folder
 
@@ -104,6 +118,12 @@ defmodule Mealplan.Sandbox.Session do
     use_user_scope = Keyword.get_lazy(opts, :use_user_scope, &Limits.user_scope_available?/0)
     timeout_ms = Keyword.get(opts, :timeout_ms, 10_000)
     max_output_bytes = Keyword.get(opts, :max_output_bytes, 64 * 1024)
+
+    # The session closes itself after this long with no command (ADR 0035).
+    # `nil` disables it — an internal caller that holds a session across a long
+    # pause on purpose can pass that.
+    idle_timeout_ms =
+      Keyword.get_lazy(opts, :idle_timeout_ms, &Mealplan.Sandbox.session_idle_timeout_ms/0)
 
     # Walking /proc for the uid's task count once per session, not once per
     # command — see Limits.nproc_budget/2. A session runs a handful of
@@ -150,10 +170,12 @@ defmodule Mealplan.Sandbox.Session do
       timeout_ms: timeout_ms,
       max_output_bytes: max_output_bytes,
       use_user_scope: use_user_scope,
-      nproc_budget: nproc_budget
+      nproc_budget: nproc_budget,
+      idle_timeout_ms: idle_timeout_ms,
+      idle_timer: nil
     }
 
-    {:ok, state}
+    {:ok, reset_idle(state)}
   end
 
   @impl true
@@ -180,27 +202,41 @@ defmodule Mealplan.Sandbox.Session do
 
   def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
 
+  # The idle window elapsed with no command (ADR 0035). Stop `:normal`, so
+  # `terminate/2` closes the backend — under microsandbox that is `msb remove`
+  # and the microVM goes — and the registry entry is dropped on the DOWN. The
+  # tenant's next `bash` finds no session and is told to call `open`.
+  def handle_info(:idle_timeout, state) do
+    Logger.info(
+      "sandbox: session #{state.tenant} idle for #{div(state.idle_timeout_ms, 1000)}s, closing"
+    )
+
+    {:stop, :normal, %{state | idle_timer: nil}}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_call(:config, _from, state), do: {:reply, state, state}
 
+  def handle_call(:reset_idle_timer, _from, state), do: {:reply, :ok, reset_idle(state)}
+
   def handle_call({:run, command, opts}, _from, state) do
-    {:reply, do_run(state, command, opts), state}
+    {:reply, do_run(state, command, opts), reset_idle(state)}
   end
 
   def handle_call({:run_and_commit, command, message, at}, _from, state) do
     result = do_run(state, command, [])
     _ = do_commit_if_changed(state, message, at)
-    {:reply, result, state}
+    {:reply, result, reset_idle(state)}
   end
 
   def handle_call({:read_corpus, path}, _from, state) do
-    {:reply, do_read_corpus(state, path), state}
+    {:reply, do_read_corpus(state, path), reset_idle(state)}
   end
 
   def handle_call({:write_corpus, path, content}, _from, state) do
-    {:reply, do_write_corpus(state, path, content), state}
+    {:reply, do_write_corpus(state, path, content), reset_idle(state)}
   end
 
   def handle_call({:write_and_commit, path, content, message, at}, _from, state) do
@@ -214,19 +250,19 @@ defmodule Mealplan.Sandbox.Session do
           other
       end
 
-    {:reply, reply, state}
+    {:reply, reply, reset_idle(state)}
   end
 
   def handle_call({:exists_corpus, path}, _from, state) do
-    {:reply, do_exists_corpus(state, path), state}
+    {:reply, do_exists_corpus(state, path), reset_idle(state)}
   end
 
   def handle_call({:list_corpus, dirs}, _from, state) do
-    {:reply, do_list_corpus(state, dirs), state}
+    {:reply, do_list_corpus(state, dirs), reset_idle(state)}
   end
 
   def handle_call({:commit_if_changed, message, at}, _from, state) do
-    {:reply, do_commit_if_changed(state, message, at), state}
+    {:reply, do_commit_if_changed(state, message, at), reset_idle(state)}
   end
 
   def handle_call({:transaction, fun}, _from, state) do
@@ -246,7 +282,18 @@ defmodule Mealplan.Sandbox.Session do
         e -> {:error, Exception.message(e)}
       end
 
-    {:reply, reply, state}
+    {:reply, reply, reset_idle(state)}
+  end
+
+  # --- the idle window (ADR 0035) -------------------------------------------
+
+  # Cancel any armed timer and arm a fresh one. Called on `open` and after every
+  # command, alongside the LRU clock `do_run/3` bumps. `nil` disables the close.
+  defp reset_idle(%__MODULE__{idle_timeout_ms: nil} = state), do: state
+
+  defp reset_idle(%__MODULE__{} = state) do
+    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
+    %{state | idle_timer: Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)}
   end
 
   # --- the mechanics ----------------------------------------------------

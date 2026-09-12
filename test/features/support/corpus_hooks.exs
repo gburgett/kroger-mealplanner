@@ -363,6 +363,15 @@ defmodule Mealplan.Features.CorpusHooks do
     {:ok, Map.put(context, :session, session)}
   end
 
+  # ADR 0035: the idle window is ten minutes in production. A scenario that
+  # asserts a session closes itself when it elapses reopens with a short one,
+  # the same trick @slow-timeout uses for the command timeout.
+  before_scenario "@idle-close", context, name: "shorten the idle window" do
+    close_session(context.tenant)
+    {:ok, session} = Mealplan.Sandbox.open(context.tenant, context.folder, idle_timeout_ms: 500)
+    {:ok, Map.put(context, :session, session)}
+  end
+
   # This DOES run for a scenario that failed: `Cucumber.Runtime` wraps the
   # steps in a try and runs the after hooks before it re-raises. So the folder
   # of a failing scenario goes here, not at the end of the run — which matters,

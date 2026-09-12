@@ -206,6 +206,10 @@ defmodule Mealplan.McpClient do
 
     client = %{client | session_id: response.session_id}
     _ = post_rpc(client, %{"jsonrpc" => "2.0", "method" => "notifications/initialized"})
+
+    # ADR 0035: bash / read_file / write_file refuse until `open` has run. A
+    # real client calls it once at the start of a session; so does this one.
+    _ = rpc(client, "tools/call", %{"name" => "open", "arguments" => %{}})
     client
   end
 

@@ -95,6 +95,28 @@ defmodule Mealplan.Mcp.Tools do
   Everything outside the folder is unreachable.\
   """
 
+  @open_description """
+  Open the sandbox session and get your bearings.
+
+  Call this first — once — before bash, read_file or write_file. It boots the
+  session over the meal-plan folder and hands back a picture of it: a tree of
+  the folders with their most recent files, the last few commits, and where the
+  documents that matter live.
+
+  The session stays warm between commands and closes itself after a spell with
+  no command. Call `open` again to resume a closed session, and to get a fresh
+  tree after a burst of writes. It is safe to call any number of times.\
+  """
+
+  @close_description """
+  Close the sandbox session now.
+
+  Optional — the session also closes itself after a spell with no command — but
+  an assistant that has finished a request should call this, so the resources
+  the session holds are freed at once. The next bash, read_file or write_file
+  will need `open` again.\
+  """
+
   @read_file_description """
   Read a file from the meal-plan folder.
 
@@ -165,6 +187,12 @@ defmodule Mealplan.Mcp.Tools do
     },
     "required" => ["stdout", "stderr", "exitCode", "timedOut", "truncated"]
   }
+
+  # `open` and `close` take no arguments: they are the session seam itself
+  # (ADR 0008, ADR 0021, ADR 0035), not a job inside the folder. An object
+  # schema with no properties is still a schema.
+  @open_input_schema %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
+  @close_input_schema %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
 
   @read_file_input_schema %{
     "type" => "object",
@@ -650,6 +678,26 @@ defmodule Mealplan.Mcp.Tools do
     "required" => ["path", "url", "items", "skipped"]
   }
 
+  # The sandbox session's own lifecycle (ADR 0035). Present in every mode, so
+  # the interface does not change shape with the deployment. Neither returns
+  # `structuredContent`, so neither carries an `output_schema`.
+  @session_tools [
+    %{
+      name: "open",
+      title: "Open the sandbox session and show the folder",
+      description: @open_description,
+      input_schema: @open_input_schema,
+      output_schema: nil
+    },
+    %{
+      name: "close",
+      title: "Close the sandbox session now",
+      description: @close_description,
+      input_schema: @close_input_schema,
+      output_schema: nil
+    }
+  ]
+
   @tools [
     %{
       name: "bash",
@@ -695,14 +743,17 @@ defmodule Mealplan.Mcp.Tools do
   @doc "The wire descriptors for `tools/list`, in the MCP shape."
   @spec list() :: [map()]
   def list do
-    Enum.map(@tools ++ network_tools(), fn t ->
-      %{
+    Enum.map(@session_tools ++ @tools ++ network_tools(), fn t ->
+      base = %{
         "name" => t.name,
         "title" => t.title,
         "description" => t.description,
-        "inputSchema" => t.input_schema,
-        "outputSchema" => t.output_schema
+        "inputSchema" => t.input_schema
       }
+
+      # `open` and `close` return only a text block, so a declared `outputSchema`
+      # (which asks the client for `structuredContent`) would be a lie.
+      if t.output_schema, do: Map.put(base, "outputSchema", t.output_schema), else: base
     end)
   end
 
@@ -760,7 +811,8 @@ defmodule Mealplan.Mcp.Tools do
 
   @doc "The set of tool names this server serves."
   @spec names() :: [String.t()]
-  def names, do: Enum.map(@tools, & &1.name) ++ Enum.map(network_tools(), & &1.name)
+  def names,
+    do: Enum.map(@session_tools ++ @tools, & &1.name) ++ Enum.map(network_tools(), & &1.name)
 
   @doc """
   Run one tool. `args` is the decoded `params.arguments` map (string keys).
@@ -783,22 +835,52 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
+  # ADR 0035 stopped the sandbox tools from auto-opening a session, so there may
+  # be none here — after `close`, or before the first `open`. No session means
+  # no folder to read the onboarding state from, and nothing to nudge about yet.
   defp with_onboarding_note(result, tenant) do
-    if Mealplan.Onboarding.done?(session!(tenant)) do
-      result
-    else
-      Map.update!(result, "content", fn blocks ->
-        blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
-      end)
+    case live_session(tenant) do
+      pid when is_pid(pid) ->
+        if Mealplan.Onboarding.done?(pid) do
+          result
+        else
+          Map.update!(result, "content", fn blocks ->
+            blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
+          end)
+        end
+
+      nil ->
+        result
     end
   end
 
   defp do_call(name, args, tenant, now)
 
+  # --- the session lifecycle (ADR 0035) ----------------------------------
+
+  defp do_call("open", _args, tenant, _now) do
+    # Check out the running session or open one — git repository, scaffold,
+    # dated migrations, and under microsandbox the microVM boot.
+    session = Mealplan.Corpus.ensure_open(tenant)
+    :ok = Session.reset_idle_timer(session)
+    {:ok, text_result(open_text(session))}
+  end
+
+  defp do_call("close", _args, tenant, _now) do
+    case live_session(tenant) do
+      pid when is_pid(pid) ->
+        :ok = Session.close(pid)
+        {:ok, text_result("sandbox session closed. Call `open` to start another.")}
+
+      nil ->
+        {:ok, text_result("no sandbox session was open.")}
+    end
+  end
+
   defp do_call("bash", args, tenant, now) do
     with {:ok, command} <- required_string(args, "command", @bash_command_required),
-         {:ok, message} <- required_trimmed(args, "message", @bash_message_required) do
-      session = session!(tenant)
+         {:ok, message} <- required_trimmed(args, "message", @bash_message_required),
+         {:ok, session} <- open_session(tenant) do
       result = Session.run_and_commit(session, command, message, now)
 
       {:ok,
@@ -819,8 +901,9 @@ defmodule Mealplan.Mcp.Tools do
   end
 
   defp do_call("read_file", args, tenant, _now) do
-    with {:ok, path} <- required_string(args, "path", @read_file_path_required) do
-      case Session.read_corpus(session!(tenant), path) do
+    with {:ok, path} <- required_string(args, "path", @read_file_path_required),
+         {:ok, session} <- open_session(tenant) do
+      case Session.read_corpus(session, path) do
         {:ok, content} ->
           {:ok,
            %{
@@ -840,8 +923,9 @@ defmodule Mealplan.Mcp.Tools do
   defp do_call("write_file", args, tenant, now) do
     with {:ok, path} <- required_string(args, "path", @write_file_path_required),
          {:ok, content} <- required_present(args, "content", @write_file_content_required),
-         {:ok, message} <- required_trimmed(args, "message", @write_file_message_required) do
-      case Session.write_and_commit(session!(tenant), path, content, message, now) do
+         {:ok, message} <- required_trimmed(args, "message", @write_file_message_required),
+         {:ok, session} <- open_session(tenant) do
+      case Session.write_and_commit(session, path, content, message, now) do
         {:ok, bytes} ->
           {:ok,
            %{
@@ -1061,7 +1145,56 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
+  # The network tools still auto-open: they read and write a shopping list
+  # through the session, and ADR 0035 scopes the "call `open` first" gate to
+  # bash / read_file / write_file. Internal callers (recheck, scaffold,
+  # migrations) keep this too.
   defp session!(tenant), do: Mealplan.Corpus.ensure_open(tenant)
+
+  @no_session ~s(no sandbox session is open — call `open` first; it returns the current folder tree and recent history)
+
+  # bash / read_file / write_file no longer boot a session (ADR 0035). No live
+  # session is a recoverable tool result naming the one verb that fixes it —
+  # the same shape as the restart refusal in `features/sandbox.feature`.
+  defp open_session(tenant) do
+    case live_session(tenant) do
+      pid when is_pid(pid) -> {:ok, pid}
+      nil -> {:refuse, @no_session}
+    end
+  end
+
+  # `Mealplan.Sandbox.whereis/1` can hand back a pid whose process has already
+  # stopped — the `Registry` releases the name on the DOWN message, a moment
+  # after `close` returns. Treat a dead pid as no session.
+  defp live_session(tenant) do
+    case Mealplan.Sandbox.whereis(tenant) do
+      pid when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+      _ -> nil
+    end
+  end
+
+  defp text_result(text) do
+    %{"content" => [%{"type" => "text", "text" => text}], "isError" => false}
+  end
+
+  # What `open` returns: the folder tree, the recent history, a short
+  # orientation, and the line that names the idle window and the way back.
+  defp open_text(session) do
+    minutes = max(div(Mealplan.Sandbox.session_idle_timeout_ms(), 60_000), 1)
+
+    [
+      Mealplan.Corpus.Tree.render(session),
+      Mealplan.Git.Repository.recent_history(session),
+      "README.md is the schema — read it first. preferences/household.md is prose " <>
+        "with no schema; read it before you choose anything on the household's behalf. " <>
+        "config/kroger.md is which Kroger shop the shopping is matched against, and " <>
+        "config/walmart.md is which Walmart store cart links are built for.",
+      "This session closes after #{minutes} minutes with no command. Call `open` again " <>
+        "to resume it and to see the folder as it is now."
+    ]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
 
   # stdout and stderr, rendered for a reader rather than for a parser.
   @doc false

@@ -119,8 +119,23 @@ max_live_sessions =
     n -> String.to_integer(n)
   end
 
+# MEALPLAN_SESSION_IDLE_TIMEOUT is the seconds a sandbox session may sit with no
+# command before it closes itself (ADR 0035). The Elixir session layer owns this
+# lifecycle: under microsandbox the close is `msb remove` and the microVM's RAM
+# goes back in the pool; under bubblewrap and host it is a GenServer stopping,
+# and the agent re-`open`s the same way. `nil` here means the backend default,
+# ten minutes. `msb`'s own `--idle-timeout` is set a few minutes longer as a
+# backstop only.
+session_idle_timeout_ms =
+  case System.get_env("MEALPLAN_SESSION_IDLE_TIMEOUT") do
+    nil -> nil
+    "" -> nil
+    s -> String.to_integer(s) * 1000
+  end
+
 config :mealplan, Mealplan.Sandbox,
   mode: sandbox_mode,
+  session_idle_timeout_ms: session_idle_timeout_ms,
   image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
   seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER"),
   # A .tar the microsandbox backend loads into `msb`, or a bare `msb` image
