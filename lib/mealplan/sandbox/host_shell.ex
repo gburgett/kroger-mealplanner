@@ -86,7 +86,17 @@ defmodule Mealplan.Sandbox.HostShell do
   `mealplan` is the one program the corpus needs that a runner will not have
   installed: under bubblewrap it is staged into the image by `cli/build.sh`, and
   here it has to be found on the host. `MEALPLAN_CLI_PATH` names its directory;
-  otherwise the two places `cli/build.sh` leaves it are tried in turn.
+  otherwise the cargo release dir — the one place `cli/build.sh` leaves `mealplan`
+  WITHOUT the rest of the musl coreutils suite next to it — is tried.
+
+  `sandbox-image/rootfs/usr/bin` is NOT a fallback. It does hold `mealplan`
+  (staged there for bubblewrap), but it also holds `realpath`, `cat` and the
+  rest of coreutils, dynamically linked to `/lib/ld-musl-x86_64.so.1`. A glibc
+  host has no such loader, so those binaries fail with "cannot execute: required
+  file not found". Putting that directory on PATH poisons the command: the
+  host's `realpath` is shadowed by a musl one that cannot run, and every corpus
+  read and write breaks. `mealplan` itself is static-pie and runs anywhere; the
+  musl coreutils next to it do not. See `test/mealplan/sandbox/host_shell_test.exs`.
   """
   @spec path() :: String.t()
   def path do
@@ -103,15 +113,17 @@ defmodule Mealplan.Sandbox.HostShell do
     # so a relative PATH entry would be resolved against that folder and the
     # binary would not be found — `mealplan: command not found`, in every
     # scenario that runs the CLI.
+    #
+    # A blank `MEALPLAN_CLI_PATH` (set but empty) is treated as unset: an empty
+    # string would `Path.expand/1` to the cwd and, worse, fall through to a
+    # fallback that must not be taken. `Enum.reject(&is_nil/1)` alone lets `""`
+    # through, which is what let the musl rootfs onto the PATH.
     candidates =
-      [System.get_env("MEALPLAN_CLI_PATH")] ++
-        [
-          "sandbox-image/rootfs/usr/bin",
-          "cli/target/x86_64-unknown-linux-musl/release"
-        ]
+      [System.get_env("MEALPLAN_CLI_PATH"), "cli/target/x86_64-unknown-linux-musl/release"]
 
     candidates
     |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&(String.trim(&1) == ""))
     |> Enum.map(&Path.expand/1)
     |> Enum.find(&File.exists?(Path.join(&1, "mealplan")))
   end
