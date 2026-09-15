@@ -264,6 +264,15 @@ defmodule Mealplan.Mcp.Tools do
         - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
         - 1 `0001111050170` Kroger Mild Cheddar Shredded Cheese — 8 oz — $2.00
 
+  AN ITEM NOBODY IS COOKING STILL GETS SEARCHED. Not every line traces back to
+  a recipe — toothpaste, a salmon pouch, whatever the household just wants
+  bought. Add it yourself: write "- <item>" under any heading in the document
+  with bash or write_file, then run this tool again. It is searched by its own
+  words exactly like any other line, and its candidates land under it the same
+  way. Do not fake a recipe to get an item onto the list, and do not regenerate
+  the whole document with "mealplan shopping-list --out" to add one line — that
+  overwrites every candidate already chosen and everything already sent.
+
   IT CHOOSES NOTHING. Searching for "boneless chicken thighs" returns noise as
   well as thighs. Two or more candidates on a line means nobody has
   chosen yet, and kroger_send_to_cart will refuse that line rather than guess.
