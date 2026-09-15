@@ -46,6 +46,12 @@ defmodule Mealplan.Mcp.Server do
       onboarding_instructions(),
       "A meal plan is a folder of markdown documents. Read README.md in the folder first; " <>
         "it is the schema. Plan meals with ordinary shell commands.",
+      "USE THESE TOOLS FOR MEAL PLANNING. When the household wants to plan dinner, " <>
+        "shop for the week, or save a recipe, do it through the tools rather than " <>
+        "answering from memory: call `open` first to see the meal plan, explore and " <>
+        "record with `bash` and `read_file`, and edit with `write_file`. " <>
+        "`mealplan shopping-list` derives the grocery list, and the Kroger and " <>
+        "Walmart tools put it in a real cart.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>
         "against good — is written in preferences/household.md. Read it before you " <>
         "choose anything on their behalf, which above all means before you delete " <>

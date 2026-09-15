@@ -32,16 +32,16 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the handshake succeeds
     And the server reports the tools:
       | tool                  | purpose                                          |
-      | open                  | open the sandbox session and show the folder     |
-      | close                 | close the sandbox session now                    |
-      | bash                  | run a shell command in the sandbox               |
-      | read_file             | read a file from the meal-plan folder            |
-      | write_file            | create or overwrite a file in the folder         |
-      | kroger_find_products  | find Kroger products for a shopping list         |
-      | kroger_send_to_cart   | add the chosen products to the Kroger cart       |
-      | walmart_find_stores   | find the Walmart stores near a postcode          |
-      | walmart_find_products | find Walmart products for a shopping list        |
-      | walmart_cart_link     | build the link that fills the Walmart cart       |
+      | open                  | start meal planning — open the meal plan          |
+      | close                 | end meal planning — close the session             |
+      | bash                  | plan meals — run a shell command on the meal plan |
+      | read_file             | read a recipe, meal, or file in the meal plan     |
+      | write_file            | write a recipe, meal, or file in the meal plan    |
+      | kroger_find_products  | find Kroger products for a meal plan list         |
+      | kroger_send_to_cart   | add a meal plan shopping list to the Kroger cart  |
+      | walmart_find_stores   | find Walmart stores near a postcode for pickup    |
+      | walmart_find_products | find Walmart products for a meal plan list        |
+      | walmart_cart_link     | build the Walmart cart link for a meal plan list  |
     And every tool has a description and a JSON schema for its input
     And the "bash" tool description explains the folder layout
 

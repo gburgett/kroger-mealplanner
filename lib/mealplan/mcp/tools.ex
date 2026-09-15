@@ -27,10 +27,11 @@ defmodule Mealplan.Mcp.Tools do
   # --- descriptions, verbatim from src/mcp/tools.ts -------------------------
 
   @bash_description """
-  Run a shell command in the meal-plan folder.
-
-  This is the whole interface. Explore and edit the meal plan the way you would
-  explore a repository: ls, grep, find, cat, sed, and writing files.
+  Plan meals by running a shell command in the meal-plan folder. Use this tool
+  for nearly every meal-planning task: recording a recipe, planning a dinner
+  for a date, seeing what is already planned, and building the shopping list.
+  Explore and edit the meal plan the way you would explore a repository —
+  ls, grep, find, cat, sed, and writing files.
 
   The folder is mounted at /workspace and every command starts there:
 
@@ -96,12 +97,14 @@ defmodule Mealplan.Mcp.Tools do
   """
 
   @open_description """
-  Open the sandbox session and get your bearings.
+  Start meal planning here. Use this first for any request about recipes,
+  dinners, the weekly menu, a grocery list, or what to cook: it opens the
+  household's meal plan and shows the lay of the land.
 
-  Call this first — once — before bash, read_file or write_file. It boots the
-  session over the meal-plan folder and hands back a picture of it: a tree of
-  the folders with their most recent files, the last few commits, and where the
-  documents that matter live.
+  Call this first — once — before bash, read_file or write_file. It opens the
+  meal plan — recipes, planned days (meals/), pantry, preferences and shopping
+  lists — and hands back a picture of it: a tree of the folders with their most
+  recent files, the last few commits, and where the documents that matter live.
 
   The session stays warm between commands and closes itself after a spell with
   no command. Call `open` again to resume a closed session, and to get a fresh
@@ -109,7 +112,7 @@ defmodule Mealplan.Mcp.Tools do
   """
 
   @close_description """
-  Close the sandbox session now.
+  End the meal-planning session now that the request is finished.
 
   Optional — the session also closes itself after a spell with no command — but
   an assistant that has finished a request should call this, so the resources
@@ -118,14 +121,16 @@ defmodule Mealplan.Mcp.Tools do
   """
 
   @read_file_description """
-  Read a file from the meal-plan folder.
+  Read a recipe, a planned day of meals, the pantry, a shopping list, or any
+  other file in the meal plan.
 
   The path is relative to the folder root, for example "recipes/chicken-tacos.md".
   Equivalent to "cat" through the bash tool; this is the convenient form.\
   """
 
   @write_file_description """
-  Create or overwrite a file in the meal-plan folder.
+  Write or edit a recipe, a planned day of meals, a shopping list, or any other
+  file in the meal plan.
 
   The path is relative to the folder root, for example "recipes/chicken-tacos.md".
   The whole file is replaced, and the change is committed with the message you
@@ -684,14 +689,14 @@ defmodule Mealplan.Mcp.Tools do
   @session_tools [
     %{
       name: "open",
-      title: "Open the sandbox session and show the folder",
+      title: "Start meal planning — open the meal plan",
       description: @open_description,
       input_schema: @open_input_schema,
       output_schema: nil
     },
     %{
       name: "close",
-      title: "Close the sandbox session now",
+      title: "End meal planning — close the session",
       description: @close_description,
       input_schema: @close_input_schema,
       output_schema: nil
@@ -701,21 +706,21 @@ defmodule Mealplan.Mcp.Tools do
   @tools [
     %{
       name: "bash",
-      title: "Run a shell command in the sandbox",
+      title: "Plan meals — run a shell command on the meal plan",
       description: @bash_description,
       input_schema: @bash_input_schema,
       output_schema: @bash_output_schema
     },
     %{
       name: "read_file",
-      title: "Read a file from the meal-plan folder",
+      title: "Read a recipe, meal, or file in the meal plan",
       description: @read_file_description,
       input_schema: @read_file_input_schema,
       output_schema: @read_file_output_schema
     },
     %{
       name: "write_file",
-      title: "Create or overwrite a file in the meal-plan folder",
+      title: "Write a recipe, meal, or file in the meal plan",
       description: @write_file_description,
       input_schema: @write_file_input_schema,
       output_schema: @write_file_output_schema
@@ -767,7 +772,7 @@ defmodule Mealplan.Mcp.Tools do
     [
       %{
         name: "kroger_find_products",
-        title: "Find Kroger products for the lines on a shopping list",
+        title: "Find Kroger products for a meal plan shopping list",
         description:
           @find_products_description <>
             "\n\nCHANGING WHICH SHOP THE PRICES COME FROM\n\n" <>
@@ -777,7 +782,7 @@ defmodule Mealplan.Mcp.Tools do
       },
       %{
         name: "kroger_send_to_cart",
-        title: "Add the chosen products to the household Kroger cart",
+        title: "Add a meal plan shopping list to the Kroger cart",
         description:
           @send_to_cart_description <>
             "\n\nCONNECTING AN ACCOUNT, OR CHANGING WHICH SHOP\n\n" <>
@@ -787,21 +792,21 @@ defmodule Mealplan.Mcp.Tools do
       },
       %{
         name: "walmart_find_stores",
-        title: "Find the Walmart stores near a postcode",
+        title: "Find Walmart stores near a postcode for pickup",
         description: @find_stores_description,
         input_schema: @find_stores_input_schema,
         output_schema: @find_stores_output_schema
       },
       %{
         name: "walmart_find_products",
-        title: "Find Walmart products for the lines on a shopping list",
+        title: "Find Walmart products for a meal plan shopping list",
         description: @find_walmart_products_description,
         input_schema: @find_walmart_products_input_schema,
         output_schema: @find_products_output_schema
       },
       %{
         name: "walmart_cart_link",
-        title: "Build the link that fills the household Walmart cart",
+        title: "Build the Walmart cart link for a meal plan shopping list",
         description: @cart_link_description <> "\n\n" <> Mealplan.Walmart.Help.how_to(),
         input_schema: @cart_link_input_schema,
         output_schema: @cart_link_output_schema
