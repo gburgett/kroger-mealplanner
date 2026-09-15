@@ -49,7 +49,7 @@ defmodule Mealplan.Shopping.List do
   @candidate ~r/^\s+-\s+(\S+)\s+`([^`]*)`\s*(.*)$/
   # A line under `## Sent`, as append_sent writes it:
   #     - 2026-08-26T12:54:35Z — 2 `0001111050158` Kroger Sharp Cheddar
-  @sent_line ~r/^-\s+(\S+)\s+—\s+(\d+)\s+`([^`]*)`\s*(.*)$/
+  @sent_line ~r/^-\s+(\S+)\s+—\s+(\d+)\s+`([^`]*)`\s*(.*)$/u
 
   @dash_line ~r/^-\s+/
   @indented_dash ~r/^\s+-\s/
@@ -604,10 +604,19 @@ defmodule Mealplan.Shopping.List do
   end
 
   # Third-party text, made safe for one line of a markdown document.
+  #
+  # The `u` modifier is load-bearing: without it `:re` matches the pattern's
+  # own em dash as raw UTF-8 bytes (E2 80 94) rather than one code point, so
+  # any byte in that set — the lead byte of `™` (E2 84 A2) among others —
+  # gets eaten out of unrelated third-party text, leaving invalid UTF-8
+  # behind. That is what "Mezzetta Sliced Tamed ™ Jalapeños" became
+  # "Mezzetta Sliced Tamed <0x84 0xA2> Jalapeños": the `™` lost its leading
+  # byte here, and the corrupted candidate line broke every later read of
+  # the file it was written to.
   defp clean(text) do
     text
-    |> String.replace(~r/[`—\r\n]+/, " ")
-    |> String.replace(~r/\s+/, " ")
+    |> String.replace(~r/[`—\r\n]+/u, " ")
+    |> String.replace(~r/\s+/u, " ")
     |> String.trim()
   end
 end

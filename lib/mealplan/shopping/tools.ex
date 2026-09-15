@@ -77,7 +77,7 @@ defmodule Mealplan.Shopping.Tools do
     %{
       path: requested,
       matched: result.matched,
-      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
+      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/u, &1, "")),
       searched: result.searched
     }
   end
@@ -309,7 +309,7 @@ defmodule Mealplan.Shopping.Tools do
     %{
       path: requested,
       matched: result.matched,
-      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/, &1, "")),
+      not_found: Enum.map(result.not_found, &Regex.replace(~r/\s+—\s.*$/u, &1, "")),
       searched: result.searched
     }
   end
