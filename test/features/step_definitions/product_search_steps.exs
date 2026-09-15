@@ -43,6 +43,25 @@ defmodule Mealplan.Features.ProductSearchSteps do
     {:ok, context}
   end
 
+  step ~r/^the candidate for "(.*)" mentions "(.*)"$/, %{args: [anchor, needle]} = context do
+    lines = candidate_lines(context, anchor)
+
+    assert Enum.any?(lines, &String.contains?(&1, needle)),
+           ~s(no candidate under "#{anchor}" mentions "#{needle}":\n#{Enum.join(lines, "\n")})
+
+    {:ok, context}
+  end
+
+  step "the shopping list document is valid UTF-8", context do
+    text = list_text(context)
+
+    assert String.valid?(text),
+           "the shopping list document holds invalid UTF-8, so a real client could not " <>
+             "receive it back as text"
+
+    {:ok, context}
+  end
+
   step ~r/^the tool result names "(.*)" as not found$/, %{args: [item]} = context do
     said = text_of(context)
     assert String.contains?(said, item), ~s(the tool result does not name "#{item}":\n#{said})
@@ -81,6 +100,18 @@ defmodule Mealplan.Features.ProductSearchSteps do
       |> Enum.join("\n")
 
     {:ok, write_file(context, target, rewritten)}
+  end
+
+  # An ad-hoc line, typed straight into the document under a heading nothing
+  # links to a recipe — no `mealplan shopping-list --json` entry stands behind
+  # it. `Given` writes the file directly, the same as recording a recipe does;
+  # the `When` step still goes through the real kroger_find_products handler.
+  step ~r/^the shopping list also has the hand-written line "(.*)" under a new "(.*)" heading$/,
+       %{args: [line, heading]} = context do
+    target = list_path(context)
+    updated = String.trim_trailing(list_text(context), "\n") <> "\n\n## #{heading}\n\n- #{line}\n"
+
+    {:ok, write_file(context, target, updated)}
   end
 
   # --- what reached the mock -------------------------------------------

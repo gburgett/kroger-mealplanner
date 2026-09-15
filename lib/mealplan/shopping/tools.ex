@@ -514,29 +514,35 @@ defmodule Mealplan.Shopping.Tools do
   # turns one product into a candidate map. Reduces the coupling to ADR 0036 to
   # one place: two passes, the derived term recorded on the line, and a not-found
   # line retried only when its `- search:` term was changed by hand.
+  #
+  # `items` only holds lines `mealplan shopping-list --json` derived from a
+  # recipe. A line the household or the agent typed straight into the document
+  # — a plain `- <item>` under any non-prose heading — has no entry there.
+  # That used to mean the line was silently skipped: no search, no candidates,
+  # no mention in the tool result, nothing to explain why. It is searched by
+  # its own text instead, falling back to `%{item: item.text}` — the same
+  # shape `known` always had, so `search_for/3` needs no second clause. This
+  # is what makes an ad-hoc line ("- salmon pouch" under any heading) an
+  # ordinary edit rather than a dead end: write it, then run
+  # kroger_find_products again.
   defp match_products(before, list, items, search_fn, to_candidate) do
     waiting = List.unmatched(list)
 
     {found, not_found, searches, searched} =
       Enum.reduce(waiting, {%{}, [], %{}, 0}, fn item, {found, not_found, searches, searched} ->
-        case Map.get(items, item.text) do
-          nil ->
-            {found, not_found, searches, searched}
+        known = Map.get(items, item.text) || %{item: item.text}
+        {term_used, products} = search_for(item, known, search_fn)
 
-          known ->
-            {term_used, products} = search_for(item, known, search_fn)
+        searches =
+          if is_nil(item.search),
+            do: Map.put(searches, item.text, term_used),
+            else: searches
 
-            searches =
-              if is_nil(item.search),
-                do: Map.put(searches, item.text, term_used),
-                else: searches
-
-            if products == [] do
-              {found, [item.text | not_found], searches, searched + 1}
-            else
-              {Map.put(found, item.text, Enum.map(products, to_candidate)), not_found, searches,
-               searched + 1}
-            end
+        if products == [] do
+          {found, [item.text | not_found], searches, searched + 1}
+        else
+          {Map.put(found, item.text, Enum.map(products, to_candidate)), not_found, searches,
+           searched + 1}
         end
       end)
 
@@ -544,8 +550,7 @@ defmodule Mealplan.Shopping.Tools do
       for item <- list.items,
           item.section == List.not_found_heading(),
           is_binary(item.search),
-          known = Map.get(items, item.text),
-          known != nil,
+          known = Map.get(items, item.text) || %{item: item.text},
           Query.to_search_term(known.item) != item.search,
           do: {item, known}
 
@@ -556,8 +561,11 @@ defmodule Mealplan.Shopping.Tools do
             {found, moved_back, retried + 1}
 
           products ->
+            # An ad-hoc line has no aisle grouping to return it to — "Other" is
+            # the CLI's own catch-all for a line it cannot categorise either
+            # (`cli/src/sections.rs`).
             {Map.put(found, item.text, Enum.map(products, to_candidate)),
-             Map.put(moved_back, item.text, known.section), retried + 1}
+             Map.put(moved_back, item.text, Map.get(known, :section, "Other")), retried + 1}
         end
       end)
 

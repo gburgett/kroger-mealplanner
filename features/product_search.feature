@@ -75,6 +75,47 @@ Feature: Reducing a shopping-list line to a search term
     Then the shopping list has the candidate "0001111022220" for "baby greens salad mix"
     And the search term for "baby greens salad mix" is "salad mix"
 
+  Scenario: An item with no tracked recipe is searched by its own words
+    A hand-typed line has no entry in what `mealplan shopping-list --json`
+    derives, because nothing in the folder links it to a recipe — nobody is
+    cooking it, it just needs to be bought. It used to be skipped in total
+    silence: no search, no candidates, no word about it anywhere. Writing an
+    item nobody cooked is an ordinary edit now, not a dead end: it is searched
+    by its own words, the same as any other line.
+
+    Given I have recorded the recipe "Nachos" serving 4 with the ingredients:
+      | quantity | unit | item        |
+      | 1        | lb   | ground beef |
+    And I have planned dinner on "2026-08-25" with the recipe "Nachos"
+    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And the shopping list also has the hand-written line "salmon pouch" under a new "Extras" heading
+    And Kroger sells at my store:
+      | search       | upc           | description         | size   | price |
+      | salmon pouch | 0009999912345 | Kroger Salmon Pouch  | 2.5 oz | 1.99  |
+    When I ask Kroger for the products on the shopping list
+    Then the shopping list has the candidate "0009999912345" for "salmon pouch"
+
+  Scenario: A trademark symbol in a product description is not corrupted
+    A candidate description is cleaned of backticks and em dashes before it is
+    written onto the line, so the document's own delimiters stay unambiguous.
+    That cleaning must not eat any OTHER character's bytes: a description
+    carrying "™" once became "Tamed <two orphaned bytes> Jalapeños" — the
+    trademark symbol's lead byte, not an em dash — and the invalid UTF-8 it
+    left behind broke every later read of the file.
+
+    Given I have recorded the recipe "Nachos" serving 4 with the ingredients:
+      | quantity | unit | item                          |
+      | 2        |      | jalapeño, sliced, for topping |
+    And I have planned dinner on "2026-08-25" with the recipe "Nachos"
+    And Kroger sells at my store:
+      | search   | upc           | description                              | size  | price |
+      | jalapeno | 0007321400129 | Mezzetta Sliced Tamed ™ Jalapeños Peppers | 16 oz | 3.59  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    When I ask Kroger for the products on the shopping list
+    Then the shopping list has the candidate "0007321400129" for "jalapeño, sliced, for topping"
+    And the shopping list document is valid UTF-8
+    And the candidate for "jalapeño, sliced, for topping" mentions "Tamed ™ Jalapeños"
+
   Scenario: Both passes empty leaves the line under "Not found", with the term tried
     Given I have recorded the recipe "Pad Thai" serving 4 with the ingredients:
       | quantity | unit | item       |
