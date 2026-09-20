@@ -9,7 +9,13 @@ defmodule Mealplan.Retail.Query do
   extra word can only narrow the result: a line with a comma, a parenthetical, a
   preparation word or a numeric specification usually comes back as an empty
   array, and a preparation word that is also a product-form word ("sliced")
-  moves the match to the wrong product.
+  moves the match to the wrong product. An em dash gets the same treatment as a
+  comma: the household's own convention appends a note after one ("— muffins",
+  "— for fall salad", "— usual Kroger pack, covers Tue's sandwiches..."), and an
+  ad-hoc line with no CLI-derived entry (ADR 0036's `known` fallback) is
+  searched by that whole raw text — 2026-09-20 measured a note long enough to
+  push a line past Kroger's 8-term cap on `filter.term` (`PRODUCT-2019`) when
+  the dash was left uncut.
 
   The word lists below are English and heuristic. They will need tuning against
   real catalogue behaviour; tune them here, and keep the measurement date in
@@ -48,7 +54,7 @@ defmodule Mealplan.Retail.Query do
     item
     |> String.downcase()
     |> fold_accents()
-    |> cut_at(~r/[,;(]/)
+    |> cut_at(~r/[,;(]|[—–]/)
     |> cut_at(~r/\s+or\s+/)
     |> drop_edge_containers()
     |> drop_prep_words()

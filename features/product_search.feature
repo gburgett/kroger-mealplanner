@@ -95,6 +95,31 @@ Feature: Reducing a shopping-list line to a search term
     When I ask Kroger for the products on the shopping list
     Then the shopping list has the candidate "0009999912345" for "salmon pouch"
 
+  Scenario: A hand-written line's own trailing note does not reach the search
+    A hand-written line carries no CLI-derived entry, so it is searched by its
+    own raw text (ADR 0036's `known` fallback) — including whatever note the
+    household appended after an em dash, the household's own convention for
+    "why this is on the list" ("— for fall salad", "— usual Kroger pack,
+    covers Tue's sandwiches, Wed's bowls, and Thu's Cuban chicken"). Measured
+    2026-09-20: an unstripped note long enough pushes the line past Kroger's
+    8-term cap on `filter.term` and the whole call comes back a 400
+    (PRODUCT-2019). The note is not the product name, and must not reach the
+    retailer at all.
+
+    Given I have recorded the recipe "Nachos" serving 4 with the ingredients:
+      | quantity | unit | item        |
+      | 1        | lb   | ground beef |
+    And I have planned dinner on "2026-08-25" with the recipe "Nachos"
+    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And the shopping list also has the hand-written line "dried cranberries — for the fall salad, plus a note about which shelf" under a new "Extras" heading
+    And Kroger sells at my store:
+      | search             | upc           | description               | size | price |
+      | dried cranberries  | 0009999954321 | Kroger Dried Cranberries  | 6 oz | 2.49  |
+    When I ask Kroger for the products on the shopping list
+    Then the shopping list has the candidate "0009999954321" for "dried cranberries — for the fall salad, plus a note about which shelf"
+    And the search term for "dried cranberries — for the fall salad, plus a note about which shelf" is "dried cranberries"
+    And Kroger was asked to search for "dried cranberries"
+
   Scenario: A trademark symbol in a product description is not corrupted
     A candidate description is cleaned of backticks and em dashes before it is
     written onto the line, so the document's own delimiters stay unambiguous.
