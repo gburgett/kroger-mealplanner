@@ -83,6 +83,12 @@ defmodule Mealplan.Features.KrogerSteps do
     {:ok, context}
   end
 
+  step "Kroger answers every product search with a gzip-compressed 503 and no content-encoding header",
+       context do
+    Kroger.product_search_gzip_junk(context.kroger)
+    {:ok, context}
+  end
+
   step "my Kroger access token has expired", context do
     :ok = Store.expire_access_token(tenant_id(context))
     {:ok, context}
@@ -389,6 +395,26 @@ defmodule Mealplan.Features.KrogerSteps do
     why = refusal(context)
     assert Regex.match?(~r{/v1/products}, why), "the refusal names no endpoint:\n#{why}"
     assert Regex.match?(~r/answered 500/, why), "the refusal names no status:\n#{why}"
+    {:ok, context}
+  end
+
+  # A gzip body that reaches Mealplan.Kroger.Api with no content-encoding
+  # header used to leave raw, invalid-UTF-8 bytes in this text — harmless here
+  # because this step calls the tool handler directly, but fatal once
+  # anubis_mcp JSON-encodes the same text to answer over the wire (measured
+  # 2026-09-20: it crashed the session actor outright, and the client never
+  # got a reply). String.valid?/1 is the one assertion that would have caught
+  # it before a household did.
+  step "the meal planner refuses, and names the Kroger endpoint and a readable reason",
+       context do
+    why = refusal(context)
+    assert String.valid?(why), "the refusal is not valid text, so sending it back would crash:\n#{inspect(why)}"
+    assert Regex.match?(~r{/v1/products}, why), "the refusal names no endpoint:\n#{why}"
+    assert Regex.match?(~r/answered 503/, why), "the refusal names no status:\n#{why}"
+
+    assert Regex.match?(~r/the product service is unwell/, why),
+           "the refusal does not carry Kroger's own reason:\n#{why}"
+
     {:ok, context}
   end
 

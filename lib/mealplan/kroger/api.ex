@@ -26,6 +26,12 @@ defmodule Mealplan.Kroger.Api do
   @max_cart_items 50
   # Kroger's own maximum for `filter.limit`. Measured: 51 is a 400.
   @max_search_limit 50
+  # Kroger's own maximum on `filter.term`: 9 individual words is a 400
+  # (PRODUCT-2019). `Query.to_search_term/1` already keeps an ordinary line
+  # well under this, but a household's own hand-typed `- search:` override
+  # reaches here without going through `Query` at all, so the cap belongs
+  # here too — the one place every term, from either source, has to pass.
+  @max_search_terms 8
 
   defstruct [:base, :client_id, :client_secret, :redirect_uri, :public_url, :tenant_id]
 
@@ -155,7 +161,7 @@ defmodule Mealplan.Kroger.Api do
   def search_products(%__MODULE__{} = api, opts) do
     query =
       URI.encode_query(%{
-        "filter.term" => Keyword.fetch!(opts, :term),
+        "filter.term" => cap_search_term(Keyword.fetch!(opts, :term)),
         "filter.locationId" => Keyword.fetch!(opts, :location_id),
         "filter.limit" => Integer.to_string(min(Keyword.get(opts, :limit, 5), @max_search_limit))
       })
@@ -166,6 +172,15 @@ defmodule Mealplan.Kroger.Api do
     |> data_list()
     |> Enum.map(&read_product/1)
     |> Enum.reject(&is_nil/1)
+  end
+
+  # `filter.term` is a conjunction over word stems, so dropping the tail words
+  # only narrows further — never turns a working search into a wrong one.
+  defp cap_search_term(term) do
+    term
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(@max_search_terms)
+    |> Enum.join(" ")
   end
 
   def locations_near(%__MODULE__{} = api, zip_code, limit \\ 10) do
@@ -378,6 +393,19 @@ defmodule Mealplan.Kroger.Api do
     end
   end
 
+  # Measured 2026-09-20: a 503 from Kroger's edge sometimes arrives gzipped
+  # with no `content-encoding` header to tell `Req` to undo it, so the raw
+  # bytes reach here looking like an ordinary body. Decompress on sight of the
+  # gzip magic number so the household still gets Kroger's own words instead
+  # of noise.
+  defp to_text(<<0x1F, 0x8B, 0x08, _rest::binary>> = body) do
+    try do
+      :zlib.gunzip(body)
+    rescue
+      _ -> body
+    end
+  end
+
   defp to_text(body) when is_binary(body), do: body
   defp to_text(nil), do: ""
   defp to_text(body), do: Jason.encode!(body)
@@ -385,11 +413,21 @@ defmodule Mealplan.Kroger.Api do
   defp string_or_nil(value) when is_binary(value), do: value
   defp string_or_nil(_), do: nil
 
+  # This text ends up inside an exception message that an MCP tool result
+  # carries back to the client as JSON — invalid UTF-8 here does not fail
+  # loudly, it crashes the JSON encoder and takes the whole session down with
+  # it (measured 2026-09-20, a gunzip that still left binary noise). Never let
+  # anything but a valid string past this point.
   defp truncate(text) do
     cond do
-      not String.valid?(text) -> binary_part(text, 0, Kernel.min(300, byte_size(text)))
-      String.length(text) > 300 -> String.slice(text, 0, 300) <> "…"
-      true -> text
+      not String.valid?(text) ->
+        "a #{byte_size(text)}-byte response with no readable text in it."
+
+      String.length(text) > 300 ->
+        String.slice(text, 0, 300) <> "…"
+
+      true ->
+        text
     end
   end
 

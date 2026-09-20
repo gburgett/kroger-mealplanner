@@ -168,6 +168,28 @@ Feature: Reducing a shopping-list line to a search term
     Then the shopping list has the candidate "0001111060009" for "deli ham"
     And no candidate for "deli ham" mentions "0001111060001"
 
+  Scenario: A hand-typed search override longer than Kroger allows is capped, not rejected
+    `- search:` is an ordinary editable line, so nothing stops a household from
+    typing an override with more words than `Query.to_search_term` would ever
+    produce. `filter.term` is a conjunction over word stems — Kroger allows at
+    most 8 — so the server caps it at 8 before the call goes out, the same
+    safety net regardless of whether the term came from the heuristic or from
+    the household's own hand.
+
+    Given I have recorded the recipe "Cold Cuts" serving 4 with the ingredients:
+      | quantity | unit | item     |
+      | 8        | oz   | deli ham |
+    And I have planned dinner on "2026-08-25" with the recipe "Cold Cuts"
+    And Kroger sells at my store:
+      | search                                    | upc           | description           | size | price |
+      | sliced turkey breast low salt and nothing else | 0001111060009 | Kroger Sliced Turkey | 9 oz | 4.49  |
+    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And I ask Kroger for the products on the shopping list
+    When I rewrite the search term for "deli ham" to "sliced turkey breast low salt and nothing else at all"
+    And I ask Kroger for the products on the shopping list
+    Then the shopping list has the candidate "0001111060009" for "deli ham"
+    And Kroger was asked to search for "sliced turkey breast low salt and nothing else"
+
   Scenario: An untouched not-found line is not searched again on a re-run
     Given I have recorded the recipe "Aromatics" serving 4 with the ingredients:
       | quantity | unit | item          |

@@ -245,6 +245,25 @@ Feature: Sending the list to Kroger
     And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
 
   @core
+  Scenario: A gzip-compressed error body does not crash the session
+    Kroger's edge measured 2026-09-20: a 503 sometimes arrives gzip-compressed
+    with no `content-encoding` header to say so, so the raw compressed bytes
+    are what a naive read would see — invalid UTF-8, not Kroger's JSON. That
+    used to end up inside the refusal text verbatim and crash the JSON encoder
+    that sends it back over MCP, taking the whole session down and leaving the
+    agent with nothing but a timeout. It has to come back as an ordinary,
+    readable refusal instead.
+
+    Given my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    And Kroger answers every product search with a gzip-compressed 503 and no content-encoding header
+    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    When I ask Kroger for the products on the shopping list
+    Then the meal planner refuses, and names the Kroger endpoint and a readable reason
+    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal-plan folder
+    And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
+
+  @core
   Scenario: An expired Kroger token is refreshed without asking again
     Kroger access tokens last thirty minutes and refresh tokens last six months.
     A household that had to approve twice an hour would stop using this.

@@ -91,12 +91,23 @@ defmodule Mealplan.Mock.Kroger.Router do
       state.product_search_status != nil ->
         fail(conn, state.product_search_status, "PRODUCT-5000", "the product service is unwell")
 
+      state.product_search_gzip_junk ->
+        gzip_fail(conn, 503, "PRODUCT-5000", "the product service is unwell")
+
       not match?({n, ""} when n >= 1 and n <= 50, limit) ->
         fail(
           conn,
           400,
           "PRODUCT-2013",
           "Field 'limit' must be a number between 1 and 50 (inclusive)"
+        )
+
+      term |> String.split(~r/\s+/, trim: true) |> length() > 8 ->
+        fail(
+          conn,
+          400,
+          "PRODUCT-2019",
+          "Field 'term' allows for a maximum of 8 individual terms per search"
         )
 
       true ->
@@ -364,5 +375,17 @@ defmodule Mealplan.Mock.Kroger.Router do
     detail = %{"timestamp" => 1_787_623_902_988, "code" => code, "reason" => reason}
     wrapped = String.starts_with?(code, "PRODUCT") or String.starts_with?(code, "LOCATION")
     json(conn, status, if(wrapped, do: %{"errors" => detail}, else: detail))
+  end
+
+  # The same body `fail/4` would send, gzip-compressed and with no
+  # `content-encoding` header — what Kroger's own edge sent 2026-09-20, and
+  # what `Req` has no way to know to undo.
+  defp gzip_fail(conn, status, code, reason) do
+    detail = %{"timestamp" => 1_787_623_902_988, "code" => code, "reason" => reason}
+    body = :zlib.gzip(Jason.encode!(%{"errors" => detail}))
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, body)
   end
 end

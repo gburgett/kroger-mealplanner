@@ -87,6 +87,7 @@ defmodule Mealplan.Mock.Kroger do
       catalogue: %{},
       # A status that makes every product search, or every cart add, fail.
       product_search_status: nil,
+      product_search_gzip_junk: false,
       cart_status: nil,
       # What the cart holds. A REPEATED ADD OF ONE UPC ADDS TO THE QUANTITY,
       # measured on 2026-08-26 against a real household account — see ADR 0012.
@@ -120,6 +121,15 @@ defmodule Mealplan.Mock.Kroger do
   @doc "Make every product search fail with `status`, or nothing when nil."
   def product_search_status(mock, status),
     do: Server.update(mock, &%{&1 | product_search_status: status})
+
+  @doc """
+  Make every product search answer 503 with a gzip-compressed body and no
+  `content-encoding` header — measured against Kroger's own edge 2026-09-20,
+  which sometimes drops that header on the way through. `Req` has nothing to
+  tell it to undo the compression, so the raw gzip bytes reach the caller
+  exactly as they did in production.
+  """
+  def product_search_gzip_junk(mock), do: Server.update(mock, &%{&1 | product_search_gzip_junk: true})
 
   @doc "Make every cart add fail with `status`, or nothing when nil."
   def cart_status(mock, status), do: Server.update(mock, &%{&1 | cart_status: status})
