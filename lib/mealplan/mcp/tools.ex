@@ -723,7 +723,8 @@ defmodule Mealplan.Mcp.Tools do
   apart and `head -1 plans/*.html` says what each one holds.
 
   Change it with save_meal_plan. Do not write a plan with write_file: the
-  arithmetic and the shopping list are done for you.  """
+  arithmetic and the shopping list are done for you.
+  """
 
   @save_meal_plan_description """
   Save a meal plan after a change, and get the corrected document back.
@@ -754,7 +755,8 @@ defmodule Mealplan.Mcp.Tools do
 
   Pass `return: "changed"` for a small reply that holds only the sections this
   save altered — splice those into the document you are showing. The default
-  hands back the whole document.  """
+  hands back the whole document.
+  """
 
   @start_meal_plan_input_schema %{
     "type" => "object",
@@ -826,8 +828,7 @@ defmodule Mealplan.Mcp.Tools do
   @start_from_required "say which date the plan starts on, as \"from\": \"2026-08-24\"."
   @start_to_required "say which date the plan ends on, as \"to\": \"2026-08-30\"."
   @start_message_required "say what this change does, as \"message\" — it becomes the commit message."
-  @save_path_required
-         "name the plan to save, as \"path\": \"plans/2026-08-24--2026-08-30.html\"."
+  @save_path_required "name the plan to save, as \"path\": \"plans/2026-08-24--2026-08-30.html\"."
   @save_message_required "say what this change does, as \"message\" — it becomes the commit message."
 
   @plan_tools [

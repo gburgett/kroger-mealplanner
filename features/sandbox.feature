@@ -16,17 +16,23 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Given a meal-plan folder mounted at "/workspace"
 
   Scenario: Discovering the interface
-    Ten tools, and the split between them is the design. Three ARE the
+    Twelve tools, and the split between them is the design. Three ARE the
     sandbox. Two are the sandbox session's own lifecycle — `open` boots the
     session and hands back the folder tree and recent history, `close` tears
     it down now. Four are the network the sandbox does not have, and they
     exist for that reason alone: a tool exists only when the sandbox cannot
     do the job by construction. "Is Kroger set up" is not such a job —
     `cat config/kroger.md` answers it — which is why there is no tool for it.
-    See ADR 0010 and ADR 0035. The tenth, walmart_cart_link, makes no
-    network call: it is the choke point where "nothing unchosen reaches the
-    household's cart" is enforced, and ADR 0017 records why that is a tool
-    rather than a shell command.
+    See ADR 0010 and ADR 0035.
+
+    The other three carry a property bash cannot be trusted to remember.
+    walmart_cart_link makes no network call: it is the choke point where
+    "nothing unchosen reaches the household's cart" is enforced (ADR 0017).
+    start_meal_plan and save_meal_plan shape the meal-plan document, and
+    their descriptions are what tell the assistant that its edits are KEPT
+    and that a section is asked for back rather than retyped — an assistant
+    that does not know would retype an ingredient and scale it from memory.
+    See ADR 0038, which admits them and says the list is no longer closed.
 
     When a client connects to the meal planner over MCP
     Then the handshake succeeds
@@ -42,6 +48,8 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
       | walmart_find_stores   | find Walmart stores near a postcode for pickup    |
       | walmart_find_products | find Walmart products for a meal plan list        |
       | walmart_cart_link     | build the Walmart cart link for a meal plan list  |
+      | start_meal_plan       | plan a week — start a meal plan                    |
+      | save_meal_plan        | save a meal plan, and get it back corrected       |
     And every tool has a description and a JSON schema for its input
     And the "bash" tool description explains the folder layout
 
