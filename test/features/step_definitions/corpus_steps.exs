@@ -125,7 +125,8 @@ defmodule Mealplan.Features.CorpusSteps do
        record_recipe(
          acc,
          row["name"],
-         to_integer(Map.get(row, "servings", ""), @default_servings)
+         to_integer(Map.get(row, "servings", ""), @default_servings),
+         ingredients: split_ingredients(Map.get(row, "ingredients", ""))
        )
      end)}
   end
@@ -843,6 +844,14 @@ defmodule Mealplan.Features.CorpusSteps do
 
     refute response["isError"], "write_file #{path} failed: #{text_of(response)}"
     context
+  end
+
+  # "1.5 lb chicken thighs, 12 corn tortillas" — the column reads the way a
+  # recipe reads, so the scenario does not have to spell out quantity and unit.
+  defp split_ingredients(""), do: []
+
+  defp split_ingredients(text) do
+    text |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
 
   defp record_recipe(context, name, servings, opts \\ []) do

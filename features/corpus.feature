@@ -22,6 +22,7 @@ Feature: The meal plan is a folder of markdown documents
       config
       meals
       pantry
+      plans
       preferences
       recipes
       shopping-lists

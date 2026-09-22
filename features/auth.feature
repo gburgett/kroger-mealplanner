@@ -56,6 +56,7 @@ Feature: Only the household reaches the meal plan
       | config         |
       | meals          |
       | pantry         |
+      | plans          |
       | preferences    |
       | recipes        |
       | shopping-lists |

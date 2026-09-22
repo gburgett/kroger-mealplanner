@@ -692,6 +692,161 @@ defmodule Mealplan.Mcp.Tools do
     "required" => ["path", "url", "items", "skipped"]
   }
 
+  # --- the two meal-plan tools (ADR 0037, ADR 0038) -------------------------
+  #
+  # ADR 0010's test says a tool exists only when the sandbox cannot do the job
+  # by construction, and bash CAN run `mealplan plan start`. These are admitted
+  # on the same ground ADR 0017 admitted the Walmart cart link and ADR 0035
+  # admitted open/close: bash moves the bytes, and bash cannot be trusted to
+  # remember the property. Here the property is that edits are KEPT and a
+  # section is ASKED FOR BACK rather than retyped, and an assistant that does
+  # not know that retypes an ingredient line and scales it from memory.
+  #
+  # So the description is the deliverable, not the schema. See ADR 0038.
+
+  @start_meal_plan_description """
+  Start a meal plan for a range of dates, and show it to the household.
+
+  Use this for "plan next week", "what are we eating", "sort out the shopping"
+  — anything that decides more than one night. It writes a plan document and
+  hands it back; show that document to the household as it is.
+
+  It comes pre-filled: a card for each date in the range, how many the
+  household cooks for (config/household.md), which shop the list is matched
+  against (config/kroger.md), the household's own standing notes
+  (preferences/household.md), and whatever those dates already hold in the
+  most recent plan that overlaps them.
+
+  Two plans may cover the same week and stay separate, which is how "what if we
+  did it cheaper" gets an answer without losing the first plan. The second one
+  needs `name`, and the name goes into the filename, so `ls plans/` tells them
+  apart and `head -1 plans/*.html` says what each one holds.
+
+  Change it with save_meal_plan. Do not write a plan with write_file: the
+  arithmetic and the shopping list are done for you.  """
+
+  @save_meal_plan_description """
+  Save a meal plan after a change, and get the corrected document back.
+
+  Post the whole document in `html` after every change the household asks for.
+  It is checked, the arithmetic is done, the shopping list is rebuilt from the
+  meals, and what comes back is what is now saved — show that.
+
+  WHAT YOU WROTE IS KEPT. recipes/ starts a plan off and then stops overruling
+  it. Delete an ingredient line because the household does not want olives
+  tonight and it stays deleted; the recipe is untouched, because they meant
+  tonight and not forever. Add a line to the shopping list for something no
+  recipe asks for — toilet paper — and it stays on the list.
+
+  What this does for you is the arithmetic. A meal that names a recipe but has
+  no ingredients yet gets them, scaled to what that meal serves. Change a
+  meal's servings and every line in it is rescaled — change the number, never
+  the lines.
+
+  NEVER RETYPE AN INGREDIENT TO PUT IT BACK. Ask for the section instead, with
+  `regenerate`, and leave `html` out to save reposting the document:
+
+      regenerate: ["meal:2026-08-26/Dinner"]     that meal, from its recipes
+      regenerate: ["day:2026-08-26"]             every meal that day
+      regenerate: ["shopping-list"]              drop lines added by hand
+      regenerate: ["standing-notes"]             re-copy preferences/household.md
+      regenerate: ["all"]                        start the whole plan over
+
+  Pass `return: "changed"` for a small reply that holds only the sections this
+  save altered — splice those into the document you are showing. The default
+  hands back the whole document.  """
+
+  @start_meal_plan_input_schema %{
+    "type" => "object",
+    "properties" => %{
+      "from" => %{
+        "type" => "string",
+        "description" => "The first date the plan covers, as YYYY-MM-DD."
+      },
+      "to" => %{
+        "type" => "string",
+        "description" => "The last date the plan covers, as YYYY-MM-DD."
+      },
+      "name" => %{
+        "type" => "string",
+        "description" =>
+          "What makes this plan different from another over the same dates, " <>
+            "for example \"cheap week\". Needed only when one already covers them."
+      },
+      "message" => %{
+        "type" => "string",
+        "description" =>
+          "A commit message describing what this change does. Required — " <>
+            "the change is committed with this message."
+      }
+    },
+    "required" => ["from", "to", "message"]
+  }
+
+  @save_meal_plan_input_schema %{
+    "type" => "object",
+    "properties" => %{
+      "path" => %{
+        "type" => "string",
+        "description" =>
+          "The plan to save, for example \"plans/2026-08-24--2026-08-30.html\"."
+      },
+      "html" => %{
+        "type" => "string",
+        "description" =>
+          "The whole meal-plan document, as you are showing it. Leave it out " <>
+            "to work on what is already saved, which is what a regenerate needs."
+      },
+      "regenerate" => %{
+        "type" => "array",
+        "items" => %{"type" => "string"},
+        "description" =>
+          "Sections to throw away and build again from recipes/: \"all\", " <>
+            "\"shopping-list\", \"standing-notes\", \"day:<date>\", " <>
+            "\"meal:<date>/<name>\" or \"meal:<date>/<name>/<recipe path>\". " <>
+            "This is how an ingredient comes back — never retype one."
+      },
+      "return" => %{
+        "type" => "string",
+        "enum" => ["whole", "changed", "none"],
+        "description" =>
+          "\"whole\" (the default) hands back the whole document. " <>
+            "\"changed\" hands back only the sections this save altered."
+      },
+      "message" => %{
+        "type" => "string",
+        "description" =>
+          "A commit message describing what this change does. Required — " <>
+            "the change is committed with this message."
+      }
+    },
+    "required" => ["path", "message"]
+  }
+
+  @start_from_required "say which date the plan starts on, as \"from\": \"2026-08-24\"."
+  @start_to_required "say which date the plan ends on, as \"to\": \"2026-08-30\"."
+  @start_message_required "say what this change does, as \"message\" — it becomes the commit message."
+  @save_path_required
+         "name the plan to save, as \"path\": \"plans/2026-08-24--2026-08-30.html\"."
+  @save_message_required "say what this change does, as \"message\" — it becomes the commit message."
+
+  @plan_tools [
+    %{
+      name: "start_meal_plan",
+      title: "Plan a week — start a meal plan",
+      description: @start_meal_plan_description,
+      input_schema: @start_meal_plan_input_schema,
+      output_schema: nil
+    },
+    %{
+      name: "save_meal_plan",
+      title: "Save a meal plan, and get it back corrected",
+      description: @save_meal_plan_description,
+      input_schema: @save_meal_plan_input_schema,
+      output_schema: nil
+    }
+  ]
+
   # The sandbox session's own lifecycle (ADR 0035). Present in every mode, so
   # the interface does not change shape with the deployment. Neither returns
   # `structuredContent`, so neither carries an `output_schema`.
@@ -757,7 +912,7 @@ defmodule Mealplan.Mcp.Tools do
   @doc "The wire descriptors for `tools/list`, in the MCP shape."
   @spec list() :: [map()]
   def list do
-    Enum.map(@session_tools ++ @tools ++ network_tools(), fn t ->
+    Enum.map(@session_tools ++ @tools ++ @plan_tools ++ network_tools(), fn t ->
       base = %{
         "name" => t.name,
         "title" => t.title,
@@ -888,6 +1043,46 @@ defmodule Mealplan.Mcp.Tools do
 
       nil ->
         {:ok, text_result("no sandbox session was open.")}
+    end
+  end
+
+  defp do_call("start_meal_plan", args, tenant, now) do
+    with {:ok, from} <- required_string(args, "from", @start_from_required),
+         {:ok, to} <- required_string(args, "to", @start_to_required),
+         {:ok, message} <- required_trimmed(args, "message", @start_message_required),
+         {:ok, session} <- open_session(tenant) do
+      name = args |> Map.get("name") |> blank_to_nil()
+
+      case Mealplan.Plan.start(session, from, to, name, message, now) do
+        {:ok, decoded} -> {:ok, text_result(Mealplan.Plan.render(decoded))}
+        {:error, text} -> {:ok, error_result(text)}
+      end
+    else
+      {:refuse, text} -> {:ok, error_result(text)}
+    end
+  end
+
+  defp do_call("save_meal_plan", args, tenant, now) do
+    with {:ok, path} <- required_string(args, "path", @save_path_required),
+         {:ok, message} <- required_trimmed(args, "message", @save_message_required),
+         {:ok, session} <- open_session(tenant) do
+      html = args |> Map.get("html") |> blank_to_nil()
+      returning = args |> Map.get("return") |> blank_to_nil() || "whole"
+
+      regenerate =
+        args
+        |> Map.get("regenerate", [])
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+
+      case Mealplan.Plan.save(session, path, html, regenerate, returning, message, now) do
+        {:ok, decoded} -> {:ok, text_result(Mealplan.Plan.render(decoded))}
+        {:error, text} -> {:ok, error_result(text)}
+      end
+    else
+      {:refuse, text} -> {:ok, error_result(text)}
     end
   end
 
@@ -1287,6 +1482,15 @@ defmodule Mealplan.Mcp.Tools do
         {:refuse, message}
     end
   end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      _ -> value
+    end
+  end
+
+  defp blank_to_nil(_), do: nil
 
   defp error_result(text) do
     %{"content" => [%{"type" => "text", "text" => text}], "isError" => true}

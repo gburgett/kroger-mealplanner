@@ -1,4 +1,4 @@
-@core
+@core @mealplan
 Feature: Planning a week as one meal-plan document
   As a busy housewife planning family meals for the week
   I want one document that holds the week and the shopping list together
@@ -42,7 +42,7 @@ Feature: Planning a week as one meal-plan document
     And "mealplan validate" reports no problems
 
   Scenario: Starting a plan copies the standing notes the household wrote
-    Given "preferences/household.md" says "Rotating kid breakfasts — cereal, yogurt, bananas."
+    Given the household preferences say "Rotating kid breakfasts — cereal, yogurt, bananas."
     When I start a meal plan from "2026-08-24" to "2026-08-30"
     Then the meal plan standing notes say "Rotating kid breakfasts — cereal, yogurt, bananas."
     And the meal plan standing notes name "preferences/household.md" as their source
@@ -58,7 +58,7 @@ Feature: Planning a week as one meal-plan document
     Given a meal plan from "2026-08-24" to "2026-08-30"
     When I start a meal plan from "2026-08-24" to "2026-08-30"
     Then the call is refused
-    And the refusal names "plans/2026-08-24--2026-08-30.html"
+    And the plan refusal names "plans/2026-08-24--2026-08-30.html"
     And the refusal says to give the plan a name
 
   Scenario: The name is in the filename, so "ls plans/" tells them apart
@@ -87,8 +87,8 @@ Feature: Planning a week as one meal-plan document
     When I plan "Dinner" on "2026-08-25" with the recipe "Chicken Tacos"
     And I save the meal plan
     Then the meal "Dinner" on "2026-08-25" uses the recipe "Chicken Tacos"
-    And the shopping list includes "1.5 lb chicken thighs"
-    And the shopping list includes "12 corn tortillas"
+    And the plan's shopping list includes "1.5 lb chicken thighs"
+    And the plan's shopping list includes "12 corn tortillas"
 
   Scenario: A recipe with no ingredients yet is filled in from the recipe
     Given a meal plan from "2026-08-24" to "2026-08-30"
@@ -104,7 +104,7 @@ Feature: Planning a week as one meal-plan document
     When I strike the ingredient "2 lb potatoes" from "Dinner" on "2026-08-25"
     And I add the recipe "Garlic Green Beans" to "Dinner" on "2026-08-25"
     And I save the meal plan
-    Then the meal "Dinner" on "2026-08-25" lists the ingredient "1 lb green beans"
+    Then the meal "Dinner" on "2026-08-25" lists the ingredient "1.5 lb green beans"
     And the meal "Dinner" on "2026-08-25" does not list the ingredient "2 lb potatoes"
 
   Scenario: The olives stay struck
@@ -114,7 +114,7 @@ Feature: Planning a week as one meal-plan document
     When I strike the ingredient "4 oz olives" from "Dinner" on "2026-08-26"
     And I save the meal plan
     Then the meal "Dinner" on "2026-08-26" does not list the ingredient "4 oz olives"
-    And the shopping list does not include "olives"
+    And the plan's shopping list does not include "olives"
     When I save the meal plan
     Then the meal "Dinner" on "2026-08-26" does not list the ingredient "4 oz olives"
     And the recipe "Pasta Puttanesca" still lists "4 oz olives"
@@ -126,7 +126,7 @@ Feature: Planning a week as one meal-plan document
     And I have struck the ingredient "4 oz olives" from "Dinner" on "2026-08-26"
     When I regenerate "meal:2026-08-26/Dinner"
     Then the meal "Dinner" on "2026-08-26" lists the ingredient "4 oz olives"
-    And the shopping list includes "4 oz olives"
+    And the plan's shopping list includes "4 oz olives"
 
   Scenario: Regenerating one night leaves the others alone
     Given a meal plan from "2026-08-24" to "2026-08-30" with:
@@ -143,8 +143,8 @@ Feature: Planning a week as one meal-plan document
     Given a meal plan from "2026-08-24" to "2026-08-30"
     When I regenerate "tuesday"
     Then the call is refused
-    And the refusal names "shopping-list"
-    And the refusal names "meal:"
+    And the plan refusal names "shopping-list"
+    And the plan refusal names "meal:"
 
   # --- the arithmetic is the server's ---------------------------------------
 
@@ -191,11 +191,11 @@ Feature: Planning a week as one meal-plan document
       | date       | meal   | recipes                              |
       | 2026-08-25 | Dinner | Chicken Tacos                        |
       | 2026-08-27 | Dinner | Sunday Pot Roast, Garlic Green Beans |
-    Then the shopping list includes "1.5 lb chicken thighs"
-    And the shopping list includes "3 lb beef chuck"
-    And the shopping list includes "1 lb green beans"
-    And the shopping list groups "3 lb beef chuck" under "Meat & Seafood"
-    And the shopping list groups "2 lb potatoes" under "Produce"
+    Then the plan's shopping list includes "1.5 lb chicken thighs"
+    And the plan's shopping list includes "3 lb beef chuck"
+    And the plan's shopping list includes "1.5 lb green beans"
+    And the plan's shopping list groups "3 lb beef chuck" under "Meat & Seafood"
+    And the plan's shopping list groups "2 lb potatoes" under "Produce"
 
   Scenario: Toilet paper is not a recipe, and stays on the list
     Given a meal plan from "2026-08-24" to "2026-08-30" with:
@@ -203,18 +203,18 @@ Feature: Planning a week as one meal-plan document
       | 2026-08-25 | Dinner | Chicken Tacos |
     When I add "6 rolls toilet paper" to the shopping list
     And I save the meal plan
-    Then the shopping list includes "6 rolls toilet paper"
+    Then the plan's shopping list includes "6 rolls toilet paper"
     When I save the meal plan
-    Then the shopping list includes "6 rolls toilet paper"
+    Then the plan's shopping list includes "6 rolls toilet paper"
 
   Scenario: An ad-hoc line survives a staple by the same name
-    Given "pantry/staples.md" lists the staple "salt"
+    Given the pantry staples list "salt"
     And a meal plan from "2026-08-24" to "2026-08-30" with:
       | date       | meal   | recipes       |
       | 2026-08-25 | Dinner | Chicken Tacos |
     When I add "1 box flaky sea salt" to the shopping list
     And I save the meal plan
-    Then the shopping list includes "1 box flaky sea salt"
+    Then the plan's shopping list includes "1 box flaky sea salt"
 
   Scenario: Regenerating the shopping list drops what was added by hand
     Given a meal plan from "2026-08-24" to "2026-08-30" with:
@@ -222,8 +222,8 @@ Feature: Planning a week as one meal-plan document
       | 2026-08-25 | Dinner | Chicken Tacos |
     And I have added "6 rolls toilet paper" to the shopping list
     When I regenerate "shopping-list"
-    Then the shopping list does not include "toilet paper"
-    And the shopping list includes "1.5 lb chicken thighs"
+    Then the plan's shopping list does not include "toilet paper"
+    And the plan's shopping list includes "1.5 lb chicken thighs"
 
   # --- the document cannot be saved broken ---------------------------------
 
@@ -260,7 +260,7 @@ Feature: Planning a week as one meal-plan document
     And I save the meal plan
     Then the meal plan reports no problems
     And the meal plan reports a warning naming "recipes/chicken-tacos.md"
-    And the shopping list includes "1.5 lb chicken thighs"
+    And the plan's shopping list includes "1.5 lb chicken thighs"
 
   Scenario: A day outside the plan's range is a problem naming the range
     Given a meal plan from "2026-08-24" to "2026-08-30"

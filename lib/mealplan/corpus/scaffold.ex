@@ -3,7 +3,7 @@ defmodule Mealplan.Corpus.Scaffold do
   The folder an agent finds when it opens a brand new meal plan. Ported from
   `src/corpus/scaffold.ts`.
 
-  A bare `ls` must print seven names and nothing else: README.md, config, meals,
+  A bare `ls` must print eight names and nothing else: README.md, config, meals,
   pantry, preferences, recipes, shopping-lists. The empty folders are held open
   by a `.gitkeep` dotfile. `config/kroger.md`, `config/walmart.md`,
   `config/household.md` and `preferences/household.md` carry a document from the
@@ -19,7 +19,7 @@ defmodule Mealplan.Corpus.Scaffold do
   alias Mealplan.Sandbox.Session
   alias Mealplan.Walmart.Config, as: WalmartConfig
 
-  @corpus_directories ~w(config meals pantry preferences recipes shopping-lists)
+  @corpus_directories ~w(config meals pantry plans preferences recipes shopping-lists)
   def corpus_directories, do: @corpus_directories
 
   @preferences_path "preferences/household.md"
