@@ -31,6 +31,7 @@ impl Problem {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Ingredient {
     pub quantity: Number,
     pub unit: Option<Unit>,

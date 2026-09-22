@@ -7,11 +7,21 @@ use std::path::Path;
 
 use crate::corpus::{check_servings, load, Corpus};
 use crate::json;
+use crate::plan;
 use crate::quantity::to_display_number;
 
 pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
+    // One path that is a plan is checked as a plan. `mealplan validate` with no
+    // path checks the whole folder, and plans/ is part of the folder.
+    if let Some(path) = only {
+        if path.ends_with(".html") {
+            return plan::run_validate(root, path, as_json) as i32;
+        }
+    }
+
     let mut corpus = load(root, only);
     check_servings(&mut corpus);
+    let plans = if only.is_none() { plan::check_all(root, &mut corpus) } else { 0 };
 
     if as_json {
         println!("{}", describe(&corpus));
@@ -27,10 +37,11 @@ pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
             None => {
                 let meals: usize = corpus.days.iter().map(|day| day.meals.len()).sum();
                 println!(
-                    "The meal plan folder is valid: {} recipes, {} days, {} meals.",
+                    "The meal plan folder is valid: {} recipes, {} days, {} meals, {} plans.",
                     corpus.recipes.len(),
                     corpus.days.len(),
-                    meals
+                    meals,
+                    plans
                 );
             }
         }

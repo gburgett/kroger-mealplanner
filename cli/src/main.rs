@@ -12,8 +12,11 @@
 //! messages are the documentation and they have to name the argument at fault.
 
 mod corpus;
+mod html;
 mod json;
+mod plan;
 mod quantity;
+mod render;
 mod sections;
 mod shopping_list;
 mod validate;
@@ -43,6 +46,39 @@ mealplan — the two jobs that are not exploration
       the Kroger store from config/kroger.md in front matter. --json prints
       the same list as structure. Both together do both.
 
+  mealplan plan start --from YYYY-MM-DD --to YYYY-MM-DD [--name NAME]
+                      [--out PATH] [--json]
+      Begin a meal plan for a range of dates and print it. Pre-filled with the
+      days in the range, the household size from config/household.md, the shop
+      from config/kroger.md, the household's own notes from
+      preferences/household.md, and whatever those dates already hold in the
+      most recent plan that overlaps them. Written to plans/<from>--<to>.html.
+      Two plans may cover the same days; the second one needs --name, and the
+      name goes in the filename so \"ls plans/\" tells them apart.
+
+  mealplan plan save --path PATH [--regenerate SECTION]...
+                     [--return whole|changed|none] [--json]
+      Save the document on standard input, check it, do the arithmetic, and
+      print it back. WHAT YOU WROTE IS KEPT: recipes/ seeds a plan and then
+      stops overruling it, so an ingredient you struck stays struck and a line
+      you added stays added. What this fills in is the gaps — a recipe with no
+      ingredients yet gets them — and what it recomputes is the shopping list
+      and any meal whose servings no longer match what its ingredients were
+      scaled for. With no document on standard input it works on what is
+      already saved, which is how a --regenerate costs one small call.
+      --regenerate SECTION throws that section away and builds it again from
+      recipes/. That is how an ingredient comes BACK: never retype it.
+      --return changed prints only the sections this save altered.
+
+  mealplan plan show --path PATH [--section SECTION]...
+      Print a saved plan, or only the sections named.
+
+  mealplan plan validate --path PATH [--json]
+      Check one plan without saving it.
+
+  mealplan plan shopping-list --path PATH --json
+      The plan's shopping list as structure, for the Kroger and Walmart tools.
+
 Run in the meal-plan folder. Everything else is bash.";
 
 fn main() -> ExitCode {
@@ -58,6 +94,7 @@ fn main() -> ExitCode {
     match arguments.first().map(String::as_str) {
         Some("validate") => validate_command(&root, &arguments[1..]),
         Some("shopping-list") => shopping_list_command(&root, &arguments[1..]),
+        Some("plan") => plan_command(&root, &arguments[1..]),
         Some("--help") | Some("-h") | Some("help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -68,6 +105,162 @@ fn main() -> ExitCode {
         }
         None => {
             eprintln!("mealplan: say which job.\n\n{USAGE}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn plan_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
+    let Some(job) = arguments.first().map(String::as_str) else {
+        eprintln!("mealplan plan: say which job — start, save, show, validate or shopping-list.");
+        return ExitCode::from(2);
+    };
+    let rest = &arguments[1..];
+
+    let mut from: Option<String> = None;
+    let mut to: Option<String> = None;
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut as_json = false;
+    let mut regenerate: Vec<plan::Section> = Vec::new();
+    let mut sections: Vec<plan::Section> = Vec::new();
+    let mut returning = plan::Returning::Whole;
+
+    let mut index = 0;
+    while index < rest.len() {
+        let argument = rest[index].as_str();
+        let mut value_for = |flag: &str, index: &mut usize| -> Option<String> {
+            let value = rest.get(*index + 1).cloned();
+            if value.is_some() {
+                *index += 1;
+            } else {
+                eprintln!("mealplan plan {job}: {flag} needs a value.");
+            }
+            value
+        };
+
+        match argument {
+            "--json" => as_json = true,
+            "--from" => match value_for("--from", &mut index) {
+                Some(value) => from = Some(value),
+                None => return ExitCode::from(2),
+            },
+            "--to" => match value_for("--to", &mut index) {
+                Some(value) => to = Some(value),
+                None => return ExitCode::from(2),
+            },
+            "--name" => match value_for("--name", &mut index) {
+                Some(value) => name = Some(value),
+                None => return ExitCode::from(2),
+            },
+            "--path" => match value_for("--path", &mut index) {
+                Some(value) => path = Some(value),
+                None => return ExitCode::from(2),
+            },
+            "--out" => match value_for("--out", &mut index) {
+                Some(value) => out = Some(value),
+                None => return ExitCode::from(2),
+            },
+            "--regenerate" | "--section" => {
+                let Some(value) = value_for(argument, &mut index) else {
+                    return ExitCode::from(2);
+                };
+                match plan::parse_section(&value) {
+                    Ok(section) => {
+                        if argument == "--regenerate" {
+                            regenerate.push(section)
+                        } else {
+                            sections.push(section)
+                        }
+                    }
+                    Err(message) => {
+                        eprintln!("mealplan plan {job}: {message}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--return" => {
+                let Some(value) = value_for("--return", &mut index) else {
+                    return ExitCode::from(2);
+                };
+                returning = match value.as_str() {
+                    "whole" => plan::Returning::Whole,
+                    "changed" => plan::Returning::Changed,
+                    "none" => plan::Returning::None,
+                    other => {
+                        eprintln!(
+                            "mealplan plan {job}: --return takes `whole`, `changed` or `none`, \
+                             not `{other}`. `changed` prints only the sections this save altered."
+                        );
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            other => {
+                eprintln!("mealplan plan {job}: there is no `{other}` option.");
+                return ExitCode::from(2);
+            }
+        }
+        index += 1;
+    }
+
+    match job {
+        "start" => {
+            let (Some(from), Some(to)) = (from, to) else {
+                eprintln!(
+                    "mealplan plan start: --from and --to are both needed, and both take a date \
+                     written as YYYY-MM-DD — for example `mealplan plan start --from 2026-08-24 \
+                     --to 2026-08-30`."
+                );
+                return ExitCode::from(2);
+            };
+            for (flag, value) in [("--from", &from), ("--to", &to)] {
+                if !corpus::is_date(value) {
+                    eprintln!(
+                        "mealplan plan start: {flag} {value} is not a date. A date is written as \
+                         YYYY-MM-DD, for example 2026-08-25."
+                    );
+                    return ExitCode::from(2);
+                }
+            }
+            if to < from {
+                eprintln!(
+                    "mealplan plan start: --to {to} is before --from {from}. The end date cannot \
+                     come before the start date."
+                );
+                return ExitCode::from(2);
+            }
+            let request = plan::Start { from: &from, to: &to, name: name.as_deref() };
+            ExitCode::from(plan::run_start(root, request, out.as_deref(), as_json))
+        }
+        "save" => {
+            let Some(path) = path else {
+                eprintln!(
+                    "mealplan plan save: --path is needed, and names the plan to save — for \
+                     example `--path plans/2026-08-24--2026-08-30.html`."
+                );
+                return ExitCode::from(2);
+            };
+            let posted = plan::read_stdin();
+            ExitCode::from(plan::run_save(root, &path, posted, &regenerate, returning, as_json))
+        }
+        "show" | "validate" | "shopping-list" => {
+            let Some(path) = path else {
+                eprintln!("mealplan plan {job}: --path is needed, and names the plan.");
+                return ExitCode::from(2);
+            };
+            ExitCode::from(match job {
+                "show" => plan::run_show(root, &path, &sections),
+                "validate" => plan::run_validate(root, &path, as_json),
+                _ => plan::run_shopping_list(root, &path),
+            })
+        }
+        other => {
+            eprintln!(
+                "mealplan plan: there is no `{other}` job. It takes start, save, show, validate \
+                 and shopping-list."
+            );
             ExitCode::from(2)
         }
     }
