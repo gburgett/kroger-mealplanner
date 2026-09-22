@@ -28,11 +28,14 @@ Consequences worth internalising before changing anything:
 - **The layout is the schema.** Paths and document conventions must stay
   guessable from a listing and stable enough to grep for. See
   `features/corpus.feature` — that file is the schema definition. A bare
-  `list_files` prints seven names: `README.md`, `config/`, `meals/`, `pantry/`,
-  `preferences/`, `recipes/`, `shopping-lists/`. That listing is asserted in
-  **three** places — `features/corpus.feature`, `features/auth.feature` and
-  `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
-  (`Mealplan.Corpus.Scaffold`) — and all three have to change together.
+  `list_files` prints eight names: `README.md`, `config/`, `meals/`, `pantry/`,
+  `plans/`, `preferences/`, `recipes/`, `shopping-lists/`. That listing is
+  asserted in **five** places — `features/corpus.feature`,
+  `features/auth.feature`, `features/invitations.feature`,
+  `features/documents.feature` and `@corpus_directories` in
+  `lib/mealplan/corpus/scaffold.ex` (`Mealplan.Corpus.Scaffold`) — and all five
+  have to change together. This note said "three" until `plans/` was added
+  and the two it did not name were the ones that failed.
 - **The path is the primary key.** `recipes/chicken-tacos.md`,
   `meals/2026-08-25.md`; `(tenant_id, path)` is the primary key of `documents`.
   Do not add a derived table (ingredients, meal links) that can drift out of
@@ -56,8 +59,9 @@ Consequences worth internalising before changing anything:
   `Mealplan.Store.Corpus.open/2` runs on every request, writes any missing
   scaffold document (`Mealplan.Corpus.Scaffold.documents/2`) as one change
   named `scaffold <paths>`, and never rewrites a document that is there. Adding
-  a corpus directory is three edits and no migration: `@corpus_directories`,
-  `features/corpus.feature`, `features/auth.feature`.
+  a corpus directory is five edits and no migration: `@corpus_directories`,
+  `features/corpus.feature`, `features/auth.feature`,
+  `features/invitations.feature`, `features/documents.feature`.
 - **There are no corpus migrations.** The dated shell scripts went with the
   sandbox. A change to the document format that existing documents must follow
   is an Elixir function over the bodies, in its own ADR.

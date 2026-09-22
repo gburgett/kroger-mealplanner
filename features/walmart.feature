@@ -309,6 +309,8 @@ Feature: Shopping at Walmart through the affiliate API
       | restore_file         |
       | validate             |
       | shopping_list        |
+      | start_meal_plan      |
+      | save_meal_plan       |
       | kroger_find_products |
       | kroger_send_to_cart  |
     And the meal planner's instructions say nothing about Walmart

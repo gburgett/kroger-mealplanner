@@ -38,6 +38,7 @@ Feature: The meal plan is documents in the database, behind file verbs
       config/
       meals/
       pantry/
+      plans/
       preferences/
       recipes/
       shopping-lists/

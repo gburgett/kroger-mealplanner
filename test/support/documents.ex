@@ -21,6 +21,14 @@ defmodule Mealplan.Documents do
   def recipe_path(name), do: "recipes/#{slug(name)}.md"
   def day_path(date), do: "meals/#{date}.md"
 
+  @doc """
+  One ingredient, as a markdown list item.
+
+  A scenario may give the line as it is written — "1.5 lb chicken thighs" —
+  rather than as parts, because that is how a datatable column reads.
+  """
+  def ingredient_line(text) when is_binary(text), do: "- " <> String.trim(text)
+
   def ingredient_line(%{quantity: quantity, unit: unit, item: item}) do
     unit = String.trim(unit)
     quantity = String.trim(quantity)
