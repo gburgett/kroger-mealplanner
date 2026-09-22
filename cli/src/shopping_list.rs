@@ -491,7 +491,7 @@ fn add(lines: &mut Vec<Line>, item: &str, measure: Measure, night: &str, check: 
 }
 
 /// Whether the household always has this in.
-fn is_staple(staples: &[String], item: &str) -> bool {
+pub fn is_staple(staples: &[String], item: &str) -> bool {
     matches_any(staples.iter(), item)
 }
 
@@ -499,7 +499,7 @@ fn is_staple(staples: &[String], item: &str) -> bool {
 ///
 /// A consumable with no matching line, or one marked "needs recheck" rather
 /// than "stocked", is not left out — it is bought like any other ingredient.
-fn is_stocked(consumables: &[Consumable], item: &str) -> bool {
+pub fn is_stocked(consumables: &[Consumable], item: &str) -> bool {
     matches_any(
         consumables
             .iter()
@@ -512,7 +512,7 @@ fn is_stocked(consumables: &[Consumable], item: &str) -> bool {
 /// Whether pantry/consumables.md still calls this item "needs recheck" —
 /// nobody has confirmed the household is actually out, so it is bought, but
 /// marked "(check)" rather than bought silently. See ADR 0016.
-fn needs_recheck(consumables: &[Consumable], item: &str) -> bool {
+pub fn needs_recheck(consumables: &[Consumable], item: &str) -> bool {
     matches_any(
         consumables
             .iter()
