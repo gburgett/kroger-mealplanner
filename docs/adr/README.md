@@ -24,7 +24,7 @@ decision, write a new record. Give the old record the status
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |
 | [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted; multi-tenancy posture partially superseded by ADR-0027 |
 | [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted; the exe.dev gate superseded by ADR-0028 |
-| [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012 |
+| [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012; tool test amended by ADR-0035 and ADR-0038 |
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
 | [0012](0012-refuse-a-second-send-of-a-shopping-list.md) | Refuse a second send of a shopping list, because Kroger adds to the quantity | accepted |
 | [0013](0013-record-household-preferences-as-prose-with-no-schema.md) | Record household preferences as prose with no schema | accepted |
@@ -51,6 +51,8 @@ decision, write a new record. Give the old record the status
 | [0034](0034-reap-each-host-mode-command-process-group.md) | Reap each host-mode command's process group, and take the test default back from microsandbox | accepted |
 | [0035](0035-make-the-sandbox-session-explicit.md) | Make the sandbox session explicit: `open` and `close` tools, warm reuse, a ten-minute idle close | accepted |
 | [0036](0036-reduce-a-shopping-list-line-to-a-search-term-before-the-retailer-call.md) | Reduce a shopping-list line to a search term before the retailer call, and record it on the line | accepted |
+| [0037](0037-make-the-meal-plan-one-html-document.md) | Make the meal plan one HTML document, and make that document the store | accepted |
+| [0038](0038-admit-a-tool-to-start-and-save-a-meal-plan.md) | Admit a tool to start a meal plan and a tool to save one | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,
