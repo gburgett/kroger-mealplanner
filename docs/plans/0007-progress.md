@@ -216,7 +216,45 @@ Rules the command keeps, each with a test:
 * two jobs in one call are refused, because the second would write a document
   the first had already changed.
 
-### Chunk 2 onwards — the Elixir side, not started
+### Chunk 2 — `Mealplan.Shopping.Plan`, the Elixir seam. DONE, and NOT YET CALLED.
+
+`lib/mealplan/shopping/plan.ex` is the same shape as `lib/mealplan/plan.ex`:
+build a command, run it in the sandbox, decode the JSON. It holds `read/2`,
+`attach/7`, `append_sent/5`, `set_cart_link/5`, `unmatched/1`,
+`product_ids_in/1` and the three product-id predicates, which are the whole of
+what the five tool bodies ask of `Mealplan.Shopping.List` today.
+
+It is committed with no caller ON PURPOSE, so the seam can be read on its own
+before five tool bodies move onto it. The suite is unchanged: 418 tests, 0
+failures.
+
+One simplification falls out of the document model and is worth knowing
+before reading chunk 3. On markdown, a tool did TWO reads — `List.parse` for
+the candidates the server wrote, and `mealplan shopping-list --json` for the
+structure the CLI derived — and then three writes
+(`move_out_of_not_found`, `attach_candidates`, `move_to_not_found`). On a
+plan both reads are one `--list`, because `list_json` now carries `search`,
+`notFound`, `sent` and `cartLink` beside the candidates; and all three writes
+are one `--attach`, because attaching candidates clears `not_found` in the
+CLI. `move_out_of_not_found` has no equivalent and needs none.
+
+### Chunk 3 — the five tool bodies, not started
+
+The plan says phase 3 deletes `lib/mealplan/shopping/list.ex`. It still does,
+but not in one commit: `Mealplan.Shopping.Tools` will dispatch on the path —
+a `plans/*.html` goes to `Shopping.Plan`, a `shopping-lists/*.md` to
+`Shopping.List` — so `features/product_search.feature`,
+`kroger_cart.feature`, `kroger_link.feature` and `walmart.feature` can move
+one at a time and the suite stays green between them. That is the same
+"beside, then remove" shape phases 1 to 3 already use. The last commit of
+phase 3 removes the markdown branch and the module, once no scenario reaches
+it.
+
+`test/features/step_definitions/meal_plan_steps.exs` already has the
+vocabulary the moved scenarios need — "a meal plan from X to Y with:", "I plan
+Dinner on DATE with the recipe R" — so the feature files change and the step
+definitions mostly gain a plan path rather than new steps.
+
 
 `mealplan plan shopping-list --path PATH --json` IS implemented and already
 emits everything the retailer tools need per line: `line` (the anchor text),
