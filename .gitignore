@@ -46,3 +46,6 @@ sandbox-image/oci.tar
 # Core dumps (msb/node has been seen to dump one when its guest agent is killed)
 core
 core.*
+
+# macOS leaves these in every directory it has been looked at in.
+.DS_Store
