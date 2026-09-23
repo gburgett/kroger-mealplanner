@@ -123,6 +123,13 @@ pub struct Candidate {
     pub id: String,
     pub count: String,
     pub description: String,
+    /// As the shop states it: "8 oz", "2 lb", "" when the shop says nothing.
+    pub size: String,
+    /// The shop's price as a plain decimal — "5.49", never "$5.49" — so a
+    /// total can be taken without reading money out of prose. Empty when the
+    /// shop returned none. A price is a price AT ONE SHOP (ADR 0010), which is
+    /// why it lives on the candidate and not on the item.
+    pub price: String,
 }
 
 /// One line of the derived shopping list.
@@ -139,9 +146,15 @@ pub struct ListLine {
 impl ListLine {
     /// The text candidates are matched by.
     ///
-    /// THE RETAILER TOOLS MATCH PRODUCTS TO THIS EXACT TEXT. It mirrors
-    /// `shopping_list::render_line` so a household that had a markdown list
-    /// keeps its candidates across the migration.
+    /// THE RETAILER TOOLS MATCH PRODUCTS TO THIS EXACT TEXT, so it has to stay
+    /// stable across a save: candidates attached to "1 lb ground beef — Mon"
+    /// must still find that line after an unrelated edit somewhere else in the
+    /// document. That is why a line is addressed by its text and never by a
+    /// number.
+    ///
+    /// It happens to match `shopping_list::render_line` as well. That is not a
+    /// contract — there is no markdown list left to carry candidates over
+    /// from — and neither renderer has to follow the other.
     pub fn anchor(&self) -> String {
         let nights: Vec<&str> = self.nights.iter().map(String::as_str).collect();
         let mark = if self.check { " (check)" } else { "" };
@@ -393,6 +406,10 @@ pub fn parse(path: &str, source: &str) -> Plan {
                     if id.is_empty() {
                         return None;
                     }
+                    // Every field is an attribute. The element's text is the
+                    // human's view — "Cheddar — 8 oz — $5.49" — and is never
+                    // read back, so a price stays a number rather than money
+                    // recovered out of prose.
                     Some(Candidate {
                         id,
                         count: candidate
@@ -400,7 +417,12 @@ pub fn parse(path: &str, source: &str) -> Plan {
                             .filter(|v| !v.is_empty())
                             .unwrap_or("1")
                             .to_string(),
-                        description: candidate.text(),
+                        description: candidate
+                            .attribute("data-mp-description")
+                            .unwrap_or_default()
+                            .to_string(),
+                        size: candidate.attribute("data-mp-size").unwrap_or_default().to_string(),
+                        price: candidate.attribute("data-mp-price").unwrap_or_default().to_string(),
                     })
                 })
                 .collect();
@@ -1085,6 +1107,35 @@ mod tests {
     }
 
     #[test]
+    fn size_and_price_come_across_as_fields() {
+        // Price is a plain decimal, never "$5.49": an agent asked to keep the
+        // bill under a number has to add these up, and money recovered out of
+        // prose is money read wrong.
+        let mut plan = bare_plan();
+        attach(
+            &mut plan,
+            r#"{"found":{"1 lb ground beef — Mon":[
+                 {"id":"0001","count":"2","description":"Kroger Ground Beef",
+                  "size":"1 lb","price":"5.49"}]}}"#,
+        );
+        let candidate = &plan.candidates[BEEF][0];
+        assert_eq!(candidate.size, "1 lb");
+        assert_eq!(candidate.price, "5.49");
+    }
+
+    #[test]
+    fn a_shop_that_states_no_size_or_price_leaves_them_empty() {
+        let mut plan = bare_plan();
+        attach(
+            &mut plan,
+            r#"{"found":{"1 lb ground beef — Mon":[{"id":"0001","description":"Beef"}]}}"#,
+        );
+        let candidate = &plan.candidates[BEEF][0];
+        assert!(candidate.size.is_empty());
+        assert!(candidate.price.is_empty());
+    }
+
+    #[test]
     fn a_candidate_with_no_id_is_dropped_rather_than_written_blank() {
         let mut plan = bare_plan();
         attach(
@@ -1422,6 +1473,14 @@ fn apply_attach(
                             .get_str("description")
                             .unwrap_or_default()
                             .to_string(),
+                        size: candidate
+                            .get("size")
+                            .and_then(crate::json::Value::as_text)
+                            .unwrap_or_default(),
+                        price: candidate
+                            .get("price")
+                            .and_then(crate::json::Value::as_text)
+                            .unwrap_or_default(),
                     })
                 })
                 .collect();
@@ -1696,6 +1755,14 @@ fn list_json(saved: &Saved) -> String {
                                                         json::field(
                                                             "description",
                                                             json::string(&candidate.description),
+                                                        ),
+                                                        json::field(
+                                                            "size",
+                                                            json::string(&candidate.size),
+                                                        ),
+                                                        json::field(
+                                                            "price",
+                                                            json::string(&candidate.price),
                                                         ),
                                                     ])
                                                 })
