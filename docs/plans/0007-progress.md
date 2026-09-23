@@ -318,11 +318,15 @@ renderers happen to agree and no longer have to.
 
 ## Phase 4 — remove the old shapes
 
-- `migrations/2026-09-22-days-and-lists-to-plans.sh`, idempotent, coreutils
-  only, running inside the sandbox at `/workspace`. It groups `meals/*.md` into
-  contiguous weeks, calls a `mealplan plan import-legacy-days` subcommand for
-  each, then removes both old directories. That subcommand is for this
-  migration alone and its `USAGE` line should say so.
+**There is no migration script, and no `import-legacy-days` subcommand.** Both
+were planned and both are cancelled. The deployed server has an agent on it
+with a shell over the folder, so moving one household's `meals/` into `plans/`
+is something the agent does with `bash` and `mealplan plan save`, once,
+watching what it is doing. Writing a dated script and a subcommand that exists
+for it alone would be tooling built to run a single time — and the whole
+argument of this product is that an agent with a shell does not need that
+tooling. `migrations/` stays for changes that must run unattended on every
+corpus; this is not one.
 - `priv/corpus/README.md` — the schema document. `## meals/` and
   `## shopping-lists/` become `## plans/`; "The two commands" becomes three.
 - `features/README.md` — the folder diagram and the layer table.
