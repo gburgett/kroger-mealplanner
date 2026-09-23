@@ -78,6 +78,26 @@ mealplan — the two jobs that are not exploration
 
   mealplan plan shopping-list --path PATH --json
       The plan's shopping list as structure, for the Kroger and Walmart tools.
+      Every line carries the text candidates are anchored to, its search term,
+      whether the shop had nothing for it, and whatever products are already
+      written under it.
+
+  mealplan plan candidates --path PATH (--list|--attach|--sent|--cart-link)
+                           [--json]
+      How the Kroger and Walmart tools write to a plan. --list prints the same
+      structure as `plan shopping-list` and changes nothing. The other three
+      read a JSON payload on standard input and save the plan:
+
+        --attach      {\"found\":{\"<line>\":[{\"id\",\"count\",\"description\"}]},
+                       \"searches\":{\"<line>\":\"term\"},\"notFound\":[\"<line>\"]}
+        --sent        {\"stamp\":\"...\"}     appends one send stamp
+        --cart-link   {\"url\":\"...\"}       sets the Walmart cart link
+
+      A line is named by its text, never by a number, so an edit somewhere
+      else cannot misplace a block. A name no line reads any more is skipped
+      and reported, never guessed at. An empty candidate list removes the
+      block, which is how \"I was shown candidates and chose nothing\" is
+      recorded.
 
 Run in the meal-plan folder. Everything else is bash.";
 
@@ -112,7 +132,10 @@ fn main() -> ExitCode {
 
 fn plan_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
     let Some(job) = arguments.first().map(String::as_str) else {
-        eprintln!("mealplan plan: say which job — start, save, show, validate or shopping-list.");
+        eprintln!(
+            "mealplan plan: say which job — start, save, show, validate, shopping-list \
+             or candidates."
+        );
         return ExitCode::from(2);
     };
     let rest = &arguments[1..];
@@ -126,6 +149,7 @@ fn plan_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
     let mut regenerate: Vec<plan::Section> = Vec::new();
     let mut sections: Vec<plan::Section> = Vec::new();
     let mut returning = plan::Returning::Whole;
+    let mut candidate_job: Option<plan::CandidateJob> = None;
 
     let mut index = 0;
     while index < rest.len() {
@@ -179,6 +203,30 @@ fn plan_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
                         return ExitCode::from(2);
                     }
                 }
+            }
+            "--list" | "--attach" | "--sent" | "--cart-link" => {
+                let wanted = match argument {
+                    "--list" => plan::CandidateJob::List,
+                    "--attach" => plan::CandidateJob::Attach,
+                    "--sent" => plan::CandidateJob::Sent,
+                    _ => plan::CandidateJob::CartLink,
+                };
+                // Two jobs in one call would write the document twice and the
+                // second write would be against a plan the first had changed.
+                if let Some(already) = candidate_job {
+                    eprintln!(
+                        "mealplan plan {job}: {argument} and --{} are two jobs. Run one, then \
+                         the other.",
+                        match already {
+                            plan::CandidateJob::List => "list",
+                            plan::CandidateJob::Attach => "attach",
+                            plan::CandidateJob::Sent => "sent",
+                            plan::CandidateJob::CartLink => "cart-link",
+                        }
+                    );
+                    return ExitCode::from(2);
+                }
+                candidate_job = Some(wanted);
             }
             "--return" => {
                 let Some(value) = value_for("--return", &mut index) else {
@@ -256,10 +304,27 @@ fn plan_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
                 _ => plan::run_shopping_list(root, &path),
             })
         }
+        "candidates" => {
+            let Some(path) = path else {
+                eprintln!(
+                    "mealplan plan candidates: --path is needed, and names the plan whose \
+                     shopping list the products belong to."
+                );
+                return ExitCode::from(2);
+            };
+            let Some(candidate_job) = candidate_job else {
+                eprintln!(
+                    "mealplan plan candidates: say which job — --list, --attach, --sent or \
+                     --cart-link. All but --list read a JSON payload on standard input."
+                );
+                return ExitCode::from(2);
+            };
+            ExitCode::from(plan::run_candidates(root, &path, candidate_job, as_json))
+        }
         other => {
             eprintln!(
-                "mealplan plan: there is no `{other}` job. It takes start, save, show, validate \
-                 and shopping-list."
+                "mealplan plan: there is no `{other}` job. It takes start, save, show, validate, \
+                 shopping-list and candidates."
             );
             ExitCode::from(2)
         }

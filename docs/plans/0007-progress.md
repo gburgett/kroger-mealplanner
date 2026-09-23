@@ -15,7 +15,7 @@ and the traps already paid for.
 | 0 | ADR 0037, ADR 0038, plan 0007, `features/meal_plan.feature` | done |
 | 1 | `cli/src/{html,plan,render}.rs`, `mealplan plan …` | done |
 | 2 | `start_meal_plan` / `save_meal_plan`, `plans/` in the scaffold, step definitions | done |
-| 3 | the Kroger and Walmart pipeline onto the plan document | **not started** |
+| 3 | the Kroger and Walmart pipeline onto the plan document | **in progress** |
 | 4 | remove `meals/` and `shopping-lists/`; the migration | **not started** |
 
 `plans/` lives BESIDE `meals/` and `shopping-lists/` right now. That is the
@@ -179,12 +179,44 @@ and replaced by a thin `Mealplan.Shopping.Plan` that shells CLI subcommands and
 decodes JSON — the same shape `lib/mealplan/plan.ex` already has, which is the
 model to copy.
 
-The CLI side needs one new subcommand group, already named in the plan and in
-`USAGE` but **not yet implemented**:
+### Chunk 1 — the CLI subcommand. DONE.
 
 ```
-mealplan plan candidates --path PATH (--list|--attach|--sent|--cart-link) --json
+mealplan plan candidates --path PATH (--list|--attach|--sent|--cart-link) [--json]
 ```
+
+`--list` prints what `plan shopping-list --json` prints and changes nothing.
+The other three read a JSON payload on standard input and save the plan.
+`apply_attach` holds every rule and is pure, so it is unit-tested; the command
+itself is covered by the scenarios in chunk 2 onwards. `cargo test` is 34, up
+from 16.
+
+Two things this needed that were not in the plan:
+
+* **`cli/src/json.rs` could only WRITE.** `--attach` takes its payload on
+  standard input, so the reader is new — hand-written, like the writer and
+  like `html.rs`, because ADR 0007 takes no new crates and the shapes are
+  small. It rejoins surrogate pairs and counts in chars, not bytes, which the
+  em-dash trap (4) says is the thing to get right here: the anchor holds an
+  em dash on every line that names its nights.
+* **`list_json` did not emit the state the tools read back.** Each line now
+  carries `search` and `notFound` beside its `candidates`, and the document
+  carries `sent` and `cartLink`. Additive, so `plan shopping-list --json` is
+  unchanged for anything already reading it.
+
+Rules the command keeps, each with a test:
+
+* an anchor no line reads any more is SKIPPED and reported, never guessed at;
+* an empty candidate list REMOVES the block — "I was shown candidates and
+  chose nothing" is an outcome;
+* `notFound` and candidates are never both true, in either order;
+* a `searches` entry that is blank clears the term rather than writing an
+  empty line, because a term the agent wrote by hand is the agent's
+  (ADR 0036);
+* two jobs in one call are refused, because the second would write a document
+  the first had already changed.
+
+### Chunk 2 onwards — the Elixir side, not started
 
 `mealplan plan shopping-list --path PATH --json` IS implemented and already
 emits everything the retailer tools need per line: `line` (the anchor text),
