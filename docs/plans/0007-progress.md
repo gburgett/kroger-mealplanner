@@ -238,17 +238,51 @@ plan both reads are one `--list`, because `list_json` now carries `search`,
 are one `--attach`, because attaching candidates clears `not_found` in the
 CLI. `move_out_of_not_found` has no equivalent and needs none.
 
+### Chunk 2a — size and price are fields, not prose. DONE.
+
+A candidate carries `size` and `price` of its own now, and a price is a plain
+decimal — `5.49`, never `$5.49`. The reason is a use this product does not
+have yet and should not be shut out of: an agent asked to keep the bill under
+a number has to ADD THESE UP, and money recovered out of prose is money read
+wrong.
+
+That set the shape of the whole candidate element. **Every field is an
+attribute; the element's text is the household's view and is never read
+back.**
+
+    <li data-mp-candidate="0001111" data-mp-count="2"
+        data-mp-description="Kroger Ground Beef 93% Lean"
+        data-mp-size="1 lb" data-mp-price="5.49"
+    >Kroger Ground Beef 93% Lean — 1 lb — $5.49</li>
+
+`data-mp-item` already worked this way — the anchor in the attribute, the same
+text in a span for the reader — so this follows the precedent rather than
+setting one. What changed is that `description` moved INTO an attribute:
+parsing it out of the text would have meant recovering three fields from one
+string, which is the prose-parsing this document format exists to avoid.
+
+A shop that states no size or price leaves the attributes off, and the text
+says "size unknown" and "no price" out loud, because a blank reads as an
+oversight. Verified: the fields survive a plain save and a second save is
+byte-identical.
+
 ### Chunk 3 — the five tool bodies, not started
 
-The plan says phase 3 deletes `lib/mealplan/shopping/list.ex`. It still does,
-but not in one commit: `Mealplan.Shopping.Tools` will dispatch on the path —
-a `plans/*.html` goes to `Shopping.Plan`, a `shopping-lists/*.md` to
-`Shopping.List` — so `features/product_search.feature`,
-`kroger_cart.feature`, `kroger_link.feature` and `walmart.feature` can move
-one at a time and the suite stays green between them. That is the same
-"beside, then remove" shape phases 1 to 3 already use. The last commit of
-phase 3 removes the markdown branch and the module, once no scenario reaches
-it.
+**One move, not a dispatch.** An earlier draft of this file proposed having
+`Mealplan.Shopping.Tools` dispatch on the path so the four retailer feature
+files could move one at a time. That was rejected, and rightly: there is no
+backwards compatibility to keep and no migration path to ease, so two code
+paths would have been complexity bought for nothing. Chunk 3 moves all five
+tool bodies and all four feature files together and deletes
+`lib/mealplan/shopping/list.ex` in the same commit, which is what plan 0007
+said in the first place.
+
+The same answer takes the migration out of phase 4 — see there.
+
+`test/features/step_definitions/meal_plan_steps.exs` already has the
+vocabulary the moved scenarios need — "a meal plan from X to Y with:", "I plan
+Dinner on DATE with the recipe R" — so the feature files change and the step
+definitions mostly gain a plan path rather than new steps.
 
 `test/features/step_definitions/meal_plan_steps.exs` already has the
 vocabulary the moved scenarios need — "a meal plan from X to Y with:", "I plan
@@ -274,10 +308,13 @@ Then `features/kroger_cart.feature`, `kroger_link.feature`,
 `product_search.feature` and `walmart.feature` move from a shopping-list path
 to a plan path.
 
-**The anchor contract is the thing to not break.** `ListLine::anchor()` in
-`cli/src/plan.rs` mirrors `render_line` in `cli/src/shopping_list.rs` exactly —
-`"{measure} {item} — {nights}"` with a ` (check)` suffix — so a household that
-already has candidates against a markdown list keeps them across the migration.
+**The anchor contract is the thing to not break**, for a reason that is NOT
+the one this file first gave. `ListLine::anchor()` has to stay stable across a
+save: candidates attached to `1 lb ground beef — Mon` must still find that
+line after an unrelated edit elsewhere in the document. That a household
+migrating off a markdown list would keep its candidates was the original
+reason, and it no longer applies — there is no such migration. The two
+renderers happen to agree and no longer have to.
 
 ## Phase 4 — remove the old shapes
 

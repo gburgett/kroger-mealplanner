@@ -88,7 +88,8 @@ mealplan — the two jobs that are not exploration
       structure as `plan shopping-list` and changes nothing. The other three
       read a JSON payload on standard input and save the plan:
 
-        --attach      {\"found\":{\"<line>\":[{\"id\",\"count\",\"description\"}]},
+        --attach      {\"found\":{\"<line>\":[{\"id\",\"count\",\"description\",
+                                       \"size\",\"price\"}]},
                        \"searches\":{\"<line>\":\"term\"},\"notFound\":[\"<line>\"]}
         --sent        {\"stamp\":\"...\"}     appends one send stamp
         --cart-link   {\"url\":\"...\"}       sets the Walmart cart link
@@ -98,6 +99,10 @@ mealplan — the two jobs that are not exploration
       and reported, never guessed at. An empty candidate list removes the
       block, which is how \"I was shown candidates and chose nothing\" is
       recorded.
+
+      A price is a plain decimal — \"5.49\", never \"$5.49\" — so that a bill
+      can be added up without reading money out of prose. It is a price at ONE
+      shop, so it belongs to the candidate and goes when the shop changes.
 
 Run in the meal-plan folder. Everything else is bash.";
 

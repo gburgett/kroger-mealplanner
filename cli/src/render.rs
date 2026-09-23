@@ -315,6 +315,19 @@ fn shopping_list(saved: &Saved) -> String {
     out
 }
 
+/// One candidate as the household reads it, in the order the markdown list
+/// used: what it is, how big, what it costs. "size unknown" and "no price" are
+/// said out loud rather than left blank, because a blank reads as an oversight.
+fn candidate_text(candidate: &plan::Candidate) -> String {
+    let size = if candidate.size.is_empty() { "size unknown" } else { &candidate.size };
+    let price = if candidate.price.is_empty() {
+        "no price".to_string()
+    } else {
+        format!("${}", candidate.price)
+    };
+    format!("{} — {size} — {price}", candidate.description)
+}
+
 fn item(saved: &Saved, line: &ListLine) -> String {
     let anchor = line.anchor();
     let mut attributes = format!("data-mp-item=\"{}\"", escape(&anchor));
@@ -339,11 +352,23 @@ fn item(saved: &Saved, line: &ListLine) -> String {
     if let Some(candidates) = saved.plan.candidates.get(&anchor) {
         out.push_str("<ul class=\"cand\">\n");
         for candidate in candidates {
+            // The attributes are the record; the text is what the household
+            // reads. Both are written here so neither has to be recovered
+            // from the other — a price is `5.49` above and `$5.49` below.
+            let mut extra = String::new();
+            if !candidate.size.is_empty() {
+                extra.push_str(&format!(" data-mp-size=\"{}\"", escape(&candidate.size)));
+            }
+            if !candidate.price.is_empty() {
+                extra.push_str(&format!(" data-mp-price=\"{}\"", escape(&candidate.price)));
+            }
             out.push_str(&format!(
-                "<li data-mp-candidate=\"{}\" data-mp-count=\"{}\">{}</li>\n",
+                "<li data-mp-candidate=\"{}\" data-mp-count=\"{}\" \
+                 data-mp-description=\"{}\"{extra}>{}</li>\n",
                 escape(&candidate.id),
                 escape(&candidate.count),
-                escape(&candidate.description)
+                escape(&candidate.description),
+                escape(&candidate_text(candidate))
             ));
         }
         out.push_str("</ul>\n");

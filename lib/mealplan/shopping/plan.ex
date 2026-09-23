@@ -99,7 +99,9 @@ defmodule Mealplan.Shopping.Plan do
                %{
                  "id" => candidate.product_id,
                  "count" => to_string(candidate.count),
-                 "description" => describe(candidate)
+                 "description" => to_string(candidate.description),
+                 "size" => to_string(candidate[:size] || ""),
+                 "price" => price(candidate[:price])
                }
              end)}
           end),
@@ -229,7 +231,9 @@ defmodule Mealplan.Shopping.Plan do
     %{
       product_id: Map.get(raw, "id", ""),
       count: Map.get(raw, "count", "1"),
-      description: Map.get(raw, "description", "")
+      description: Map.get(raw, "description", ""),
+      size: Map.get(raw, "size", ""),
+      price: Map.get(raw, "price", "")
     }
   end
 
@@ -240,22 +244,15 @@ defmodule Mealplan.Shopping.Plan do
     decoded
   end
 
-  # How a candidate reads in the document. The size and the price belong to the
-  # description because the document is prose a human opens, not a record — and
-  # because a Kroger price is a price at one shop, so it is worth seeing beside
-  # the product rather than parsed back out later.
-  defp describe(candidate) do
-    [candidate.description, blank_to(candidate[:size], "size unknown"), price_of(candidate)]
-    |> Enum.map(&String.trim(to_string(&1)))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" — ")
-  end
-
-  defp price_of(candidate), do: blank_to(candidate[:price], "no price")
-
-  defp blank_to(nil, fallback), do: fallback
-  defp blank_to("", fallback), do: fallback
-  defp blank_to(value, _fallback), do: value
+  # A price goes into the document as a plain decimal — "5.49", never "$5.49"
+  # — so that adding a bill up is arithmetic rather than money recovered out of
+  # prose. The CLI renders the "$" for the household to read. A shop that
+  # returned no price gets an empty string, and the document says "no price".
+  defp price(nil), do: ""
+  defp price(""), do: ""
+  defp price(value) when is_binary(value), do: String.trim_leading(value, "$")
+  defp price(value) when is_float(value), do: :erlang.float_to_binary(value, decimals: 2)
+  defp price(value) when is_integer(value), do: :erlang.float_to_binary(value * 1.0, decimals: 2)
 
   defp refusal(result, path) do
     [result.stderr, result.stdout]
