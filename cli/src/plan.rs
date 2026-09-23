@@ -961,6 +961,144 @@ pub fn format_servings(value: Number) -> String {
 mod tests {
     use super::*;
 
+    // --- `plan candidates --attach` -------------------------------------
+    //
+    // apply_attach holds every rule the retailer tools depend on, and it is
+    // pure, so it is tested here rather than through the filesystem. The
+    // scenarios in features/ drive the command itself.
+
+    fn bare_plan() -> Plan {
+        Plan {
+            path: "plans/2026-08-24--2026-08-30.html".to_string(),
+            from: "2026-08-24".to_string(),
+            to: "2026-08-30".to_string(),
+            name: None,
+            adults: Some(2),
+            children: Some(2),
+            store: String::new(),
+            modality: String::new(),
+            days: Vec::new(),
+            standing_notes: Vec::new(),
+            adhoc: Vec::new(),
+            candidates: BTreeMap::new(),
+            searches: BTreeMap::new(),
+            not_found: BTreeSet::new(),
+            sent: Vec::new(),
+            cart_link: None,
+            prose: Vec::new(),
+        }
+    }
+
+    const BEEF: &str = "1 lb ground beef — Mon";
+    const OLIVES: &str = "8 oz olives — Wed";
+
+    fn known() -> BTreeSet<String> {
+        [BEEF.to_string(), OLIVES.to_string()].into_iter().collect()
+    }
+
+    fn attach(plan: &mut Plan, payload: &str) -> Vec<String> {
+        let value = crate::json::parse(payload).expect("payload parses");
+        apply_attach(plan, &value, &known())
+    }
+
+    #[test]
+    fn candidates_attach_to_the_line_that_reads_the_anchor() {
+        let mut plan = bare_plan();
+        let skipped = attach(
+            &mut plan,
+            r#"{"found":{"1 lb ground beef — Mon":[
+                 {"id":"0001","count":"2","description":"Ground Beef 93%"},
+                 {"id":"0002","count":1,"description":"Ground Beef 80%"}]}}"#,
+        );
+        assert!(skipped.is_empty());
+        let found = &plan.candidates[BEEF];
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].id, "0001");
+        // A count written as a number is text in the document either way.
+        assert_eq!(found[1].count, "1");
+    }
+
+    #[test]
+    fn an_anchor_no_line_reads_is_skipped_and_named() {
+        // Never guessed at: the household is waiting on those candidates, and
+        // putting them under the wrong line is worse than saying nothing.
+        let mut plan = bare_plan();
+        let skipped = attach(
+            &mut plan,
+            r#"{"found":{"2 lb quinoa — Fri":[{"id":"0009","description":"Quinoa"}]}}"#,
+        );
+        assert_eq!(skipped, vec!["2 lb quinoa — Fri".to_string()]);
+        assert!(plan.candidates.is_empty());
+    }
+
+    #[test]
+    fn an_empty_candidate_list_removes_the_block() {
+        // "I was shown candidates and chose nothing" is an outcome.
+        let mut plan = bare_plan();
+        attach(&mut plan, r#"{"found":{"8 oz olives — Wed":[{"id":"0003","description":"Olives"}]}}"#);
+        assert!(plan.candidates.contains_key(OLIVES));
+
+        attach(&mut plan, r#"{"found":{"8 oz olives — Wed":[]}}"#);
+        assert!(!plan.candidates.contains_key(OLIVES));
+    }
+
+    #[test]
+    fn not_found_and_candidates_are_never_both_true() {
+        let mut plan = bare_plan();
+        attach(&mut plan, r#"{"notFound":["8 oz olives — Wed"]}"#);
+        assert!(plan.not_found.contains(OLIVES));
+
+        // The shop stocks it after all — the mark goes when the products come.
+        attach(&mut plan, r#"{"found":{"8 oz olives — Wed":[{"id":"0003","description":"Olives"}]}}"#);
+        assert!(!plan.not_found.contains(OLIVES));
+        assert!(plan.candidates.contains_key(OLIVES));
+
+        // And the other way about.
+        attach(&mut plan, r#"{"notFound":["8 oz olives — Wed"]}"#);
+        assert!(plan.not_found.contains(OLIVES));
+        assert!(!plan.candidates.contains_key(OLIVES));
+    }
+
+    #[test]
+    fn a_search_term_is_written_and_an_empty_one_clears_it() {
+        let mut plan = bare_plan();
+        attach(&mut plan, r#"{"searches":{"1 lb ground beef — Mon":"ground beef"}}"#);
+        assert_eq!(plan.searches.get(BEEF).map(String::as_str), Some("ground beef"));
+
+        attach(&mut plan, r#"{"searches":{"1 lb ground beef — Mon":"   "}}"#);
+        assert!(!plan.searches.contains_key(BEEF));
+    }
+
+    #[test]
+    fn one_payload_can_do_all_three_and_reports_every_unknown_anchor_once() {
+        let mut plan = bare_plan();
+        let skipped = attach(
+            &mut plan,
+            r#"{"found":{"1 lb ground beef — Mon":[{"id":"0001","description":"Beef"}],
+                        "2 lb quinoa — Fri":[{"id":"0009","description":"Quinoa"}]},
+                "searches":{"2 lb quinoa — Fri":"quinoa"},
+                "notFound":["8 oz olives — Wed","2 lb quinoa — Fri"]}"#,
+        );
+        assert_eq!(skipped, vec!["2 lb quinoa — Fri".to_string()]);
+        assert!(plan.candidates.contains_key(BEEF));
+        assert!(plan.not_found.contains(OLIVES));
+    }
+
+    #[test]
+    fn a_candidate_with_no_id_is_dropped_rather_than_written_blank() {
+        let mut plan = bare_plan();
+        attach(
+            &mut plan,
+            r#"{"found":{"1 lb ground beef — Mon":[
+                 {"description":"no id here"},{"id":"0001","description":"Beef"}]}}"#,
+        );
+        let found = &plan.candidates[BEEF];
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "0001");
+    }
+
+    use super::*;
+
     #[test]
     fn dates_run_across_a_month_end() {
         let dates = dates_between("2026-08-30", "2026-09-02");
@@ -1124,6 +1262,230 @@ pub fn run_shopping_list(root: &Path, path: &str) -> u8 {
     let saved = save(root, parse(path, &source), &[]);
     println!("{}", list_json(&saved));
     if saved.problems.is_empty() { 0 } else { 1 }
+}
+
+/// What `mealplan plan candidates` is asked to do. One document, one change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandidateJob {
+    /// Print the list and its retailer state, and change nothing.
+    List,
+    /// Attach candidates, search terms and not-found marks from the payload.
+    Attach,
+    /// Append one send stamp.
+    Sent,
+    /// Set the Walmart cart link.
+    CartLink,
+}
+
+/// The retailer tools' way into the document.
+///
+/// ADR 0037 put every read and write of a plan in the CLI, and this is the
+/// half the retailer tools need: `Mealplan.Shopping.Plan` builds a payload and
+/// runs this, exactly as `Mealplan.Plan` runs `plan save`. The payload travels
+/// on standard input, like a posted document, so nothing an assistant supplied
+/// is ever interpolated into a command line.
+///
+/// THE ANCHOR IS THE KEY. Every map in the payload is keyed by
+/// `ListLine::anchor()` — the line's rendered text — and never by a line
+/// number, so an edit elsewhere in the document cannot misplace a block. An
+/// anchor that is no longer on the list is skipped rather than guessed at, and
+/// it is reported, because silently dropping candidates the household is
+/// waiting for is the failure this command exists to avoid.
+pub fn run_candidates(root: &Path, path: &str, job: CandidateJob, as_json: bool) -> u8 {
+    if let Err(message) = check_path(path) {
+        eprintln!("mealplan plan candidates: {message}");
+        return 2;
+    }
+    let Ok(source) = fs::read_to_string(root.join(path)) else {
+        eprintln!("mealplan plan candidates: there is no {path}.");
+        return 2;
+    };
+
+    let mut plan = parse(path, &source);
+    if plan.from.is_empty() || plan.to.is_empty() {
+        eprintln!(
+            "mealplan plan candidates: {path} is not a meal plan — it has no data-from and \
+             data-to on its root element."
+        );
+        return 2;
+    }
+
+    if job == CandidateJob::List {
+        let saved = save(root, plan, &[]);
+        println!("{}", list_json(&saved));
+        return 0;
+    }
+
+    let payload = match read_payload(job) {
+        Ok(payload) => payload,
+        Err(message) => {
+            eprintln!("mealplan plan candidates: {message}");
+            return 2;
+        }
+    };
+
+    // The anchors that exist right now, derived from the document as it
+    // stands. Computed before the change so an unknown anchor can be named.
+    let known: BTreeSet<String> = save(root, plan.clone(), &[])
+        .list
+        .iter()
+        .map(ListLine::anchor)
+        .collect();
+
+    let skipped = match job {
+        CandidateJob::Attach => apply_attach(&mut plan, &payload, &known),
+        CandidateJob::Sent => {
+            match payload.get_str("stamp").map(str::to_string) {
+                Some(stamp) if !stamp.trim().is_empty() => plan.sent.push(stamp),
+                _ => {
+                    eprintln!(
+                        "mealplan plan candidates --sent: the payload needs a \"stamp\" string."
+                    );
+                    return 2;
+                }
+            }
+            Vec::new()
+        }
+        CandidateJob::CartLink => {
+            match payload.get_str("url").map(str::to_string) {
+                Some(url) if !url.trim().is_empty() => plan.cart_link = Some(url),
+                _ => {
+                    eprintln!(
+                        "mealplan plan candidates --cart-link: the payload needs a \"url\" string."
+                    );
+                    return 2;
+                }
+            }
+            Vec::new()
+        }
+        CandidateJob::List => Vec::new(),
+    };
+
+    let saved = save(root, plan, &[]);
+    let document = crate::render::document(&saved);
+    let full = root.join(path);
+    if let Some(parent) = full.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Err(error) = fs::write(&full, &document) {
+        eprintln!("mealplan plan candidates: cannot write {path}: {error}");
+        return 2;
+    }
+
+    if as_json {
+        use crate::json;
+        println!(
+            "{}",
+            json::object(vec![
+                json::field("path", json::string(path)),
+                json::field(
+                    "skipped",
+                    json::array(skipped.iter().map(|anchor| json::string(anchor)).collect()),
+                ),
+                json::field("list", list_json(&saved)),
+            ])
+        );
+    } else {
+        for anchor in &skipped {
+            eprintln!("warning: no line reads `{anchor}` any more, so it was left alone.");
+        }
+    }
+    0
+}
+
+/// Attach the payload to the plan. Returns the anchors it did not recognise.
+fn apply_attach(
+    plan: &mut Plan,
+    payload: &crate::json::Value,
+    known: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut skipped = BTreeSet::new();
+
+    if let Some(found) = payload.get("found").and_then(crate::json::Value::as_object) {
+        for (anchor, candidates) in found {
+            if !known.contains(anchor) {
+                skipped.insert(anchor.clone());
+                continue;
+            }
+            let read: Vec<Candidate> = candidates
+                .as_array()
+                .iter()
+                .filter_map(|candidate| {
+                    let id = candidate.get_str("id")?.to_string();
+                    Some(Candidate {
+                        id,
+                        count: candidate
+                            .get("count")
+                            .and_then(crate::json::Value::as_text)
+                            .unwrap_or_else(|| "1".to_string()),
+                        description: candidate
+                            .get_str("description")
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect();
+
+            // An empty list REMOVES the block. That is how the household
+            // choosing nothing is recorded, and it is an outcome, not a
+            // failure.
+            if read.is_empty() {
+                plan.candidates.remove(anchor);
+            } else {
+                // Candidates and "nothing was found" cannot both be true.
+                plan.not_found.remove(anchor);
+                plan.candidates.insert(anchor.clone(), read);
+            }
+        }
+    }
+
+    if let Some(searches) = payload.get("searches").and_then(crate::json::Value::as_object) {
+        for (anchor, term) in searches {
+            if !known.contains(anchor) {
+                skipped.insert(anchor.clone());
+                continue;
+            }
+            match term.as_text() {
+                // A term the agent wrote by hand is the agent's (ADR 0036), so
+                // an empty one clears ours rather than writing a blank line.
+                Some(text) if !text.trim().is_empty() => {
+                    plan.searches.insert(anchor.clone(), text);
+                }
+                _ => {
+                    plan.searches.remove(anchor);
+                }
+            }
+        }
+    }
+
+    for anchor in payload.get("notFound").map(crate::json::Value::as_array).unwrap_or_default() {
+        let Some(anchor) = anchor.as_text() else { continue };
+        if !known.contains(&anchor) {
+            skipped.insert(anchor);
+            continue;
+        }
+        plan.candidates.remove(&anchor);
+        plan.not_found.insert(anchor);
+    }
+
+    skipped.into_iter().collect()
+}
+
+fn read_payload(job: CandidateJob) -> Result<crate::json::Value, String> {
+    let source = read_stdin().unwrap_or_default();
+    if source.trim().is_empty() {
+        return Err(format!(
+            "{} needs a JSON payload on standard input, and standard input was empty.",
+            match job {
+                CandidateJob::Attach => "--attach",
+                CandidateJob::Sent => "--sent",
+                CandidateJob::CartLink => "--cart-link",
+                CandidateJob::List => "--list",
+            }
+        ));
+    }
+    crate::json::parse(&source)
+        .map_err(|message| format!("the payload on standard input is not JSON: {message}"))
 }
 
 fn section_name(section: &Section) -> Option<String> {
@@ -1301,6 +1663,19 @@ fn list_json(saved: &Saved) -> String {
                             json::field("adhoc", json::boolean(line.adhoc)),
                             json::field("check", json::boolean(line.check)),
                             json::field(
+                                "notFound",
+                                json::boolean(saved.plan.not_found.contains(&anchor)),
+                            ),
+                            json::field(
+                                "search",
+                                saved
+                                    .plan
+                                    .searches
+                                    .get(&anchor)
+                                    .map(|term| json::string(term))
+                                    .unwrap_or_else(json::null),
+                            ),
+                            json::field(
                                 "nights",
                                 json::array(line.nights.iter().map(|n| json::string(n)).collect()),
                             ),
@@ -1333,6 +1708,19 @@ fn list_json(saved: &Saved) -> String {
                     })
                     .collect(),
             ),
+        ),
+        json::field(
+            "sent",
+            json::array(saved.plan.sent.iter().map(|stamp| json::string(stamp)).collect()),
+        ),
+        json::field(
+            "cartLink",
+            saved
+                .plan
+                .cart_link
+                .as_ref()
+                .map(|url| json::string(url))
+                .unwrap_or_else(json::null),
         ),
         json::field(
             "leftOut",
