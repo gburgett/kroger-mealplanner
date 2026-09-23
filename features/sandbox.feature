@@ -422,11 +422,21 @@ Feature: The MCP server is a sandboxed shell over the meal-plan folder
     Then the output does not contain "shhh"
     And the output does not contain "KROGER_CLIENT_SECRET"
 
+  @memory-limit
   Scenario: A command that eats all the memory is stopped, not the whole machine
     Driven through sort rather than python3, because python3 is not in the image
     and a scenario that passes on "command not found" would say nothing about
     the memory limit. sort holds its input in memory until it has to spill, and
     the spill goes to a tmpfs, which counts against the same limit.
+
+    Tagged for the same reason @fork-limit is: what stops the runaway is the
+    cgroup from "systemd-run --user --scope --property=MemoryMax=512M", and
+    Limits.user_scope_available?/0 is false wherever there is no user systemd.
+    Nothing else caps memory there — prlimit sets --nproc and --fsize and no
+    address space — so the command runs until the MACHINE's OOM killer picks a
+    process, and when it picks beam.smp the whole run dies with no summary.
+    Exclude this one and @fork-limit on any machine with no user systemd, a
+    plain container above all. On the deployment VM both hold and both run.
 
     When I run "yes | sort > /dev/null"
     Then the command fails

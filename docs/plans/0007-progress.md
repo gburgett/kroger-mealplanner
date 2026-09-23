@@ -36,7 +36,7 @@ household's existing folder still behaves exactly as it did.
   whole document, and it names both the meal and the shopping list.
 * `Mealplan.Mcp.Tools.list/0` returns twelve.
 * **The full suite: 418 tests, 0 failures, 80 excluded.** Host mode, in a
-  Linux container — see Environment. `--exclude fork-limit` is part of that
+  Linux container — see Environment. The two `--exclude`s are part of that
   command and trap 5 says why.
 
 ### What that run found
@@ -88,7 +88,7 @@ The command, and the `--exclude` is not optional — trap 5:
 
 ```bash
 MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=/work/cargo-target/release \
-  mix test --exclude fork-limit
+  mix test --exclude fork-limit --exclude memory-limit
 ```
 
 `cargo build --release` with no `--target` gives the native binary host mode
@@ -161,14 +161,16 @@ Five, and four of them cost real time:
    exactly the symptom reported as "ran out of memory running tests". Three
    runs here died that way at one or the other of these two scenarios.
 
-   `--exclude fork-limit` covers the fork bomb. The memory one has NO TAG, so
-   it cannot be excluded and is a coin flip on every containerised run; it
-   happened to pass in the runs above. Tagging it, and making
-   `Limits.wrap/3` fall back to `prlimit --as` when there is no user scope,
-   are both worth doing — AGENTS.md already claims the rlimits are "the only
-   line left when the user's systemd is not reachable", and today there is no
-   memory rlimit, so that claim is not true. Both change the security
-   boundary, so ADR first.
+   Both are excludable now: the fork bomb was already `@fork-limit` and the
+   memory one is `@memory-limit` as of this branch, with the reason written
+   into the scenario. Neither is excluded by default, so a run on the
+   deployment VM still asserts both and a green run claims what it always did.
+
+   **Still open, and not this branch's job:** `Limits.wrap/3` should fall back
+   to `prlimit --as` when there is no user scope. AGENTS.md says the rlimits
+   are "the only line left when the user's systemd is not reachable", and
+   today there is no memory rlimit at all, so that claim is not true. That
+   changes the security boundary, so ADR first.
 
 ## Phase 3 — the retailer pipeline
 
