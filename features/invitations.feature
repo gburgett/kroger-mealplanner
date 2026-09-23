@@ -52,6 +52,7 @@ Feature: An invited household gets its own meal plan
       | config         |
       | meals          |
       | pantry         |
+      | plans          |
       | preferences    |
       | recipes        |
       | shopping-lists |

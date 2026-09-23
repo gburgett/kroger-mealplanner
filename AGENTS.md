@@ -16,13 +16,14 @@ Consequences worth internalising before changing anything:
 - **The folder is the database.** Its layout and document conventions are the
   schema. They must stay guessable from a directory listing and stable enough to
   grep for. See `features/corpus.feature` — that file is the schema definition.
-  A bare `ls` prints seven names: `README.md`, `config`, `meals`, `pantry`,
-  `preferences`, `recipes`, `shopping-lists`. That listing is asserted in
-  **three** places — `features/corpus.feature`, `features/auth.feature` and
-  `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
-  (`Mealplan.Corpus.Scaffold`) — and all three have to
-  change together. This note said "two" until a seventh name was added and
-  `auth.feature` was the one that failed.
+  A bare `ls` prints eight names: `README.md`, `config`, `meals`, `pantry`,
+  `plans`, `preferences`, `recipes`, `shopping-lists`. That listing is asserted
+  in **four** places — `features/corpus.feature`, `features/auth.feature`,
+  `features/invitations.feature` and `@corpus_directories` in
+  `lib/mealplan/corpus/scaffold.ex` (`Mealplan.Corpus.Scaffold`) — and all four
+  have to change together. This note said "two" until a seventh name was added
+  and `auth.feature` was the one that failed, then said "three" until `plans`
+  was added and `invitations.feature` was the one that failed.
 - **The filename is the primary key.** `recipes/chicken-tacos.md`,
   `meals/2026-08-25.md`. Uniqueness and ordering come free from the
   filesystem; do not add an index that can drift out of step.
@@ -35,9 +36,9 @@ Consequences worth internalising before changing anything:
   the paths it wrote and the server commits them as `scaffold <paths>` on the
   next start. Without that, a new corpus directory added to a folder that
   already has history sat untracked until some later tool call swept it into a
-  commit labelled `write_file recipes/foo.md`. Adding a name is therefore three
+  commit labelled `write_file recipes/foo.md`. Adding a name is therefore four
   edits and no migration: `@corpus_directories`, `features/corpus.feature`,
-  `features/auth.feature`.
+  `features/auth.feature`, `features/invitations.feature`.
 - **Forward migrations are dated shell scripts in `migrations/`, run inside the
   sandbox at session open.** Each script that has not run changes the corpus the
   way the agent would (bash inside the sandbox) and is committed as
