@@ -87,7 +87,8 @@ config :cucumber,
     "features/walmart.feature",
     "features/consumable_recheck.feature",
     "features/onboarding.feature",
-    "features/sms_otp.feature"
+    "features/sms_otp.feature",
+    "features/documents.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

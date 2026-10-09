@@ -256,5 +256,5 @@ folder on disk gets that folder imported on first use, as one change named
 - The weekly recheck job (ADR 0018) still drives `bash` over a folder. It
   skips a document tenant until it is ported to the file verbs.
 - `Mealplan.Store` is the seam. It sends a corpus operation to the sandbox
-  session for a folder tenant, and to `Mealplan.Documents` for a document
+  session for a folder tenant, and to `Mealplan.Store.Documents` for a document
   tenant.

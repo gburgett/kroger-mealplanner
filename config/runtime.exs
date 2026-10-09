@@ -112,6 +112,22 @@ sandbox_mode =
       raise "MEALPLAN_SANDBOX must be \"bubblewrap\", \"host\" or \"microsandbox\", got #{inspect(other)}"
   end
 
+# MEALPLAN_STORE is where a NEW tenant's meal plan lives (ADR 0038): "folder"
+# is a folder of markdown behind the sandboxed shell, "documents" is rows in the
+# state database behind file verbs. It is copied onto the tenant when its
+# invitation is redeemed, so changing it never moves an existing household.
+# Anything else is a typo, and raises.
+corpus_store =
+  case System.get_env("MEALPLAN_STORE") do
+    nil -> "folder"
+    "" -> "folder"
+    "folder" -> "folder"
+    "documents" -> "documents"
+    other -> raise "MEALPLAN_STORE must be \"folder\" or \"documents\", got #{inspect(other)}"
+  end
+
+config :mealplan, :corpus_store, corpus_store
+
 max_live_sessions =
   case System.get_env("MEALPLAN_MAX_LIVE_SESSIONS") do
     nil -> nil

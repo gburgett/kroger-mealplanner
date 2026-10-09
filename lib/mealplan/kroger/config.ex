@@ -9,7 +9,7 @@ defmodule Mealplan.Kroger.Config do
   """
 
   alias Mealplan.Kroger.Help
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
 
   @path "config/kroger.md"
   def path, do: @path
@@ -79,14 +79,14 @@ defmodule Mealplan.Kroger.Config do
         "kroger: disconnect the account"
       end
 
-    Session.write_and_commit(session, @path, document(choice, base_url), message, now)
+    Store.write_and_commit(session, @path, document(choice, base_url), message, now)
   end
 
   @doc "The store the folder currently says to shop at. Only the front matter is read."
-  @spec read(pid()) :: %{store: String.t(), modality: String.t()}
+  @spec read(Store.t()) :: %{store: String.t(), modality: String.t()}
   def read(session) do
     text =
-      case Session.read_corpus(session, @path) do
+      case Store.read_corpus(session, @path) do
         {:ok, text} -> text
         {:error, _} -> ""
       end

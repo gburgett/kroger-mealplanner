@@ -754,10 +754,27 @@ defmodule Mealplan.Mcp.Tools do
   @doc false
   def write_file_input_schema, do: @write_file_input_schema
 
-  @doc "The wire descriptors for `tools/list`, in the MCP shape."
+  @doc """
+  The wire descriptors for `tools/list` for `tenant`, in the MCP shape.
+
+  A document tenant (ADR 0038) is served the file verbs of
+  `Mealplan.Mcp.DocumentTools` in place of `open` / `close` / `bash` /
+  `read_file` / `write_file`; the network tools are the same for both.
+  """
+  @spec list(String.t()) :: [map()]
+  def list(tenant) do
+    case Mealplan.Tenancy.store(tenant) do
+      :documents -> Mealplan.Mcp.DocumentTools.list() ++ wire(network_tools())
+      :folder -> list()
+    end
+  end
+
+  @doc "The wire descriptors for a folder tenant's `tools/list`, in the MCP shape."
   @spec list() :: [map()]
-  def list do
-    Enum.map(@session_tools ++ @tools ++ network_tools(), fn t ->
+  def list, do: wire(@session_tools ++ @tools ++ network_tools())
+
+  defp wire(tools) do
+    Enum.map(tools, fn t ->
       base = %{
         "name" => t.name,
         "title" => t.title,
@@ -846,6 +863,13 @@ defmodule Mealplan.Mcp.Tools do
   def names,
     do: Enum.map(@session_tools ++ @tools, & &1.name) ++ Enum.map(network_tools(), & &1.name)
 
+  # The folder tools a document tenant is not served. Named here so a client
+  # holding a stale tool list is told what to use instead, not "unknown tool".
+  @folder_only ~w(bash close)
+  @no_shell "this household's meal plan is stored as documents (ADR 0038), so there is no shell " <>
+              "and no session to close. Explore with list_files, read_file and grep; change with " <>
+              "write_file, edit_file and delete_file; shopping_list derives the grocery list."
+
   @doc """
   Run one tool. `args` is the decoded `params.arguments` map (string keys).
 
@@ -861,29 +885,51 @@ defmodule Mealplan.Mcp.Tools do
   @spec call(String.t(), map(), String.t(), DateTime.t()) ::
           {:ok, map()} | {:error, :unknown_tool}
   def call(name, args, tenant, now) do
-    case do_call(name, args, tenant, now) do
-      {:ok, result} -> {:ok, with_onboarding_note(result, tenant)}
+    store = Mealplan.Tenancy.store(tenant)
+
+    result =
+      cond do
+        store == :documents and name in Mealplan.Mcp.DocumentTools.names() ->
+          corpus = Mealplan.Store.Corpus.open(tenant, now: now)
+          {:ok, Mealplan.Mcp.DocumentTools.call(name, args, corpus, now)}
+
+        store == :documents and name in @folder_only ->
+          {:ok, error_result(@no_shell)}
+
+        true ->
+          do_call(name, args, tenant, now)
+      end
+
+    case result do
+      {:ok, result} -> {:ok, with_onboarding_note(result, tenant, store)}
       other -> other
     end
   end
 
+
   # ADR 0035 stopped the sandbox tools from auto-opening a session, so there may
   # be none here — after `close`, or before the first `open`. No session means
   # no folder to read the onboarding state from, and nothing to nudge about yet.
-  defp with_onboarding_note(result, tenant) do
+  defp with_onboarding_note(result, tenant, :documents) do
+    if Mealplan.Onboarding.done?(Mealplan.Store.Corpus.handle(tenant)),
+      do: result,
+      else: append_onboarding_note(result)
+  end
+
+  defp with_onboarding_note(result, tenant, :folder) do
     case live_session(tenant) do
       pid when is_pid(pid) ->
-        if Mealplan.Onboarding.done?(pid) do
-          result
-        else
-          Map.update!(result, "content", fn blocks ->
-            blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
-          end)
-        end
+        if Mealplan.Onboarding.done?(pid), do: result, else: append_onboarding_note(result)
 
       nil ->
         result
     end
+  end
+
+  defp append_onboarding_note(result) do
+    Map.update!(result, "content", fn blocks ->
+      blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
+    end)
   end
 
   defp do_call(name, args, tenant, now)
@@ -1181,7 +1227,10 @@ defmodule Mealplan.Mcp.Tools do
   # through the session, and ADR 0035 scopes the "call `open` first" gate to
   # bash / read_file / write_file. Internal callers (recheck, scaffold,
   # migrations) keep this too.
-  defp session!(tenant), do: Mealplan.Corpus.ensure_open(tenant)
+  #
+  # For a document tenant (ADR 0038) this is its `%Mealplan.Store.Corpus{}`;
+  # the shopping tools work through `Mealplan.Store` and do not tell them apart.
+  defp session!(tenant), do: Mealplan.Store.for_tenant(tenant)
 
   @no_session ~s(no sandbox session is open — call `open` first; it returns the current folder tree and recent history)
 

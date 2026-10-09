@@ -44,7 +44,11 @@ excludes =
       true -> [:microsandbox]
     end
 
-ExUnit.configure(exclude: excludes)
+# ADR 0038: the document store's @security scenarios assert an AUTHORISATION
+# boundary — a path cannot leave the tenant, a tenant cannot read another's rows
+# — which no sandbox mode weakens. `include` beats `exclude`, so they run in
+# host mode too, where every other @security scenario is excluded.
+ExUnit.configure(exclude: excludes, include: [:documents])
 
 unless Mealplan.Sandbox.confined?() do
   IO.puts(:stderr, """

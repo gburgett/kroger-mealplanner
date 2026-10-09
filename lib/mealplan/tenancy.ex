@@ -45,6 +45,24 @@ defmodule Mealplan.Tenancy do
     end
   end
 
+  @doc """
+  Where a NEW tenant's meal plan lives: `"folder"` or `"documents"` (ADR 0038).
+  `MEALPLAN_STORE` sets it; the default is `"folder"`.
+  """
+  @spec default_store() :: String.t()
+  def default_store, do: Application.get_env(:mealplan, :corpus_store, "folder")
+
+  @doc """
+  Which store `slug`'s meal plan lives in: `:folder` or `:documents`.
+  """
+  @spec store(String.t()) :: :folder | :documents
+  def store(slug) when is_binary(slug) do
+    case Repo.one(from t in Tenant, where: t.slug == ^slug, select: t.store) do
+      "documents" -> :documents
+      _ -> :folder
+    end
+  end
+
   @doc "A fresh slug for a new tenant: `household-<8 hex>`."
   @spec new_slug() :: String.t()
   def new_slug, do: "household-" <> (:crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower))

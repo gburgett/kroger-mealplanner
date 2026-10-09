@@ -17,7 +17,7 @@ defmodule Mealplan.Onboarding do
   """
 
   alias Mealplan.Corpus.Scaffold
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
 
   @note """
   ONBOARDING: this meal-plan folder still looks brand new. Four things help
@@ -46,20 +46,20 @@ defmodule Mealplan.Onboarding do
   def note, do: @note
 
   @doc "True once the household has rewritten its own preferences and pantry."
-  @spec done?(pid()) :: boolean()
+  @spec done?(Store.t()) :: boolean()
   def done?(session) do
     preferences_rewritten?(session) and pantry_filled?(session)
   end
 
   defp preferences_rewritten?(session) do
-    case Session.read_corpus(session, Scaffold.preferences_path()) do
+    case Store.read_corpus(session, Scaffold.preferences_path()) do
       {:ok, content} -> content != Scaffold.preferences_example()
       {:error, _} -> false
     end
   end
 
   defp pantry_filled?(session) do
-    case Session.list_corpus(session, ["pantry"]) do
+    case Store.list_corpus(session, ["pantry"]) do
       {:ok, entries} -> Enum.any?(entries, &(&1.dir == "pantry"))
       {:error, _} -> false
     end

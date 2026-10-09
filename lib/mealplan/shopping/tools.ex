@@ -17,6 +17,7 @@ defmodule Mealplan.Shopping.Tools do
 
   alias Mealplan.Shopping.List
   alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
   alias Mealplan.Kroger
   alias Mealplan.Walmart
   alias Mealplan.Retail.Query
@@ -126,7 +127,7 @@ defmodule Mealplan.Shopping.Tools do
         after_text = List.append_sent(before, sending, now)
         updated_consumables = mark_consumables(session, sending_lines, now)
 
-        Session.transaction(session, fn ctx ->
+        Store.transaction(session, fn ctx ->
           {:ok, _} = ctx.write_corpus.(requested, after_text)
 
           if updated_consumables do
@@ -244,7 +245,7 @@ defmodule Mealplan.Shopping.Tools do
   end
 
   defp mark_consumables(session, sending_lines, now) do
-    case Session.read_corpus(session, "pantry/consumables.md") do
+    case Store.read_corpus(session, "pantry/consumables.md") do
       {:ok, current} ->
         marked = Kroger.Consumables.mark_bought(current, sending_lines, now)
         if marked != current, do: marked, else: nil
@@ -472,7 +473,7 @@ defmodule Mealplan.Shopping.Tools do
         "mealplan shopping-list --from #{from} --to #{to} --json > \"$f\" 2>&1; " <>
         ~s(status=$?; cat "$f"; rm -f "$f"; exit $status)
 
-    result = Session.run(session, command)
+    result = derive_list(session, command, ["shopping-list", "--from", from, "--to", to, "--json"])
 
     if result.exit_code != 0 do
       raise Refusal.exception(
@@ -508,6 +509,18 @@ defmodule Mealplan.Shopping.Tools do
        }}
     end)
   end
+
+  # A folder tenant runs the command in its sandbox. A document tenant runs the
+  # same parser over its documents with a fixed argument vector (ADR 0038), so
+  # there is no shell and no file to pass the status through.
+  defp derive_list(%Mealplan.Store.Corpus{} = corpus, _command, args) do
+    case Mealplan.Store.Corpus.run_cli(corpus, args) do
+      {:ok, result} -> Map.take(result, [:stdout, :stderr, :exit_code])
+      {:error, message} -> %{stdout: "", stderr: message, exit_code: 1}
+    end
+  end
+
+  defp derive_list(session, command, _args) when is_pid(session), do: Session.run(session, command)
 
   # The search loop shared by kroger_find_products and walmart_find_products.
   # `search_fn` runs one retailer search and returns a product list; `to_candidate`
@@ -624,14 +637,14 @@ defmodule Mealplan.Shopping.Tools do
   end
 
   defp read_corpus!(session, path) do
-    case Session.read_corpus(session, path) do
+    case Store.read_corpus(session, path) do
       {:ok, text} -> text
       {:error, message} -> raise Refusal.exception(message)
     end
   end
 
   defp write_and_commit!(session, path, content, message, now) do
-    case Session.write_and_commit(session, path, content, message, now) do
+    case Store.write_and_commit(session, path, content, message, now) do
       {:ok, _bytes} -> :ok
       {:error, message} -> raise Refusal.exception(message)
     end

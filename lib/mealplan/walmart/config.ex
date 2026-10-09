@@ -6,7 +6,7 @@ defmodule Mealplan.Walmart.Config do
   cart is a link the household opens.
   """
 
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
 
   @path "config/walmart.md"
   def path, do: @path
@@ -63,10 +63,10 @@ defmodule Mealplan.Walmart.Config do
   end
 
   @doc "The store the folder currently says to build cart links for. Only the front matter."
-  @spec read(pid()) :: %{store: String.t(), access_point: String.t()}
+  @spec read(Store.t()) :: %{store: String.t(), access_point: String.t()}
   def read(session) do
     text =
-      case Session.read_corpus(session, @path) do
+      case Store.read_corpus(session, @path) do
         {:ok, text} -> text
         {:error, _} -> ""
       end

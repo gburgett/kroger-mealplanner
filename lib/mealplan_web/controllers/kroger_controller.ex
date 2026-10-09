@@ -269,7 +269,8 @@ defmodule MealplanWeb.KrogerController do
 
   defp kroger(conn), do: Kroger.Api.for_tenant(conn.assigns.tenant)
 
-  defp session(conn), do: {:ok, Mealplan.Corpus.ensure_open(conn.assigns.tenant)}
+  # A folder tenant's session, or a document tenant's store (ADR 0038).
+  defp session(conn), do: {:ok, Mealplan.Store.for_tenant(conn.assigns.tenant)}
 
   defp now, do: Mealplan.Clock.now()
 

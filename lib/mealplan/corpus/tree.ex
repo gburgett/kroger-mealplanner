@@ -6,14 +6,14 @@ defmodule Mealplan.Corpus.Tree do
   """
 
   alias Mealplan.Corpus.Scaffold
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
 
   @max_per_dir 5
 
   @doc "Walk the folder and render the tree string. Returns \"\" on a listing error."
-  @spec render(pid()) :: String.t()
+  @spec render(Store.t()) :: String.t()
   def render(session) do
-    case Session.list_corpus(session, Scaffold.corpus_directories()) do
+    case Store.list_corpus(session, Scaffold.corpus_directories()) do
       {:ok, entries} -> render_snapshot(snapshot(entries))
       {:error, _} -> ""
     end

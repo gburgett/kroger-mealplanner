@@ -93,7 +93,7 @@ defmodule Mealplan.Mcp.Server do
   # injects at @before_compile, which routes to Anubis.Server.Handlers.
   @impl Anubis.Server
   def handle_request(%{"method" => "tools/list"}, frame) do
-    {:reply, %{"tools" => Tools.list()}, frame}
+    {:reply, %{"tools" => Tools.list(tenant(frame))}, frame}
   end
 
   def handle_request(%{"method" => "tools/call", "params" => %{"name" => name} = params}, frame) do

@@ -146,7 +146,10 @@ defmodule Mealplan.Invitations do
       Tenant.changeset(%Tenant{}, %{
         slug: slug,
         name: invitation.label || invitation.phone,
-        corpus_path: Path.join(Tenancy.corpus_root(), slug)
+        corpus_path: Path.join(Tenancy.corpus_root(), slug),
+        # ADR 0038: MEALPLAN_STORE picks where a NEW household's meal plan
+        # lives. It is copied here, once, so changing it later moves nobody.
+        store: Tenancy.default_store()
       })
     )
   end

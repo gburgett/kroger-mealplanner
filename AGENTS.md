@@ -11,6 +11,24 @@ and exposes command execution over it. There are no CRUD tools. An assistant
 plans meals the way a developer explores a repository — `ls`, `grep`, `find`,
 `cat`, writing files — and that is the whole interface.
 
+**A second store is on its way in: documents in the database (ADR 0038).**
+`tenants.store` is `folder` (everything below) or `documents`. A document
+tenant has the same layout, paths and markdown, but rows in the state database
+instead of a folder, and file verbs instead of a shell: `list_files`,
+`read_file`, `grep`, `write_file`, `edit_file`, `delete_file`, `history`,
+`restore_file`, `validate`, `shopping_list` (`Mealplan.Mcp.DocumentTools`).
+Nothing the agent writes is executed, so there is no sandbox, session or
+microVM behind it, and tenant isolation is a `tenant_id` in every query
+(`Mealplan.Store.Documents`). A recipe or day is checked by `mealplan validate`
+BEFORE it is stored (`Mealplan.Store.Corpus`), with the binary run over a
+temporary copy of the documents and a fixed argument vector. `Mealplan.Store`
+is the seam the shopping tools, the config readers, the tree and the
+onboarding check go through, so they work on either. `MEALPLAN_STORE` sets the
+store a NEW household gets; the default stays `folder` until the remaining
+features are ported. A tenant switched to `documents` with a folder on disk
+has it imported on first use. `features/documents.feature` is the spec, and its
+`@security` scenarios run in every mode, host included.
+
 Consequences worth internalising before changing anything:
 
 - **The folder is the database.** Its layout and document conventions are the
@@ -100,6 +118,7 @@ sandbox.
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
 | `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
 | Server state | one household, one writer; a test run that needs nothing running | SQLite, one file beside the folder, through Ecto | ADR 0031 |
+| Document store | tenant isolation without a kernel per tenant | `documents` / `document_changes` / `document_versions` in the same Ecto repo, file-verb MCP tools, the `mealplan` binary run unsandboxed over a temp copy | ADR 0038 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | a header is only worth the network path it arrived on | an SMS one-time code; the SuperTokens managed service is the code authority | ADR 0028, ADR 0030 |
 | Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |

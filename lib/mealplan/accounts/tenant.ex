@@ -15,14 +15,18 @@ defmodule Mealplan.Accounts.Tenant do
     field :slug, :string
     field :name, :string
     field :corpus_path, :string
+    # Where this tenant's meal plan lives (ADR 0038): "folder" is the sandboxed
+    # folder under `corpus_path`, "documents" is rows in this database.
+    field :store, :string, default: "folder"
     has_many :memberships, Mealplan.Accounts.Membership
     timestamps(type: :utc_datetime)
   end
 
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:slug, :name, :corpus_path])
+    |> cast(attrs, [:slug, :name, :corpus_path, :store])
     |> validate_required([:slug])
+    |> validate_inclusion(:store, ~w(folder documents))
     |> unique_constraint(:slug)
   end
 end

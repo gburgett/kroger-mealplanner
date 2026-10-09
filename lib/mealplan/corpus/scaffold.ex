@@ -17,6 +17,7 @@ defmodule Mealplan.Corpus.Scaffold do
   alias Mealplan.Household.Config, as: HouseholdConfig
   alias Mealplan.Kroger.Config, as: KrogerConfig
   alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
   alias Mealplan.Walmart.Config, as: WalmartConfig
 
   @corpus_directories ~w(config meals pantry preferences recipes shopping-lists)
@@ -114,15 +115,47 @@ defmodule Mealplan.Corpus.Scaffold do
     end)
   end
 
+  @doc """
+  The scaffold for a document tenant (ADR 0038): the documents that are
+  missing, as `[{path, body}]`, for the caller to store as one change.
+
+  The same documents and the same rules as `run/2` — README, preferences and
+  household config written once; the Kroger and Walmart config regenerated
+  until a shop is chosen — without the `.gitkeep` files. A folder in the
+  document store exists because the schema names it, not because a dotfile
+  holds it open.
+  """
+  @spec documents(Mealplan.Store.Corpus.t(), String.t() | nil) :: [{String.t(), String.t()}]
+  def documents(corpus, base_url \\ nil) do
+    once =
+      for {path, body} <- [
+            {"README.md", readme()},
+            {@preferences_path, preferences_example()},
+            {HouseholdConfig.path(), HouseholdConfig.document()}
+          ],
+          missing?(corpus, path),
+          do: {path, body}
+
+    regenerated =
+      [
+        {KrogerConfig.read(corpus).store, KrogerConfig.path(), KrogerConfig.document(nil, base_url)},
+        {WalmartConfig.read(corpus).store, WalmartConfig.path(), WalmartConfig.document(nil)}
+      ]
+      |> Enum.filter(fn {store, path, wanted} -> store == "" and read(corpus, path) != wanted end)
+      |> Enum.map(fn {_store, path, wanted} -> {path, wanted} end)
+
+    once ++ regenerated
+  end
+
   defp missing?(session, path) do
-    case Session.exists_corpus(session, path) do
+    case Store.exists_corpus(session, path) do
       {:ok, :missing} -> true
       _ -> false
     end
   end
 
   defp read(session, path) do
-    case Session.read_corpus(session, path) do
+    case Store.read_corpus(session, path) do
       {:ok, text} -> text
       {:error, _} -> nil
     end
