@@ -46,7 +46,7 @@ Feature: Shopping at Walmart through the affiliate API
     When I set my Walmart store to "Cincinnati Walmart Supercenter"
     Then the file "config/walmart.md" contains the line "store: 5435"
     And the file "config/walmart.md" contains the line "access_point: 4254e0e7-f9d9-443f-9941-0edd3d13b7b8"
-    And the last commit touched the file "config/walmart.md"
+    And the last change touched "config/walmart.md"
 
   @core
   Scenario: The products that match each line are written in
@@ -190,10 +190,7 @@ Feature: Shopping at Walmart through the affiliate API
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
-    When I run:
-      """
-      sed -i 's/ (check)$//' shopping-lists/2026-08-25--2026-08-31.md
-      """
+    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
     And I ask for the Walmart cart link
     Then the meal planner says nothing was added to the cart
     And the file "pantry/consumables.md" contains the line "- shredded cheddar: needs recheck"
@@ -277,7 +274,7 @@ Feature: Shopping at Walmart through the affiliate API
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Walmart for the products on the shopping list
     Then the meal planner refuses, and names the Walmart endpoint and the status
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal-plan folder
+    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
     And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
 
   @core
@@ -300,18 +297,24 @@ Feature: Shopping at Walmart through the affiliate API
     Given the server has no Walmart credential
     When a client connects to the meal planner over MCP
     Then the server reports the tools:
-      | tool                 | purpose                                           |
-      | open                 | start meal planning — open the meal plan          |
-      | close                | end meal planning — close the session             |
-      | bash                 | plan meals — run a shell command on the meal plan |
-      | read_file            | read a recipe, meal, or file in the meal plan     |
-      | write_file           | write a recipe, meal, or file in the meal plan    |
-      | kroger_find_products | find Kroger products for a meal plan list         |
-      | kroger_send_to_cart  | add a meal plan shopping list to the Kroger cart  |
+      | tool                 |
+      | open                 |
+      | list_files           |
+      | read_file            |
+      | grep                 |
+      | write_file           |
+      | edit_file            |
+      | delete_file          |
+      | history              |
+      | restore_file         |
+      | validate             |
+      | shopping_list        |
+      | kroger_find_products |
+      | kroger_send_to_cart  |
     And the meal planner's instructions say nothing about Walmart
 
   @security
-  Scenario: The Walmart tools cannot reach a file outside the meal-plan folder
+  Scenario: The Walmart tools cannot reach a document outside the meal plan
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     When I ask Walmart for the products on the list "../escape.md"
     Then the meal planner refuses, and names the path "../escape.md"
@@ -332,10 +335,10 @@ Feature: Shopping at Walmart through the affiliate API
     And no Walmart cart link was built
 
   @security
-  Scenario: The Walmart private key never reaches the sandbox
+  Scenario: The Walmart private key is never handed to the agent
     The key signs every affiliate request, and it is the server's own
-    credential. The mount namespace — not the path being hard to guess — is
-    what keeps it out.
+    credential. A path names one of the household's documents and nothing
+    else — not the path being hard to guess — and that is what keeps it out.
 
-    When I try to read the Walmart private key through the bash tool
+    When I try to read the Walmart private key by its path
     Then the output does not contain the Walmart private key

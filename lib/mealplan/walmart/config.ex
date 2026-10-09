@@ -31,8 +31,8 @@ defmodule Mealplan.Walmart.Config do
     2. You pick one of what it found.
     3. It writes this file with the store's id and access point.
 
-    "cat config/walmart.md" then says which store is set. The server's signing key
-    is not in this folder and cannot be reached from it — it is the server's own
+    Reading config/walmart.md then says which store is set. The server's signing
+    key is not in the meal plan and cannot be reached from it — it is the server's own
     credential, not the household's.
     """
   end
@@ -64,9 +64,9 @@ defmodule Mealplan.Walmart.Config do
 
   @doc "The store the folder currently says to build cart links for. Only the front matter."
   @spec read(Store.t()) :: %{store: String.t(), access_point: String.t()}
-  def read(session) do
+  def read(corpus) do
     text =
-      case Store.read_corpus(session, @path) do
+      case Store.read_corpus(corpus, @path) do
         {:ok, text} -> text
         {:error, _} -> ""
       end

@@ -1,44 +1,37 @@
 defmodule Mealplan.Features.RecheckSteps do
   @moduledoc """
-  The weekly recheck job (ADR 0018). A port of
-  `features/steps/consumable_recheck.steps.ts`.
+  The weekly recheck job (ADR 0018).
 
   Driven the same way the interactive tools are driven elsewhere in this suite:
   `Given` steps set up scripted state directly, and `When the weekly recheck job
   runs` is the one call into real production code.
-
-  The TypeScript harness shelled out to `mix mealplan.recheck` so the job ran in
-  its own OS process. It does not need to: `Mealplan.Recheck.run/1` opens and
-  closes its own sandbox session either way, which is the property that mattered
-  — and not spawning a BEAM is the whole point of ADR 0022.
   """
 
   use Cucumber.StepDefinition
 
   import ExUnit.Assertions
 
+  alias Mealplan.FeatureCorpus
   alias Mealplan.Mock.Llm
-  alias Mealplan.Sandbox.Session
 
   @fixture_message "weekly recheck test fixture"
 
   # --- setup -----------------------------------------------------------------
 
   step "today is {string}", %{args: [date]} = context do
-    {:ok, Map.put(context, :recheck_today, DateTime.new!(Date.from_iso8601!(date), ~T[12:00:00Z]))}
+    {:ok,
+     Map.put(context, :recheck_today, DateTime.new!(Date.from_iso8601!(date), ~T[12:00:00Z]))}
   end
 
-  step "the last commit to the meal-plan folder was made on {string}",
-       %{args: [date]} = context do
-    at = DateTime.new!(Date.from_iso8601!(date), ~T[09:00:00Z])
+  # A change row with a backdated time and no documents, recorded after every
+  # other: the newest change is what the job's staleness gate reads.
+  step "the last change to the meal plan was made on {string}", %{args: [date]} = context do
+    Mealplan.Repo.insert!(%Mealplan.Store.Change{
+      tenant_id: FeatureCorpus.tenant_id(context),
+      message: @fixture_message,
+      inserted_at: DateTime.new!(Date.from_iso8601!(date), ~T[09:00:00Z])
+    })
 
-    result =
-      Session.run(context.session, ~s(git commit -q --allow-empty -m "#{@fixture_message}"),
-        commit: false,
-        env: Mealplan.Git.Commit.commit_environment(at)
-      )
-
-    assert result.exit_code == 0, "could not backdate a commit:\n#{result.stderr}"
     {:ok, context}
   end
 
@@ -96,6 +89,7 @@ defmodule Mealplan.Features.RecheckSteps do
   end
 
   defp tool_input("bash", argument), do: %{"command" => argument, "message" => @fixture_message}
+  defp tool_input("grep", argument), do: %{"pattern" => argument}
   defp tool_input(_tool, argument), do: %{"path" => argument}
 
   # The tables and single-value steps above write a literal "\n" — turn it into
@@ -105,25 +99,14 @@ defmodule Mealplan.Features.RecheckSteps do
   # --- running ---------------------------------------------------------------
 
   step "the weekly recheck job runs", context do
-    # The job opens its own session over the same folder. The scenario's session
-    # is closed first so two sandboxes are not writing to one git repository —
-    # in production there is only ever one.
-    Mealplan.Features.CorpusHooks.close_session(context.tenant)
-
     result =
       Mealplan.Recheck.run(
-        folder: context.folder,
+        tenant: context.tenant,
         now: context[:recheck_today] || context.now,
-        tenant: "recheck-#{context.tenant}",
         llm_base: context.llm.base
       )
 
-    {:ok, session} = Mealplan.Sandbox.open(context.tenant, context.folder)
-
-    {:ok,
-     context
-     |> Map.put(:recheck, result)
-     |> Map.put(:session, session)}
+    {:ok, Map.put(context, :recheck, result)}
   end
 
   # --- assertions ------------------------------------------------------------
@@ -153,10 +136,13 @@ defmodule Mealplan.Features.RecheckSteps do
   end
 
   step "the pantry consumable {string} now reads {string}", %{args: [item, status]} = context do
-    content = File.read!(Path.join(context.folder, "pantry/consumables.md"))
+    content = FeatureCorpus.read!(context, "pantry/consumables.md")
 
     pattern =
-      Regex.compile!("^-\\s*#{Regex.escape(item)}:\\s*#{Regex.escape(status)}\\b", [:multiline, :caseless])
+      Regex.compile!("^-\\s*#{Regex.escape(item)}:\\s*#{Regex.escape(status)}\\b", [
+        :multiline,
+        :caseless
+      ])
 
     assert Regex.match?(pattern, content),
            ~s(pantry/consumables.md does not say "#{item}: #{status}":\n#{content})
@@ -173,17 +159,20 @@ defmodule Mealplan.Features.RecheckSteps do
   step "the job's output says it gave up after too many turns", context do
     lines = result(context)["logLines"]
 
-    assert Enum.any?(lines, &(Regex.match?(~r/gave up/i, &1) and Regex.match?(~r/too many turns/i, &1))),
+    assert Enum.any?(
+             lines,
+             &(Regex.match?(~r/gave up/i, &1) and Regex.match?(~r/too many turns/i, &1))
+           ),
            "no log line said the job gave up:\n#{Enum.join(lines, "\n")}"
 
     {:ok, context}
   end
 
-  step "the tool result for that call names the folder boundary, not the file", context do
+  step "the tool result for that call names the meal plan's boundary", context do
     call = tool_call(context, "read_file")
     assert call["isError"], "the read_file call did not fail:\n#{call["resultText"]}"
 
-    assert String.contains?(call["resultText"], "meal-plan folder"),
+    assert String.contains?(call["resultText"], "outside the meal plan"),
            "the refusal does not name the boundary:\n#{call["resultText"]}"
 
     {:ok, context}
@@ -200,11 +189,12 @@ defmodule Mealplan.Features.RecheckSteps do
     {:ok, context}
   end
 
-  step "the tool result for that call says the command does not exist", context do
+  step "the tool result for that call says there is no such tool", context do
     call = tool_call(context, "bash")
+    assert call["isError"], "the bash call was not refused:\n#{call["resultText"]}"
 
-    assert Regex.match?(~r/command not found|not found|no such file/i, call["resultText"]),
-           "the command was not refused as missing:\n#{call["resultText"]}"
+    assert call["resultText"] =~ ~s(there is no tool called "bash"),
+           "the refusal does not say there is no such tool:\n#{call["resultText"]}"
 
     {:ok, context}
   end

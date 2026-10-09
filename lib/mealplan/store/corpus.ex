@@ -2,8 +2,8 @@ defmodule Mealplan.Store.Corpus do
   @moduledoc """
   One tenant's meal plan in the document store (ADR 0038).
 
-  This is what a `pid` is for a folder tenant: the handle every corpus
-  operation takes. It is a plain struct, not a process — there is no session to
+  The handle every corpus operation takes. It is a plain struct, not a
+  process — there is no session to
   boot, keep warm, time out or evict. `Mealplan.Store` dispatches on it.
 
   Two kinds of write go through here, and they are checked differently:
@@ -11,7 +11,7 @@ defmodule Mealplan.Store.Corpus do
     * `write/6` — a write the AGENT chose. A markdown document is checked by
       `mealplan validate <path>` against the tenant's documents with the change
       in place, and a problem refuses the write. The format is still defined in
-      one place, the parser; the difference from the folder is that the check
+      one place, the parser; the difference from the old folder is that the check
       runs before the store rather than after it.
     * `commit/4` — a write the SERVER composed: scaffold, import, a tool that
       records candidates or a cart send. These are not checked, because a
@@ -22,8 +22,6 @@ defmodule Mealplan.Store.Corpus do
   alias Mealplan.Corpus.Scaffold
   alias Mealplan.Repo
   alias Mealplan.Store.{Cli, Documents, Paths}
-
-  require Logger
 
   @enforce_keys [:tenant, :tenant_id]
   defstruct [:tenant, :tenant_id]
@@ -41,7 +39,7 @@ defmodule Mealplan.Store.Corpus do
 
   @doc """
   The document store for `slug`, brought to the shape a served request can
-  assume: imported from its folder on first use if it has one, and scaffolded.
+  assume: scaffolded.
 
   Cheap to call on every request: when nothing is missing it is a handful of
   reads and no write.
@@ -53,10 +51,6 @@ defmodule Mealplan.Store.Corpus do
     now = Keyword.get_lazy(opts, :now, &Mealplan.Clock.now/0)
     base_url = Keyword.get_lazy(opts, :base_url, &Mealplan.Config.public_url/0)
 
-    if Documents.count(tenant.id) == 0 and is_binary(tenant.corpus_path) do
-      import_folder(corpus, tenant.corpus_path, now)
-    end
-
     case Scaffold.documents(corpus, base_url) do
       [] ->
         :ok
@@ -67,38 +61,6 @@ defmodule Mealplan.Store.Corpus do
     end
 
     corpus
-  end
-
-  # A tenant moving from the folder store keeps its folder: every regular file
-  # that names a valid document path comes across as one change. Hidden files —
-  # `.git`, `.gitkeep`, the migration ledger — do not.
-  defp import_folder(corpus, folder, now) do
-    if File.dir?(folder) do
-      writes =
-        folder
-        |> Path.join("**")
-        |> Path.wildcard()
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.map(&Path.relative_to(&1, folder))
-        |> Enum.flat_map(fn path ->
-          with {:ok, path} <- Paths.normalise(path),
-               {:ok, body} <- File.read(Path.join(folder, path)),
-               true <- String.valid?(body),
-               true <- byte_size(body) <= Documents.max_document_bytes() do
-            [{path, body}]
-          else
-            _ ->
-              Logger.warning("store: not importing #{path} from #{folder} for #{corpus.tenant}")
-              []
-          end
-        end)
-
-      if writes != [] do
-        {:ok, _} = Documents.commit(corpus.tenant_id, writes, "import #{folder}", now)
-      end
-    end
-
-    :ok
   end
 
   # --- reads ----------------------------------------------------------------
@@ -142,7 +104,7 @@ defmodule Mealplan.Store.Corpus do
 
   @doc """
   The entries directly in the root and in each of `dirs`, in the shape the
-  folder session's `list_corpus` returns: `%{dir: "ROOT" | dir, name: name}`.
+  tree and the onboarding check read: `%{dir: "ROOT" | dir, name: name}`.
   """
   @spec list_corpus(t(), [String.t()]) :: {:ok, [map()]}
   def list_corpus(%__MODULE__{} = corpus, dirs) do
@@ -350,7 +312,7 @@ defmodule Mealplan.Store.Corpus do
       documents = with_writes(corpus, writes)
 
       Enum.reduce_while(to_check, {:ok, []}, fn path, {:ok, warnings} ->
-        case Cli.run(documents, ["validate", path]) do
+        case Cli.run(documents, ["validate", "--changed", path, path]) do
           {:ok, %{exit_code: 0, stderr: stderr}} ->
             {:cont, {:ok, warnings ++ warning_lines(stderr)}}
 
@@ -366,6 +328,20 @@ defmodule Mealplan.Store.Corpus do
             {:halt, {:error, message}}
         end
       end)
+    end
+  end
+
+  @doc """
+  The arguments that tell `mealplan validate` which days are the change in
+  front of the agent: the documents the latest change touched. Serving warnings
+  are given for those days only, so a standing plan is not re-flagged by every
+  later check that has nothing to do with it.
+  """
+  @spec changed_args(t()) :: [String.t()]
+  def changed_args(%__MODULE__{} = corpus) do
+    case Documents.history(corpus.tenant_id, nil, 1) do
+      [%{paths: paths}] -> Enum.flat_map(paths, fn {path, _deleted} -> ["--changed", path] end)
+      [] -> []
     end
   end
 

@@ -97,8 +97,8 @@ defmodule Mealplan.Invitations do
   Redeem `invitation` against the telephone that just signed in. `attrs` carries
   `:supertokens_user_id` and optionally `:label`.
 
-  On a fresh invitation this creates the tenant (slug `household-<hex>`,
-  `corpus_path` under `MEALPLAN_CORPUS_ROOT`), the owner user and the owner
+  On a fresh invitation this creates the tenant (slug `household-<hex>`), the
+  owner user and the owner
   membership, and stamps `tenant_id` / `redeemed_at`. On an already-redeemed one
   it re-attaches the core id and the owner membership and returns the same
   tenant. Idempotent either way.
@@ -145,11 +145,7 @@ defmodule Mealplan.Invitations do
     Repo.insert!(
       Tenant.changeset(%Tenant{}, %{
         slug: slug,
-        name: invitation.label || invitation.phone,
-        corpus_path: Path.join(Tenancy.corpus_root(), slug),
-        # ADR 0038: MEALPLAN_STORE picks where a NEW household's meal plan
-        # lives. It is copied here, once, so changing it later moves nobody.
-        store: Tenancy.default_store()
+        name: invitation.label || invitation.phone
       })
     )
   end

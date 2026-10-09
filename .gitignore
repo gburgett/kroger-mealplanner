@@ -1,4 +1,4 @@
-# --- Rust CLI and the sandbox image it is staged into ---
+# --- Rust CLI (and the retired sandbox image, ADR 0039, should a checkout still hold one) ---
 target/
 *.wasm
 sandbox-image/rootfs/

@@ -1,7 +1,7 @@
 defmodule Mealplan.Corpus.Tree do
   @moduledoc """
-  A `tree`-like view of the meal-plan folder, shown to the agent at session
-  open. Ported from `src/corpus/tree.ts`. Shows only the last 5 files per
+  A `tree`-like view of the meal plan, handed to the agent by `open` and to the
+  weekly recheck job. Shows only the last 5 documents per folder
   directory (lexicographically), with per-directory counts.
   """
 
@@ -12,8 +12,8 @@ defmodule Mealplan.Corpus.Tree do
 
   @doc "Walk the folder and render the tree string. Returns \"\" on a listing error."
   @spec render(Store.t()) :: String.t()
-  def render(session) do
-    case Store.list_corpus(session, Scaffold.corpus_directories()) do
+  def render(corpus) do
+    case Store.list_corpus(corpus, Scaffold.corpus_directories()) do
       {:ok, entries} -> render_snapshot(snapshot(entries))
       {:error, _} -> ""
     end

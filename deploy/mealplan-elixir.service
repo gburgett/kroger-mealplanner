@@ -15,16 +15,10 @@
 # CONCRETE, NOT A TEMPLATE. Every path and address below is this machine's, the
 # same reasoning as deploy/mealplan.service.
 #
-# ADR 0033: this server now admits more than one invited household, each with
-# its own tenant and its own folder under MEALPLAN_CORPUS_ROOT, each in its own
-# libkrun microVM (MEALPLAN_SANDBOX=microsandbox). There is no configured owner.
-#
-# THE CUTOVER HAPPENED: this is the server now, on port 8000, against the
-# real /home/exedev/meal-plan. It ran alongside the Node service for the rest
-# of the migration, on 8001 against its own /home/exedev/meal-plan-elixir
-# folder, so the two servers never committed to one git repository at once.
-# deploy/mealplan.service is stopped and disabled; it stays in the repository
-# until plan 0005 Phase 9 deletes the Node source it starts.
+# ADR 0033: this server admits more than one invited household, each with its
+# own tenant. ADR 0039: each household's meal plan is rows in the state
+# database (MEALPLAN_STATE), behind file-verb tools. There is no folder, no
+# sandbox and no microVM per household, and no configured owner.
 #
 # DEPLOY = `mix release` THEN RESTART. There is a build step now (ADR 0020):
 #
@@ -34,8 +28,8 @@
 #     MIX_ENV=prod mix release --overwrite
 #     systemctl --user restart mealplan-elixir.service
 #
-# A change to cli/ still needs ./cli/build.sh and a change to the sandbox image
-# still needs ./sandbox-image/build.sh — unchanged by this migration.
+# A change to cli/ still needs ./cli/build.sh: the server runs the `mealplan`
+# parser from cli/target/ (ADR 0038). The "meal plans:" journal line names it.
 Description=Kroger meal planner MCP server (Elixir)
 Documentation=file:///home/exedev/kroger-mealplanner/docs/adr/0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md
 # Nothing on this VM to order against. The state is one SQLite file (ADR 0024,
@@ -48,7 +42,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/home/exedev/kroger-mealplanner
 # The release. `mix release` writes it here; there is no daemon, one BEAM node
-# holds the server, the sandbox children and (Phase 6) the Oban job.
+# holds the server and the job.
 ExecStart=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan start
 ExecStop=/home/exedev/kroger-mealplanner/_build/prod/rel/mealplan/bin/mealplan stop
 
@@ -64,14 +58,10 @@ Environment=MEALPLAN_PUBLIC_URL=https://plantrify.com
 # ADR 0033: there is no configured owner and no bootstrap household. Every
 # household is invited by hand — `bin/mealplan eval
 # 'Mealplan.Invitations.create("+15095550142", label: "...")'` — and the first
-# code that number spends provisions its own tenant and a fresh folder under
-# MEALPLAN_CORPUS_ROOT. MEALPLAN_OWNER and MEALPLAN_OWNER_PHONE are gone.
-Environment=MEALPLAN_CORPUS_ROOT=/home/exedev/meal-plans
-# The old single-household folder (ADR 0033). Kept named ONLY as a pointer for
-# a follow-up record that moves its recipes and meals into the re-onboarded
-# tenant. Nothing reads it at runtime; the current household re-onboards from
-# empty as an ordinary invitee.
-Environment=MEALPLAN_FOLDER=/home/exedev/meal-plan
+# code that number spends provisions its own tenant, whose meal plan is
+# scaffolded on its first request. MEALPLAN_OWNER and MEALPLAN_OWNER_PHONE are
+# gone, and so are MEALPLAN_CORPUS_ROOT, MEALPLAN_FOLDER and MEALPLAN_SANDBOX
+# (ADR 0039).
 # The SuperTokens core — the managed deployment (ADR 0029), over HTTPS. Its
 # API key travels in .env.elixir, not here: it is the whole of the lock on the
 # user store, and this file is world-readable and in git.
@@ -80,25 +70,15 @@ Environment=SUPERTOKENS_CONNECTION_URI=https://st-dev-ff40b340-a989-11f1-abbd-07
 # whichever one this names travel in .env, never here.
 Environment=MEALPLAN_SMS_PROVIDER=twilio
 
-# The server state, one SQLite file (ADR 0024, restored by ADR 0030). It has a
-# password-free path, so unlike DATABASE_URL it lives here rather than in .env.
-# It MUST be outside MEALPLAN_CORPUS_ROOT and outside every tenant's folder —
-# a sandbox mounts those and the file holds a household's Kroger token in the
-# clear — and `Mealplan.Boot` refuses to start if it is not.
+# The server state, one SQLite file (ADR 0024, restored by ADR 0030). Since
+# ADR 0038 it holds every household's meal plan too, so backing up this one
+# file backs up everything. It has a password-free path, so unlike
+# DATABASE_URL it lives here rather than in .env.
 # ~/.local/state/mealplan/mealplan.db is the default; this names it so a reader
 # of the unit knows where the state is.
 Environment=MEALPLAN_STATE=/home/exedev/.local/state/mealplan/mealplan.db
-# systemd-run, prlimit, bwrap and git all live here. The sandbox gets an empty
-# environment regardless: `env -i` sits between prlimit and bwrap.
-# ~/.local/bin carries `msb` (microsandbox, a mise-managed install); the
-# microVM backend below shells out to it by name, so it has to resolve here.
-Environment=PATH=/home/exedev/.local/bin:/usr/bin:/bin
-# ADR 0033: the deployed server admits more than one household, so each one
-# runs in its own libkrun microVM (ADR 0027). bubblewrap between tenants is one
-# UID namespace, not a kernel. This needs `msb` on PATH, /dev/kvm read/write
-# (`msb doctor`), and sandbox-image/oci.tar built with
-# `./sandbox-image/build.sh --microsandbox`. See docs/deploying-behind-exe-dev.md.
-Environment=MEALPLAN_SANDBOX=microsandbox
+# `env` and `sh` live here; the parser runs under `env -i` with nothing else.
+Environment=PATH=/usr/bin:/bin
 # The BEAM must run UTF-8 or Elixir mangles non-ASCII output. rel/env.sh.eex
 # also sets these; belt and braces.
 Environment=LANG=C.UTF-8
@@ -131,10 +111,9 @@ Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15
 
-# No NoNewPrivileges=, RestrictNamespaces= or PrivateUsers= here, on purpose:
-# the product's whole boundary is bubblewrap creating user and pid namespaces
-# per command, and those three would break it. Containment lives in
-# sandbox-image/, not in this unit.
+# Nothing an assistant writes is run (ADR 0039), so the hardening that used to
+# break bubblewrap's namespaces no longer has anything to break.
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=default.target

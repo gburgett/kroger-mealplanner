@@ -1,17 +1,16 @@
-defmodule Mealplan.Sandbox.ScratchTest do
+defmodule Mealplan.Store.ScratchTest do
   @moduledoc """
   The cleanup guarantees, asserted rather than assumed.
 
-  These exist because the assumption was wrong once and it cost a disk. A
-  command's scratch files were removed on the last line of
-  `Mealplan.Sandbox.Runner.run/2`, which a killed command never reaches, and
-  nothing looked for the leftovers afterwards. The memory-limit scenario's
-  `yes | sort` left 11 GB of spill in one of them and filled this VM to 94%.
+  These exist because the assumption was wrong once and it cost a disk: under
+  the sandbox a killed `yes | sort` left 11 GB of spill behind and filled the VM
+  to 94%. The parser's temporary copy of a household's documents lives in the
+  same layout, under the same rules.
   """
 
   use ExUnit.Case, async: false
 
-  alias Mealplan.Sandbox.Scratch
+  alias Mealplan.Store.Scratch
 
   setup do
     # A base of this test's own, so nothing here can see — or remove — the
@@ -20,7 +19,7 @@ defmodule Mealplan.Sandbox.ScratchTest do
     # `Scratch.root/0` memoises its answer in `:persistent_term` for the life
     # of the OS process, so `tmp_base` alone is not enough: whichever test
     # calls `root/0` or `command_dir!/0` first — here or in an ordinary
-    # sandboxed command elsewhere in the same suite — fixes it for every test
+    # parser run elsewhere in the same suite — fixes it for every test
     # afterward. `release/0` erased that memo but the live suite around it
     # promptly recomputed it from the SAME shared `tmp_base`, so "release/0
     # removes the root" was deleting a directory a still-running scenario's
@@ -114,81 +113,38 @@ defmodule Mealplan.Sandbox.ScratchTest do
     end
   end
 
-  describe "Runner.run/2 cleanup" do
+  describe "Cli.run/3 cleanup" do
     # These measure the DELTA, not the whole root. The root belongs to the OS
-    # process, and the suite shares it: a session GenServer or a Bandit request
-    # handler from another test can hold a command directory of its own while
-    # these run, and that is not this function's business. Asserting the root
-    # was empty made these three tests fail for other tests' work.
+    # process, and the suite shares it.
     setup do
       {:ok, before: command_dirs()}
     end
 
-    # The regression test for the 11 GB. A command that is stopped by the
-    # wall-clock timeout used to leave its TMPDIR — and everything the command
-    # had written into it — behind, because the removal was the last line of a
-    # function the timeout path reached but the killed command's spill outlived.
-    test "a command that times out leaves nothing behind", %{before: before} do
-      result = run_in_sandbox("sleep 5", timeout_ms: 300)
+    test "a parser run that succeeds leaves nothing behind", %{before: before} do
+      assert {:ok, %{exit_code: 0}} =
+               Mealplan.Store.Cli.run([{"README.md", "# Meal plan\n"}], ["validate"])
 
-      assert result.timed_out
       assert command_dirs() -- before == []
     end
 
-    test "a command that fails leaves nothing behind", %{before: before} do
-      result = run_in_sandbox("exit 3")
-
-      assert result.exit_code == 3
+    test "a parser run that fails leaves nothing behind", %{before: before} do
+      assert {:ok, %{exit_code: code}} = Mealplan.Store.Cli.run([], ["no-such-job"])
+      assert code != 0
       assert command_dirs() -- before == []
     end
 
-    test "a command that writes to TMPDIR leaves nothing behind", %{before: before} do
-      # What `sort` does when it spills, and what the shopping list does for its
-      # JSON: writes a file next to the command rather than into the corpus.
-      result = run_in_sandbox(~s(echo spill > "${TMPDIR:-/tmp}/spill"; ls "${TMPDIR:-/tmp}"))
+    test "documents that cannot be laid out leave nothing behind", %{before: before} do
+      # A document and a folder with one name cannot both be on a disk.
+      assert {:error, message} =
+               Mealplan.Store.Cli.run([{"notes", "a file"}, {"notes/today.md", "x"}], ["validate"])
 
-      assert result.exit_code == 0
-      assert result.stdout =~ "spill"
+      assert message =~ "could not be laid out"
       assert command_dirs() -- before == []
     end
   end
 
   defp command_dirs do
     Scratch.root() |> Path.join("cmd-*") |> Path.wildcard()
-  end
-
-  defp run_in_sandbox(command, opts \\ []) do
-    workspace = Path.join(System.tmp_dir!(), "scratch-ws-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(workspace)
-    on_exit(fn -> File.rm_rf(workspace) end)
-
-    Mealplan.Sandbox.Runner.run(
-      command,
-      Keyword.merge(
-        [
-          # These assert `Runner`'s own scratch cleanup, which is the same for
-          # its two modes. Under `MEALPLAN_SANDBOX=microsandbox` the Runner is
-          # not the code path at all (`Mealplan.Sandbox.Backend.Microsandbox`
-          # is, with its own `after File.rm_rf/1` — see
-          # `test/mealplan/sandbox/microsandbox_test.exs`), so fall back to the
-          # unconfined mode `Runner` does understand.
-          mode: runner_mode(),
-          image_root: Mealplan.Sandbox.default_image_root(),
-          seccomp_filter: Mealplan.Sandbox.default_seccomp_filter(),
-          workspace: workspace,
-          tenant: "scratch-test",
-          use_user_scope: Mealplan.Sandbox.Limits.user_scope_available?()
-        ],
-        opts
-      )
-    )
-  end
-
-  defp runner_mode do
-    case Mealplan.Sandbox.mode() do
-      :microsandbox -> :host
-      other -> other
-    end
   end
 
   describe "root/0 and command_dir!/0" do

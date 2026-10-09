@@ -9,7 +9,7 @@ defmodule MealplanWeb.LoginPage do
   Written the same way as `MealplanWeb.ConsentPage`, and for the same reason:
   the app is generated `--no-html`, so there is no EEx auto-escaping to lean
   on, and `e/1` is the same five-character escape. A template engine running
-  outside the sandbox in the process that holds the household's tokens is a bad
+  in the process that holds the household's tokens is a bad
   trade for two forms.
 
   **The code is never rendered here.** It exists in the message and in the

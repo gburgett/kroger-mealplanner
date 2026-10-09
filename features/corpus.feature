@@ -14,27 +14,27 @@ Feature: The meal plan is a folder of markdown documents
   validator does not look at it. See `features/preferences.feature`.
 
   Scenario: The layout is discoverable
-    Given a meal-plan folder mounted at "/workspace"
-    When I run "ls"
+    Given a meal plan
+    When I list the meal plan
     Then the output is:
       """
       README.md
-      config
-      meals
-      pantry
-      preferences
-      recipes
-      shopping-lists
+      config/
+      meals/
+      pantry/
+      preferences/
+      recipes/
+      shopping-lists/
       """
 
   Scenario: One recipe is one file, named after the recipe
     When I record the recipe "Sunday Pot Roast" serving 6
-    Then the file "recipes/sunday-pot-roast.md" exists in the meal-plan folder
+    Then the file "recipes/sunday-pot-roast.md" exists in the meal plan
 
   Scenario: One day is one file, named after its date
     Given I have recorded the recipe "Chicken Tacos" serving 4
     When I plan dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    Then the file "meals/2026-08-25.md" exists in the meal-plan folder
+    Then the file "meals/2026-08-25.md" exists in the meal plan
 
   Scenario: A day documents any number of meals
     Given I have recorded the recipe "Pancakes" serving 4
@@ -62,7 +62,7 @@ Feature: The meal plan is a folder of markdown documents
 
       - [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
     And the meal "Breakfast" on "2026-08-25" uses 1 recipe
     And the meal "Lunch" on "2026-08-25" uses 1 recipe
@@ -137,14 +137,14 @@ Feature: The meal plan is a folder of markdown documents
 
       Grandma's trick: warm the tortillas in a dry skillet, never the microwave.
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
     And the file "recipes/chicken-tacos.md" contains the line "Grandma's trick: warm the tortillas in a dry skillet, never the microwave."
 
   Scenario: A healthy folder validates clean
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
     And the output says the folder is valid
 
@@ -160,7 +160,7 @@ Feature: The meal plan is a folder of markdown documents
 
       - a good handful of cheese
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output names the file "recipes/chicken-tacos.md"
     And the output names the line "- a good handful of cheese"
@@ -177,7 +177,7 @@ Feature: The meal plan is a folder of markdown documents
 
       - [Beef Wellington](../recipes/beef-wellington.md)
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output says "recipes/beef-wellington.md" is missing
 
@@ -192,7 +192,7 @@ Feature: The meal plan is a folder of markdown documents
 
       servings: six
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output names the file "meals/2026-08-25.md"
     And the output names the line "servings: six"
@@ -208,7 +208,7 @@ Feature: The meal plan is a folder of markdown documents
 
       ## Dinner
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output names the file "meals/2026-08-25.md"
     And the output mentions "belongs to a meal"
@@ -224,7 +224,7 @@ Feature: The meal plan is a folder of markdown documents
 
       Leftovers night.
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
 
   Scenario: The validator catches a day whose filename and date disagree
@@ -234,7 +234,7 @@ Feature: The meal plan is a folder of markdown documents
       date: 2026-08-26
       ---
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output says the filename and the date do not match
 
@@ -247,14 +247,14 @@ Feature: The meal plan is a folder of markdown documents
 
       - 12 corn tortillas
       """
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output says the front matter is missing
 
   Scenario: The validator reports every problem at once, not just the first
     Given the file "recipes/one.md" contains "no front matter here"
     And the file "recipes/two.md" contains "nor here"
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command fails
     And the output names the file "recipes/one.md"
     And the output names the file "recipes/two.md"
@@ -262,5 +262,5 @@ Feature: The meal plan is a folder of markdown documents
   Scenario: Validating a single file while drafting it
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And the file "recipes/broken.md" contains "no front matter here"
-    When I run "mealplan validate recipes/chicken-tacos.md"
+    When I validate "recipes/chicken-tacos.md"
     Then the command succeeds

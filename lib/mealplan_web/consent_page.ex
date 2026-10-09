@@ -9,8 +9,8 @@ defmodule MealplanWeb.ConsentPage do
   `client_uri` and the scopes all come from the open registration endpoint. The
   app is generated `--no-html`, so there is no EEx auto-escaping to lean on;
   `e/1` below is the same five-character escape `src/auth/consent.ts` carried,
-  for the same reason it carried it — a template engine running outside the
-  sandbox in the process that holds the household's tokens is a bad trade for
+  for the same reason it carried it — a template engine running in the
+  process that holds the household's tokens is a bad trade for
   two paragraphs of markup. The redirect URI is shown as text, not as a link.
   """
 
@@ -18,7 +18,7 @@ defmodule MealplanWeb.ConsentPage do
 
   @doc """
   `opts` keys: `:consent_id`, `:client` (map), `:params` (map), `:phone`,
-  `:folder`, `:offer_kroger` (bool), `:kroger_connected` (bool).
+  `:household`, `:offer_kroger` (bool), `:kroger_connected` (bool).
   """
   def render(opts) do
     client = opts[:client]
@@ -81,13 +81,13 @@ defmodule MealplanWeb.ConsentPage do
     <div class="card">
     <h1>Let <strong>#{e(name)}</strong> into the meal plan?</h1>
 
-    <p class="warn">Approving gives this program a shell over your meal-plan folder:
-    it can read, change and delete every recipe and every meal. Everything it does
-    is committed, so it can be undone — but only if you notice.</p>
+    <p class="warn">Approving lets this program read, change and delete every recipe
+    and every meal in your meal plan. Everything it does is recorded, so it can be
+    undone — but only if you notice.</p>
 
     <dl>
       <dt>Signed in as</dt><dd>#{e(opts[:phone])}</dd>
-      <dt>Folder</dt><dd><code>#{e(opts[:folder])}</code></dd>
+      <dt>Meal plan</dt><dd><code>#{e(opts[:household])}</code></dd>
       <dt>Client id</dt><dd><code>#{e(client["client_id"])}</code></dd>
     #{website}  <dt>Sends you back to</dt><dd><code>#{e(params["redirect_uri"])}</code></dd>
       <dt>Asking for</dt><dd>#{scopes_text}</dd>

@@ -16,7 +16,7 @@ Feature: Planning the day's meals
   preference. Read "preferences/household.md" before writing a day.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
     And I have recorded the recipes:
       | name               | servings |
       | Chicken Tacos      | 4        |
@@ -39,7 +39,7 @@ Feature: Planning the day's meals
 
       - [Chicken Tacos](../recipes/chicken-tacos.md)
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the dinner on "2026-08-25" uses the recipe "Chicken Tacos"
 
   Scenario: Planning a main and a side
@@ -50,21 +50,17 @@ Feature: Planning the day's meals
 
   Scenario: Adding a side to a day already planned
     Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I run:
+    When I edit "meals/2026-08-25.md" replacing "- [Chicken Tacos](../recipes/chicken-tacos.md)" with:
       """
-      sed -i '/^- \[Chicken Tacos\]/a - [Garlic Green Beans](../recipes/garlic-green-beans.md)' meals/2026-08-25.md
-      mealplan validate
+      - [Chicken Tacos](../recipes/chicken-tacos.md)
+      - [Garlic Green Beans](../recipes/garlic-green-beans.md)
       """
     Then the command succeeds
     And the dinner on "2026-08-25" uses 2 recipes
 
   Scenario: Removing a recipe from a day
     Given I have planned dinner on "2026-08-25" with the recipes "Chicken Tacos" and "Garlic Green Beans"
-    When I run:
-      """
-      sed -i '/garlic-green-beans.md/d' meals/2026-08-25.md
-      mealplan validate
-      """
+    When I edit "meals/2026-08-25.md" removing the line "- [Garlic Green Beans](../recipes/garlic-green-beans.md)"
     Then the command succeeds
     And the dinner on "2026-08-25" uses 1 recipe
     And the dinner on "2026-08-25" uses the recipe "Chicken Tacos"
@@ -87,12 +83,12 @@ Feature: Planning the day's meals
 
       - [Chicken Tacos](../recipes/chicken-tacos.md)
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the dinner on "2026-08-25" serves 4
 
   Scenario: Planning a day with no cooking
     When I plan dinner on "2026-08-27" with no recipes and the note "Leftovers night."
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the dinner on "2026-08-27" uses 0 recipes
 
   Scenario: Planning several meals for one day
@@ -101,7 +97,7 @@ Feature: Planning the day's meals
       | Breakfast | Pancakes                            | 2        |
       | Lunch     | Chicken Tacos                       | 1        |
       | Dinner    | Sunday Pot Roast, Garlic Green Beans | 6        |
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the meal "Breakfast" on "2026-08-25" uses 1 recipe
     And the meal "Lunch" on "2026-08-25" uses 1 recipe
     And the meal "Dinner" on "2026-08-25" uses 2 recipes
@@ -122,7 +118,7 @@ Feature: Planning the day's meals
 
       - [Pancakes](../recipes/pancakes.md)
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the meal "Second Breakfast" on "2026-08-25" uses 1 recipe
 
   Scenario: One day per date, because the date is the filename
@@ -130,7 +126,7 @@ Feature: Planning the day's meals
     When I plan dinner on "2026-08-25" with the recipe "Sunday Pot Roast"
     Then the dinner on "2026-08-25" uses 1 recipe
     And the dinner on "2026-08-25" uses the recipe "Sunday Pot Roast"
-    And the meal-plan folder has 1 day document
+    And the meal plan has 1 day document
 
   Scenario: Reviewing the week
     Given I have planned the days:
@@ -138,7 +134,7 @@ Feature: Planning the day's meals
       | 2026-08-24 | Chicken Tacos                        |
       | 2026-08-26 | Sunday Pot Roast, Garlic Green Beans |
       | 2026-09-02 | Pancakes                             |
-    When I run "ls meals/"
+    When I list "meals"
     Then the output is:
       """
       2026-08-24.md
@@ -151,7 +147,7 @@ Feature: Planning the day's meals
       | date       | recipes          |
       | 2026-08-26 | Sunday Pot Roast |
       | 2026-09-02 | Pancakes         |
-    When I run "ls meals/2026-08-*.md"
+    When I list "meals/2026-08-*.md"
     Then the output is "meals/2026-08-26.md"
 
   Scenario: Seeing what the week holds without opening every file
@@ -159,25 +155,29 @@ Feature: Planning the day's meals
       | date       | recipes          |
       | 2026-08-24 | Chicken Tacos    |
       | 2026-08-26 | Sunday Pot Roast |
-    When I run "grep -H '^- \[' meals/*.md"
+    When I search "meals/*.md" for "^- \["
     Then the output is:
       """
-      meals/2026-08-24.md:- [Chicken Tacos](../recipes/chicken-tacos.md)
-      meals/2026-08-26.md:- [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
+      meals/2026-08-24.md:11:- [Chicken Tacos](../recipes/chicken-tacos.md)
+      meals/2026-08-26.md:11:- [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
       """
 
   Scenario: Days with nothing planned simply have no file
     Given I have planned dinner on "2026-08-24" with the recipe "Chicken Tacos"
-    When I run "ls meals/"
+    When I list "meals"
     Then the output is "2026-08-24.md"
 
   Scenario: Cancelling a day
     Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I run "rm meals/2026-08-25.md"
+    When I delete the document "meals/2026-08-25.md"
     Then the command succeeds
-    And the meal-plan folder has 0 day documents
+    And the meal plan has 0 day documents
 
-  Scenario: Planning a meal from a recipe we have not recorded
+  Scenario: Planning a meal from a recipe we have not recorded is refused
+    A day that links to a recipe the meal plan does not hold would fail the
+    shopping list later, at the worst moment. It is refused when it is written,
+    naming the missing recipe — record it first, or plan something else.
+
     When I write the file "meals/2026-08-25.md":
       """
       ---
@@ -190,17 +190,16 @@ Feature: Planning the day's meals
 
       - [Beef Wellington](../recipes/beef-wellington.md)
       """
-    And I run "mealplan validate"
     Then the command fails
     And the output says "recipes/beef-wellington.md" is missing
+    And the file "meals/2026-08-25.md" does not exist in the meal plan
 
-  Scenario: A day filed under something that is not a date
+  Scenario: A day filed under something that is not a date is refused
     When I write the file "meals/next-tuesday.md":
       """
       ---
       date: 2026-08-25
       ---
       """
-    And I run "mealplan validate"
     Then the command fails
     And the output says the filename is not a date

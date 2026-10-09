@@ -18,7 +18,7 @@ defmodule Mealplan.Household.Config do
   @path "config/household.md"
   def path, do: @path
 
-  @doc "The template a brand-new folder ships. Written once, never overwritten."
+  @doc "The template a brand-new meal plan ships. Written once, never overwritten."
   def document do
     """
     ---

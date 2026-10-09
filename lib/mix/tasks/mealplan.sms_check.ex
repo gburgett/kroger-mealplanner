@@ -43,8 +43,7 @@ defmodule Mix.Tasks.Mealplan.SmsCheck do
           Mix.raise("give exactly one telephone number, in E.164, for example +19722759023")
       end
 
-    # Only the HTTP client is needed — not the endpoint, the repo or the
-    # sandbox. Starting the whole app would bind a port and open a database
+    # Only the HTTP client is needed — not the endpoint or the repo. Starting the whole app would bind a port and open a database
     # for a single outbound call.
     {:ok, _} = Application.ensure_all_started(:req)
 

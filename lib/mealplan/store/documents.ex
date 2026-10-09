@@ -246,9 +246,9 @@ defmodule Mealplan.Store.Documents do
   end
 
   @doc """
-  The body `path` had right after `change_id`: `{:ok, body}`, `{:ok, nil}` when
-  that change (or the last one before it) deleted it, or `{:error, message}` when
-  the path did not exist yet at that change.
+  The body `path` had right after `change_id`: `{:ok, body}`, or `{:ok, nil}`
+  when it did not exist then — deleted by that change or an earlier one, or not
+  yet written. `{:error, message}` when there is no such change.
   """
   @spec body_at(integer(), String.t(), integer()) ::
           {:ok, String.t() | nil} | {:error, String.t()}
@@ -266,10 +266,10 @@ defmodule Mealplan.Store.Documents do
         {:error,
          "there is no change ##{change_id} in this meal plan. The history tool lists the changes and their numbers."}
 
+      # Before its first change the document did not exist: putting it back as
+      # it was then is deleting it.
       version == nil ->
-        {:error,
-         "\"#{path}\" did not exist yet at change ##{change_id}. " <>
-           "history with this path lists the changes that touched it."}
+        {:ok, nil}
 
       true ->
         {:ok, version.body}

@@ -1,27 +1,23 @@
 defmodule Mealplan.Recheck do
   @moduledoc """
   The weekly recheck job. Nobody is at the keyboard for this one — see ADR 0018
-  for why that changes how it is built, not just when it runs. Ported from
-  `src/jobs/recheck.ts`.
+  for why that changes how it is built, not just when it runs.
 
-  It opens the SAME sandbox `Mealplan.Sandbox.Session` the server opens, and
-  drives an LLM tool loop over the SAME `bash` / `read_file` / `write_file`
-  behaviour the MCP tools expose (`Mealplan.Mcp.Tools`). That is the one point
-  where "the same way the household's agent does it" and "no direct file
-  access" are the same requirement seen from two sides: this module never
-  touches a path inside the folder except through the session.
+  It drives an LLM tool loop over the SAME tools the household's own assistant
+  is served (`Mealplan.Mcp.DocumentTools`): `history`, `list_files`,
+  `read_file`, `grep`, `write_file` and `edit_file`. That is the one point
+  where "the same way the household's agent does it" and "no direct access to
+  the documents" are the same requirement seen from two sides: this module
+  never reads or writes a document except through those tools, so every write
+  it makes is checked by the parser and recorded like any other.
 
-  `run/1` opens its own session and closes it before returning, so a caller
-  never has to know the sandbox exists. `Mix.Tasks.Mealplan.Recheck` is the
-  Cucumber entry point; the Oban worker is the production one.
+  `Mix.Tasks.Mealplan.Recheck` is the command-line entry point; the scenarios
+  call `run/1` directly.
   """
 
-  alias Mealplan.Corpus.Tree
-  alias Mealplan.Git.Repository
-  alias Mealplan.Mcp.Tools
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Mcp.DocumentTools
+  alias Mealplan.Store.{Corpus, Documents}
 
-  # A folder untouched this long has nothing to reconsider.
   @stale_after_seconds 7 * 24 * 60 * 60
   # No household is present to say "that's enough" if the model loses the thread.
   @default_max_turns 8
@@ -33,13 +29,13 @@ defmodule Mealplan.Recheck do
   @commit_prefix "weekly recheck: "
 
   @task_instruction "Once a week you are asked one question: given " <>
-                      "pantry/consumables.md, the last week of this folder's git " <>
+                      "pantry/consumables.md, the last week of this meal plan's " <>
                       "history, and the meal plans and shopping lists that history " <>
                       "touched, which \"stocked\" consumables have probably run out " <>
                       "and should be marked \"needs recheck\"?\n\n" <>
-                      "Use bash and read_file to look at what changed: `git log " <>
-                      "--since=\"7 days ago\" --oneline`, the day documents and " <>
-                      "shopping lists that log names, and pantry/consumables.md " <>
+                      "Use history and read_file to look at what changed: the " <>
+                      "recent changes, the day documents and shopping lists they " <>
+                      "name, and pantry/consumables.md " <>
                       "itself. A consumable that shows up across several of the " <>
                       "week's meals and is still marked \"stocked\" is a candidate; " <>
                       "one that was just bought (a recent \"last bought\" date) " <>
@@ -47,86 +43,71 @@ defmodule Mealplan.Recheck do
                       "Your only job is deciding which items need a recheck. If you " <>
                       "find any, write the whole of pantry/consumables.md back with " <>
                       "those lines changed to \"needs recheck\", using write_file " <>
-                      "with a commit message describing what you changed and why. " <>
-                      "Touch nothing else in the folder. If nothing needs a " <>
+                      "with a message describing what you changed and why. " <>
+                      "Touch nothing else in the meal plan. If nothing needs a " <>
                       "recheck, say so and end your turn without calling a tool."
+
+  @tools ~w(history list_files read_file grep write_file edit_file)
 
   @doc """
   Run one weekly recheck.
 
   Options:
 
-    * `:folder` (required) — the meal-plan folder
+    * `:tenant` (required) — the household's slug
     * `:now` (required) — `DateTime` or an ISO 8601 string; the staleness gate
-      and every commit this job makes read it
-    * `:tenant` — the sandbox session tenant (default `"weekly-recheck"`)
+      and every change this job makes read it
     * `:llm_base` — the exe.dev LLM gateway (default `Mealplan.Config.llm_base/0`)
     * `:max_turns` — the loop ceiling (default #{@default_max_turns})
-    * `:image_root`, `:seccomp_filter` — passed through to the session
 
-  Returns a map mirroring `RecheckResult` in `src/jobs/recheck.ts`, keyed by
-  STRINGS in camelCase and ready for `Jason.encode!/1` as it stands:
+  Returns a map keyed by STRINGS in camelCase and ready for `Jason.encode!/1`:
   `"ran"`, `"skippedReason"`, `"exitCode"`, `"turnsUsed"`, `"gaveUp"`,
   `"toolCalls"` (each `%{"name", "input", "resultText", "isError"}`) and
   `"logLines"`.
   """
   def run(opts) do
-    folder = Keyword.fetch!(opts, :folder)
-    tenant = Keyword.get(opts, :tenant, "weekly-recheck")
+    tenant = Keyword.fetch!(opts, :tenant)
     llm_base = Keyword.get(opts, :llm_base) || Mealplan.Config.llm_base()
     now = normalise_now(Keyword.fetch!(opts, :now))
     max_turns = Keyword.get(opts, :max_turns, @default_max_turns)
 
-    session_opts =
-      # This unattended job holds one session across LLM turns that can each
-      # take a while; the ten-minute idle close (ADR 0035) is for a live agent,
-      # not for this, so disable it here.
-      [folder: folder, tenant: tenant, idle_timeout_ms: nil]
-      |> maybe_put(:image_root, Keyword.get(opts, :image_root))
-      |> maybe_put(:seccomp_filter, Keyword.get(opts, :seccomp_filter))
+    acc = %{log_lines: [], tool_calls: [], turns_used: 0, gave_up: false}
+    acc = debug(acc, "opening the meal plan of #{tenant}")
+    corpus = Corpus.open(tenant, now: now)
 
-    acc = %{
-      log_lines: [],
-      tool_calls: [],
-      turns_used: 0,
-      gave_up: false
-    }
-
-    acc = debug(acc, "opening the sandbox over #{folder}")
-    {:ok, session} = Session.start_link(session_opts)
-
-    try do
-      recheck(session, %{llm_base: llm_base, now: now, max_turns: max_turns}, acc)
-    after
-      Session.close(session)
-    end
+    recheck(corpus, %{llm_base: llm_base, now: now, max_turns: max_turns}, acc)
   end
 
-  defp recheck(session, cfg, acc) do
-    # Every git command runs inside the sandbox — src/git/repository.ts states
-    # why, and the reason (a planted hook or filter in the bind-mounted .git)
-    # applies as much to a check that runs before anything else does.
-    head = Session.run(session, "git log -1 --format=%ct 2>/dev/null")
-    last = head.stdout |> String.trim() |> parse_epoch()
-    age = DateTime.to_unix(cfg.now) - last
+  defp recheck(corpus, cfg, acc) do
+    last = Documents.last_change_at(corpus.tenant_id)
+    age = if last, do: DateTime.diff(cfg.now, last), else: nil
 
-    if last == 0 or age > @stale_after_seconds do
+    if last == nil or age > @stale_after_seconds do
       reason =
-        if last == 0 do
-          "the folder has no commits yet"
+        if last == nil do
+          "the meal plan has no changes yet"
         else
-          "the folder has not changed in #{age_days(age)} days"
+          "the meal plan has not changed in #{age_days(age)} days"
         end
 
       acc = debug(acc, "#{reason}; nothing to reconsider, exiting without asking a model")
       finish(acc, ran: false, skipped_reason: reason, exit_code: 0)
     else
-      acc = debug(acc, "the folder changed within the last week; asking the model")
-      system = build_system_prompt(session)
-      tools = tool_schemas()
-      messages = [%{"role" => "user", "content" => [%{"type" => "text", "text" => @task_instruction}]}]
+      acc = debug(acc, "the meal plan changed within the last week; asking the model")
 
-      ctx = %{session: session, now: cfg.now, llm_base: cfg.llm_base, max_turns: cfg.max_turns, system: system, tools: tools}
+      messages = [
+        %{"role" => "user", "content" => [%{"type" => "text", "text" => @task_instruction}]}
+      ]
+
+      ctx = %{
+        corpus: corpus,
+        now: cfg.now,
+        llm_base: cfg.llm_base,
+        max_turns: cfg.max_turns,
+        system: build_system_prompt(corpus),
+        tools: DocumentTools.llm_schemas(@tools)
+      }
+
       acc = turn_loop(ctx, messages, acc)
 
       acc =
@@ -139,8 +120,6 @@ defmodule Mealplan.Recheck do
       finish(acc, ran: true, exit_code: if(acc.gave_up, do: 1, else: 0))
     end
   end
-
-  # --- the loop ----------------------------------------------------------
 
   defp turn_loop(ctx, _messages, acc) when acc.turns_used >= ctx.max_turns do
     error(
@@ -204,77 +183,35 @@ defmodule Mealplan.Recheck do
       {:error, message} ->
         # `callLlm` threw on a non-2xx answer in the TypeScript job, and the
         # loop was not wrapped, so it propagated out. Mirror that: crash the
-        # run. The `after` clause still closes the session.
+        # run. Nothing is left open: there is no session to close.
         raise message
     end
   end
 
   # --- one tool call, the SAME behaviour the MCP tools expose --------------
 
-  defp run_one_tool(ctx, "bash", input) do
-    result = Session.run(ctx.session, input["command"] || "")
-    _ = Session.commit_if_changed(ctx.session, @commit_prefix <> (input["message"] || ""), ctx.now)
-    {Tools.render_bash_result(result), result.exit_code != 0}
-  end
+  # Only the tools this job was handed, and every write is marked as the job's,
+  # so a household reading history can tell its edits from the job's.
+  defp run_one_tool(ctx, name, input) when name in @tools do
+    input = if is_map(input), do: input, else: %{}
 
-  defp run_one_tool(ctx, "read_file", input) do
-    case Session.read_corpus(ctx.session, input["path"] || "") do
-      {:ok, content} -> {content, false}
-      {:error, message} -> {message, true}
-    end
-  end
+    input =
+      if Map.has_key?(input, "message"),
+        do: Map.update!(input, "message", &(@commit_prefix <> to_string(&1))),
+        else: input
 
-  defp run_one_tool(ctx, "write_file", input) do
-    path = input["path"] || ""
-
-    case Session.write_corpus(ctx.session, path, input["content"] || "") do
-      {:ok, bytes} ->
-        _ =
-          Session.commit_if_changed(
-            ctx.session,
-            @commit_prefix <> (input["message"] || ""),
-            ctx.now
-          )
-
-        {"wrote #{bytes} bytes to #{path}", false}
-
-      {:error, message} ->
-        {message, true}
-    end
+    result = DocumentTools.call(name, input, ctx.corpus, ctx.now)
+    text = result["content"] |> Enum.map_join("\n", & &1["text"])
+    {text, result["isError"] == true}
   end
 
   defp run_one_tool(_ctx, name, _input), do: {~s(there is no tool called "#{name}"), true}
 
-  # --- context for the model -------------------------------------------
-
-  defp build_system_prompt(session) do
-    tree = Tree.render(session)
-    history = Repository.recent_history(session)
-
-    "#{tree}\n\n#{history}\n\n" <>
-      "You are the meal planner's weekly recheck job, not the household's own " <>
+  defp build_system_prompt(corpus) do
+    DocumentTools.open_text(corpus) <>
+      "\n\nYou are the meal planner's weekly recheck job, not the household's own " <>
       "assistant. Nobody is watching this run; end your turn once you have made " <>
       "whatever decision the task below asks for."
-  end
-
-  defp tool_schemas do
-    [
-      %{
-        "name" => "bash",
-        "description" => Tools.bash_description(),
-        "input_schema" => Tools.bash_input_schema()
-      },
-      %{
-        "name" => "read_file",
-        "description" => Tools.read_file_description(),
-        "input_schema" => Tools.read_file_input_schema()
-      },
-      %{
-        "name" => "write_file",
-        "description" => Tools.write_file_description(),
-        "input_schema" => Tools.write_file_input_schema()
-      }
-    ]
   end
 
   # --- result + logging ------------------------------------------------
@@ -312,22 +249,10 @@ defmodule Mealplan.Recheck do
     dt
   end
 
-  defp parse_epoch(""), do: 0
-
-  defp parse_epoch(text) do
-    case Integer.parse(text) do
-      {n, _} -> n
-      :error -> 0
-    end
-  end
-
   defp age_days(age_seconds) do
     :erlang.float_to_binary(age_seconds / 86_400, decimals: 1)
   end
 
   defp plural(1, word), do: word
   defp plural(_, word), do: word <> "s"
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 end

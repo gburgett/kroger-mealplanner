@@ -523,7 +523,8 @@ defmodule Mealplan.Mcp.DocumentTools do
 
   defp run("validate", args, corpus, _now) do
     with {:ok, path} <- optional_path(args["path"]),
-         {:ok, result} <- Corpus.run_cli(corpus, ["validate" | List.wrap(path)]) do
+         {:ok, result} <-
+           Corpus.run_cli(corpus, ["validate" | Corpus.changed_args(corpus)] ++ List.wrap(path)) do
       text = String.trim(result.stdout <> result.stderr)
       if result.exit_code == 0, do: {:ok, text}, else: {:error, text}
     end
@@ -653,7 +654,7 @@ defmodule Mealplan.Mcp.DocumentTools do
 
     case Task.yield(task, @grep_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, []} ->
-        {:ok, ~s(no line matches "#{pattern}".), %{"matches" => []}}
+        {:ok, "no line matches the pattern.", %{"matches" => []}}
 
       {:ok, hits} when files_only ->
         paths = hits |> Enum.map(&elem(&1, 0)) |> Enum.uniq()

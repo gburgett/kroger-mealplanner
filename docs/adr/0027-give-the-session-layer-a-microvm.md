@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: superseded by ADR-0039
 date: 2026-09-05
 decision-makers: gburgett
 consulted: docs/multi-tenant-isolation-trade-study.md §8–§10, docs/agent-runtime-spike.md, ADR 0005, ADR 0006, ADR 0008, ADR 0021, ADR 0022, microsandbox 0.6.14 (`msb --help`, `msb doctor`)

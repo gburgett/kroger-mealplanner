@@ -4,11 +4,10 @@ defmodule Mealplan.Shopping.Tools do
   (`findProducts`, `sendToCart`, `findStores`, `findWalmartProducts`,
   `buildCartLink`) and their renderers from `src/mcp/server.ts`.
 
-  Each works on ONE document in `shopping-lists/`, read and written through the
-  sandbox session so "cannot reach outside the folder" has the shape
-  `read_file` already has. The write and its commit are one session message
-  (`write_and_commit` / `transaction`), so they stay atomic against a racing
-  bash command.
+  Each works on ONE document in `shopping-lists/`, read and written through
+  `Mealplan.Store`, so "cannot reach outside the meal plan" has the shape
+  `read_file` already has. A send that writes the list and the pantry does it
+  in one `transaction`, so it is recorded as one change.
 
   A refusal is raised as `Refusal` (or a `Mealplan.Kroger.Api.*` /
   `Mealplan.Walmart.Api.*` exception) and turned into an ordinary tool result
@@ -16,8 +15,8 @@ defmodule Mealplan.Shopping.Tools do
   """
 
   alias Mealplan.Shopping.List
-  alias Mealplan.Sandbox.Session
   alias Mealplan.Store
+  alias Mealplan.Store.Corpus
   alias Mealplan.Kroger
   alias Mealplan.Walmart
   alias Mealplan.Retail.Query
@@ -33,10 +32,10 @@ defmodule Mealplan.Shopping.Tools do
 
   # --- kroger_find_products ---------------------------------------------
 
-  def find_products(session, now, kroger, requested, message, base_url) do
+  def find_products(corpus, now, kroger, requested, message, base_url) do
     if is_nil(kroger), do: raise(Kroger.Api.NotConfiguredError.new())
 
-    config = Kroger.Config.read(session)
+    config = Kroger.Config.read(corpus)
 
     if config.store == "" do
       raise Refusal.exception(
@@ -45,9 +44,9 @@ defmodule Mealplan.Shopping.Tools do
             )
     end
 
-    before = read_corpus!(session, requested)
+    before = read_corpus!(corpus, requested)
     list = List.parse(requested, before)
-    items = structure_by_line(session, list.front, requested)
+    items = structure_by_line(corpus, list.front, requested)
 
     search_fn = fn term ->
       if String.trim(term) == "" do
@@ -73,7 +72,7 @@ defmodule Mealplan.Shopping.Tools do
     end
 
     result = match_products(before, list, items, search_fn, to_candidate)
-    write_and_commit!(session, requested, result.text, message, now)
+    write_and_commit!(corpus, requested, result.text, message, now)
 
     %{
       path: requested,
@@ -85,14 +84,14 @@ defmodule Mealplan.Shopping.Tools do
 
   # --- kroger_send_to_cart --------------------------------------------
 
-  def send_to_cart(session, now, kroger, requested, message, only, base_url) do
+  def send_to_cart(corpus, now, kroger, requested, message, only, base_url) do
     if is_nil(kroger), do: raise(Kroger.Api.NotConfiguredError.new())
 
     unless Kroger.Store.connected?(kroger.tenant_id) do
       raise Kroger.Api.NotLinkedError.new(base_url || kroger.public_url)
     end
 
-    before = read_corpus!(session, requested)
+    before = read_corpus!(corpus, requested)
     list = List.parse(requested, before)
 
     needs_check = Enum.filter(list.items, &String.ends_with?(&1.text, @check_mark))
@@ -108,7 +107,7 @@ defmodule Mealplan.Shopping.Tools do
             )
     end
 
-    config = Kroger.Config.read(session)
+    config = Kroger.Config.read(corpus)
     {sending, sending_lines, skipped} = collect_sending(list, only, requested)
 
     cond do
@@ -125,9 +124,9 @@ defmodule Mealplan.Shopping.Tools do
         )
 
         after_text = List.append_sent(before, sending, now)
-        updated_consumables = mark_consumables(session, sending_lines, now)
+        updated_consumables = mark_consumables(corpus, sending_lines, now)
 
-        Store.transaction(session, fn ctx ->
+        Store.transaction(corpus, fn ctx ->
           {:ok, _} = ctx.write_corpus.(requested, after_text)
 
           if updated_consumables do
@@ -237,15 +236,15 @@ defmodule Mealplan.Shopping.Tools do
                 "\n\nNothing has been sent. Read the \"## Sent\" section of the file — it says " <>
                 "what went, and when. To put one product back that the household deleted in " <>
                 "the Kroger app, send that UPC on its own with \"items\". To shop another week, " <>
-                "write a new list with \"mealplan shopping-list --from DATE --to DATE --out <path>\"."
+                "write a new list with shopping_list and \"out\"."
             )
     end
 
     :ok
   end
 
-  defp mark_consumables(session, sending_lines, now) do
-    case Store.read_corpus(session, "pantry/consumables.md") do
+  defp mark_consumables(corpus, sending_lines, now) do
+    case Store.read_corpus(corpus, "pantry/consumables.md") do
       {:ok, current} ->
         marked = Kroger.Consumables.mark_bought(current, sending_lines, now)
         if marked != current, do: marked, else: nil
@@ -278,12 +277,12 @@ defmodule Mealplan.Shopping.Tools do
 
   # --- walmart_find_products --------------------------------------
 
-  def find_walmart_products(session, now, walmart, requested, message) do
+  def find_walmart_products(corpus, now, walmart, requested, message) do
     if is_nil(walmart), do: raise(Walmart.Api.NotConfiguredError.new())
 
-    before = read_corpus!(session, requested)
+    before = read_corpus!(corpus, requested)
     list = List.parse(requested, before)
-    items = structure_by_line(session, list.front, requested)
+    items = structure_by_line(corpus, list.front, requested)
 
     search_fn = fn term ->
       if String.trim(term) == "" do
@@ -305,7 +304,7 @@ defmodule Mealplan.Shopping.Tools do
     end
 
     result = match_products(before, list, items, search_fn, to_candidate)
-    write_and_commit!(session, requested, result.text, message, now)
+    write_and_commit!(corpus, requested, result.text, message, now)
 
     %{
       path: requested,
@@ -317,10 +316,10 @@ defmodule Mealplan.Shopping.Tools do
 
   # --- walmart_cart_link ----------------------------------------
 
-  def build_cart_link(session, now, walmart, requested, message, only) do
+  def build_cart_link(corpus, now, walmart, requested, message, only) do
     if is_nil(walmart), do: raise(Walmart.Api.NotConfiguredError.new())
 
-    before = read_corpus!(session, requested)
+    before = read_corpus!(corpus, requested)
     list = List.parse(requested, before)
 
     needs_check = Enum.filter(list.items, &String.ends_with?(&1.text, @check_mark))
@@ -347,7 +346,7 @@ defmodule Mealplan.Shopping.Tools do
                 "#{Walmart.Api.max_link_items()}. Link fewer at a time."
 
       true ->
-        config = Walmart.Config.read(session)
+        config = Walmart.Config.read(corpus)
 
         store =
           if config.store != "" do
@@ -367,7 +366,7 @@ defmodule Mealplan.Shopping.Tools do
           )
 
         after_text = List.append_cart_link(before, url, now)
-        write_and_commit!(session, requested, after_text, message, now)
+        write_and_commit!(corpus, requested, after_text, message, now)
 
         %{path: requested, url: url, items: linking, skipped: skipped}
     end
@@ -445,35 +444,25 @@ defmodule Mealplan.Shopping.Tools do
 
   # The list, as structure, from `mealplan shopping-list --json` — the seam
   # ADR 0010 defends. Keyed by the rendered line, which is the anchor text.
-  defp structure_by_line(session, front, requested) do
+  defp structure_by_line(corpus, front, requested) do
     from = Map.get(front, "from", "")
     to = Map.get(front, "to", "")
 
     unless date?(from) and date?(to) do
       raise Refusal.exception(
               "#{requested}: the front matter needs \"from:\" and \"to:\" as dates, written as " <>
-                "YYYY-MM-DD. Write the list with \"mealplan shopping-list --from DATE --to DATE " <>
-                "--out #{requested}\"."
+                "YYYY-MM-DD. Write the list with shopping_list, giving \"from\", \"to\" and " <>
+                "\"out\": #{requested}."
             )
     end
 
-    # Via a file rather than straight down stdout, because the exit status has to
-    # survive and a shell pipeline would lose it.
-    #
-    # `${TMPDIR:-/tmp}`, never a literal `/tmp`. Under bubblewrap the two are the
-    # same thing — a private `--tmpfs /tmp` that goes when the sandbox goes — but
-    # in host mode a literal `/tmp` is the machine's real one, shared with every
-    # other command on it. That wrote one fixed path, `/tmp/mealplan-list.json`,
-    # which two runs at once would read out of each other's hands, and which
-    # nothing ever removed. TMPDIR is this command's own directory in host mode
-    # (Mealplan.Sandbox.Scratch), so the file is private and goes with it; `$$`
-    # keeps two commands in one sandbox apart as well.
-    command =
-      ~s(f="${TMPDIR:-/tmp}/mealplan-list-$$.json"; ) <>
-        "mealplan shopping-list --from #{from} --to #{to} --json > \"$f\" 2>&1; " <>
-        ~s(status=$?; cat "$f"; rm -f "$f"; exit $status)
-
-    result = derive_list(session, command, ["shopping-list", "--from", from, "--to", to, "--json"])
+    # The parser over the household's documents, with a fixed argument vector
+    # (ADR 0038): no shell, and the exit status arrives as it is.
+    result =
+      case Corpus.run_cli(corpus, ["shopping-list", "--from", from, "--to", to, "--json"]) do
+        {:ok, result} -> result
+        {:error, message} -> %{stdout: "", stderr: message, exit_code: 1}
+      end
 
     if result.exit_code != 0 do
       raise Refusal.exception(
@@ -509,18 +498,6 @@ defmodule Mealplan.Shopping.Tools do
        }}
     end)
   end
-
-  # A folder tenant runs the command in its sandbox. A document tenant runs the
-  # same parser over its documents with a fixed argument vector (ADR 0038), so
-  # there is no shell and no file to pass the status through.
-  defp derive_list(%Mealplan.Store.Corpus{} = corpus, _command, args) do
-    case Mealplan.Store.Corpus.run_cli(corpus, args) do
-      {:ok, result} -> Map.take(result, [:stdout, :stderr, :exit_code])
-      {:error, message} -> %{stdout: "", stderr: message, exit_code: 1}
-    end
-  end
-
-  defp derive_list(session, command, _args) when is_pid(session), do: Session.run(session, command)
 
   # The search loop shared by kroger_find_products and walmart_find_products.
   # `search_fn` runs one retailer search and returns a product list; `to_candidate`
@@ -636,15 +613,15 @@ defmodule Mealplan.Shopping.Tools do
     |> Map.new()
   end
 
-  defp read_corpus!(session, path) do
-    case Store.read_corpus(session, path) do
+  defp read_corpus!(corpus, path) do
+    case Store.read_corpus(corpus, path) do
       {:ok, text} -> text
       {:error, message} -> raise Refusal.exception(message)
     end
   end
 
-  defp write_and_commit!(session, path, content, message, now) do
-    case Store.write_and_commit(session, path, content, message, now) do
+  defp write_and_commit!(corpus, path, content, message, now) do
+    case Store.write_and_commit(corpus, path, content, message, now) do
       {:ok, _bytes} -> :ok
       {:error, message} -> raise Refusal.exception(message)
     end

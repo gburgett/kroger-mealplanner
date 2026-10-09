@@ -8,7 +8,7 @@ defmodule MealplanWeb.KrogerPages do
   function below is untouched.
 
   Plain HTML in heredocs, for the reason `MealplanWeb.ConsentPage` gives: a
-  template engine that renders strings, running outside the sandbox in the
+  template engine that renders strings, running in the
   process that holds the household's credentials, is a bad trade for three
   pages of markup. `e/1` is the same five-character escape.
 
@@ -118,8 +118,8 @@ defmodule MealplanWeb.KrogerPages do
         <dt>Store</dt><dd>#{if store, do: e(store.name), else: "not chosen yet"}</dd>
       #{address_row}  <dt>Collected by</dt><dd>#{e((store && store.modality) || "pickup")}</dd>
       </dl>
-      <p class="quiet">The store is written in <code>config/kroger.md</code>, in the
-      meal-plan folder. The credential is not, and cannot be reached from there.</p>
+      <p class="quiet">The store is written in <code>config/kroger.md</code>, in your
+      meal plan. The credential is not, and cannot be reached from there.</p>
       <form method="get" action="/kroger/store" class="row">
         <button type="submit">Change store</button>
       </form>
@@ -214,8 +214,8 @@ defmodule MealplanWeb.KrogerPages do
       """
       <h1>Kroger is connected</h1>
       <p>The shopping will be matched against <strong>#{e(store.name)}</strong>#{address_part}, for #{e(store.modality)}.</p>
-      <p class="quiet">It is written in <code>config/kroger.md</code> in the meal-plan
-      folder, where you and the assistant can both read it.</p>
+      <p class="quiet">It is written in <code>config/kroger.md</code> in your meal
+      plan, where you and the assistant can both read it.</p>
       <p>You can close this page.</p>\
       """
     )

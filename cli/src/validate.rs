@@ -3,15 +3,16 @@
 //! Reports EVERY problem, not the first. An agent that fixes one thing and is
 //! told about the next one is doing the validator's bookkeeping for it.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::corpus::{check_servings, load, Corpus};
 use crate::json;
 use crate::quantity::to_display_number;
 
-pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
+pub fn run(root: &Path, only: Option<&str>, as_json: bool, changed: Option<&HashSet<String>>) -> i32 {
     let mut corpus = load(root, only);
-    check_servings(&mut corpus);
+    check_servings(&mut corpus, changed);
 
     if as_json {
         println!("{}", describe(&corpus));

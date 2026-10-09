@@ -132,10 +132,3 @@ Feature: The household signs in with a code sent to their telephone
     When the household asks for a code for "+15095550142"
     Then the page that comes back does not hold the code
     And the log does not hold the code
-
-  @security
-  Scenario: The core is not reachable from the sandbox
-    Given the household has approved a client
-    When the client runs "curl -s https://st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io/hello"
-    Then the command fails
-    And no answer from the core reaches the agent

@@ -4,10 +4,10 @@ Feature: The meal plan is documents in the database, behind file verbs
   I want to list, read, search and write the meal plan's documents
   So that I can plan the week the way I explore a repository, with no shell
 
-  ADR 0038. A household whose meal plan is stored as documents has the same
-  layout, the same paths and the same markdown as a folder — README.md is still
-  the schema — but no shell. The agent gets file verbs instead: list_files,
-  read_file, grep, write_file, edit_file, delete_file, history and
+  ADR 0038, ADR 0039. A household's meal plan is documents in the server's
+  database, with the layout, the paths and the markdown a folder had — README.md
+  is still the schema — but no shell. The agent gets file verbs instead:
+  list_files, read_file, grep, write_file, edit_file, delete_file, history and
   restore_file, plus validate and shopping_list, which run the `mealplan`
   parser over the documents.
 
@@ -20,10 +20,7 @@ Feature: The meal plan is documents in the database, behind file verbs
   it is stored, naming the line. The folder found that drift after the fact;
   the document store never holds it.
 
-  Background:
-    Given the household's meal plan is stored as documents
-
-  Scenario: A document household is offered file verbs, not a shell
+  Scenario: The household is offered file verbs, not a shell
     Then the tools offered include "list_files", "read_file", "grep", "write_file" and "edit_file"
     And the tools offered include "delete_file", "history", "restore_file", "validate" and "shopping_list"
     And the tools offered do not include "bash" or "close"
@@ -226,15 +223,6 @@ Feature: The meal plan is documents in the database, behind file verbs
     Then the tool call succeeds
     And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "`0001111000123` Kroger Boneless Chicken Thighs"
 
-  Scenario: A household moving from a folder brings its folder along
-    Given the household's folder holds the recipe "Sunday Pot Roast" serving 6
-    And the household's meal plan moves from its folder to documents
-    When I call "read_file" for "recipes/sunday-pot-roast.md"
-    Then the tool call succeeds
-    And the output mentions "name: Sunday Pot Roast"
-    When I call "history"
-    Then the output mentions "import "
-
   @security
   Scenario Outline: A path cannot leave the household's meal plan
     When I call "read_file" for "<path>"
@@ -274,14 +262,3 @@ Feature: The meal plan is documents in the database, behind file verbs
     And the output does not contain "secret-stew.md"
     When I call "list_files" with the path "recipes"
     Then the output does not contain "secret-stew"
-
-  @security
-  Scenario: Nothing the agent writes is put on disk in the household's folder
-    When I write the document "pantry/staples.md" with the message "staples":
-      """
-      # Staples
-
-      - salt
-      """
-    Then the tool call succeeds
-    And the household's folder on disk has no "pantry/staples.md"

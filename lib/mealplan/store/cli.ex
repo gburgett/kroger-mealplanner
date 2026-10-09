@@ -16,7 +16,7 @@ defmodule Mealplan.Store.Cli do
   server holds reaches the child even by accident.
   """
 
-  alias Mealplan.Sandbox.Scratch
+  alias Mealplan.Store.Scratch
 
   @timeout_ms 15_000
 
@@ -43,12 +43,10 @@ defmodule Mealplan.Store.Cli do
           {:ok, result()} | {:error, String.t()}
   def run(documents, args, opts \\ []) do
     with {:ok, binary} <- binary() do
-      dir = Path.join(Scratch.root(), "documents-#{System.unique_integer([:positive])}")
+      dir = Scratch.command_dir!()
       stderr_path = dir <> ".stderr"
 
       try do
-        File.mkdir_p!(dir)
-
         for {path, body} <- documents do
           full = Path.join(dir, path)
           File.mkdir_p!(Path.dirname(full))
@@ -104,16 +102,14 @@ defmodule Mealplan.Store.Cli do
   @doc """
   Where the `mealplan` binary is, or `{:error, message}` naming what to build.
 
-  `MEALPLAN_CLI_PATH` names its directory, as host mode reads it. Otherwise the
-  cargo release directory, then the copy `cli/build.sh` stages into the sandbox
-  image — the binary is static, so that copy runs on the host as well.
+  `MEALPLAN_CLI_PATH` names its directory. Otherwise the cargo release
+  directory `./cli/build.sh` builds into.
   """
   @spec binary() :: {:ok, String.t()} | {:error, String.t()}
   def binary do
     candidates = [
       System.get_env("MEALPLAN_CLI_PATH"),
-      "cli/target/x86_64-unknown-linux-musl/release",
-      "sandbox-image/rootfs/usr/bin"
+      "cli/target/x86_64-unknown-linux-musl/release"
     ]
 
     candidates

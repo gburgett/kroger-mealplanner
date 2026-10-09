@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; the folder store and MEALPLAN_STORE superseded by ADR-0039
 date: 2026-10-09
 decision-makers: gburgett
 consulted: ADR 0006, ADR 0007, ADR 0008, ADR 0010, ADR 0027, ADR 0031, ADR 0033, ADR 0035, docs/sandbox-trade-study.md, docs/multi-tenant-isolation-trade-study.md

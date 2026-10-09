@@ -6,9 +6,9 @@ defmodule Mealplan.Features.KrogerSteps do
   third-party API this project mocks — see `Mealplan.Mock.Kroger`.
 
   EVERYTHING ELSE IS REAL. A `When` that finds products goes through the real
-  tool handler, which runs `mealplan shopping-list --json` in the real sandbox,
-  makes a real HTTP request over a real socket, and commits the result to the
-  real git repository. A `Then` reads the file that ended up on disk, or the
+  tool handler, which runs the real `mealplan` parser over the household's
+  documents, makes a real HTTP request over a real socket, and records the
+  result as a change. A `Then` reads the document that was stored, or the
   mock's record of what was sent — which is the only record there can be,
   because Kroger's cart cannot be read back.
   """
@@ -17,6 +17,7 @@ defmodule Mealplan.Features.KrogerSteps do
 
   import ExUnit.Assertions
 
+  alias Mealplan.FeatureCorpus
   alias Mealplan.Kroger.{Config, Store}
   alias Mealplan.Features.BrowserSteps, as: Browser
   alias Mealplan.Mcp.Tools
@@ -173,11 +174,18 @@ defmodule Mealplan.Features.KrogerSteps do
      })}
   end
 
-  step "I try to read the Kroger token store through the bash tool", context do
-    # Knowing the path is not the protection. The store is a database row that
-    # the sandbox has no client, no socket and no credential to reach — three
-    # independent reasons before the mount namespace is counted.
-    {:ok, run_bash(context, "cat #{Store.__schema__(:source)} 2>&1 || true")}
+  step "I try to read the Kroger token store by its name", context do
+    # Knowing the name is not the protection. A path names a document of this
+    # household's and nothing else (ADR 0038); the store is a table of server
+    # state that no tool reads.
+    {:ok, FeatureCorpus.call(context, "read_file", %{"path" => Store.__schema__(:source)})}
+  end
+
+  step "I search the whole meal plan for the Kroger access token", context do
+    held = Store.tokens(tenant_id(context))
+    assert held, "no Kroger token is held, so this scenario proves nothing"
+
+    {:ok, FeatureCorpus.call(context, "grep", %{"pattern" => Regex.escape(held.access_token)})}
   end
 
   # --- what the list says ----------------------------------------------------
@@ -408,7 +416,10 @@ defmodule Mealplan.Features.KrogerSteps do
   step "the meal planner refuses, and names the Kroger endpoint and a readable reason",
        context do
     why = refusal(context)
-    assert String.valid?(why), "the refusal is not valid text, so sending it back would crash:\n#{inspect(why)}"
+
+    assert String.valid?(why),
+           "the refusal is not valid text, so sending it back would crash:\n#{inspect(why)}"
+
     assert Regex.match?(~r{/v1/products}, why), "the refusal names no endpoint:\n#{why}"
     assert Regex.match?(~r/answered 503/, why), "the refusal names no status:\n#{why}"
 
@@ -443,21 +454,13 @@ defmodule Mealplan.Features.KrogerSteps do
     assert held, "no Kroger token is held, so this scenario proves nothing"
 
     refute String.contains?(output(context), held.access_token),
-           "the Kroger access token is readable from the sandbox"
+           "the Kroger access token is readable through the tools"
 
     if held.refresh_token do
       refute String.contains?(output(context), held.refresh_token),
-             "the Kroger refresh token is readable from the sandbox"
+             "the Kroger refresh token is readable through the tools"
     end
 
-    {:ok, context}
-  end
-
-  step "the output does not contain the Kroger client secret", context do
-    refute String.contains?(output(context), Kroger.client_secret()),
-           "the Kroger client secret is readable from inside the sandbox"
-
-    refute String.contains?(output(context), "KROGER_CLIENT_SECRET"), "even the name leaked in"
     {:ok, context}
   end
 
@@ -601,11 +604,14 @@ defmodule Mealplan.Features.KrogerSteps do
     {:ok, context}
   end
 
-  step "the store was committed to the meal plan's history", context do
-    context = run_bash(context, "git log --oneline -20")
+  step "the store was recorded in the meal plan's history", context do
+    messages =
+      tenant_id(context)
+      |> then(&Mealplan.Store.Documents.history(&1, "config/kroger.md", 20))
+      |> Enum.map(& &1.message)
 
-    assert Regex.match?(~r/kroger: shop at/, context.last.stdout),
-           "the store was never committed:\n#{context.last.stdout}"
+    assert Enum.any?(messages, &Regex.match?(~r/kroger: shop at/, &1)),
+           "the store was never recorded:\n#{Enum.join(messages, "\n")}"
 
     {:ok, context}
   end
@@ -635,30 +641,6 @@ defmodule Mealplan.Features.KrogerSteps do
       context[:kroger_callback_url] || flunk("no Kroger callback has happened in this scenario")
 
     {:ok, Browser.visit(context, url)}
-  end
-
-  step "the Kroger token store is outside the meal-plan folder", context do
-    # It is a database row, in the SQLite file the server state lives in
-    # (ADR 0024). This credential is held IN THE CLEAR — it is replayed to
-    # Kroger, so it cannot be hashed — which makes where the file sits the whole
-    # defence. Check the path first, then that the folder holds nothing that
-    # looks like the credential.
-    database = Path.expand(Mealplan.Config.database())
-    folder = Path.expand(context.folder)
-
-    refute database == folder or String.starts_with?(database, folder <> "/"),
-           "the state database is inside the meal-plan folder:\n#{database}"
-
-    held = Store.tokens(tenant_id(context))
-    assert held, "no Kroger token is held, so this scenario proves nothing"
-
-    context =
-      run_bash(context, "grep -rl #{shell_quote(held.access_token)} . 2>/dev/null || true")
-
-    assert String.trim(context.last.stdout) == "",
-           "the Kroger credential is inside the folder, which the agent can read:\n#{context.last.stdout}"
-
-    {:ok, context}
   end
 
   # --- what the agent can find out about linking -----------------------------
@@ -814,8 +796,6 @@ defmodule Mealplan.Features.KrogerSteps do
   defp query_of(%URI{query: nil}), do: %{}
   defp query_of(%URI{query: query}), do: URI.decode_query(query)
 
-  defp shell_quote(word), do: "'" <> String.replace(word, "'", "'\\''") <> "'"
-
   # --- the tools -------------------------------------------------------------
 
   defp find_products(context, target) do
@@ -842,25 +822,6 @@ defmodule Mealplan.Features.KrogerSteps do
     })
   end
 
-  defp run_bash(context, command) do
-    {:ok, response} =
-      Tools.call(
-        "bash",
-        %{"command" => command, "message" => "bash #{command}"},
-        context.tenant,
-        context.now
-      )
-
-    structured = response["structuredContent"] || %{}
-
-    Map.put(context, :last, %{
-      stdout: Map.get(structured, "stdout", ""),
-      stderr: Map.get(structured, "stderr", ""),
-      exit_code: Map.get(structured, "exitCode", 0),
-      text: response |> Map.get("content", []) |> Enum.map_join("\n", &Map.get(&1, "text", ""))
-    })
-  end
-
   defp write_file(context, path, content) do
     {:ok, response} =
       Tools.call(
@@ -877,20 +838,16 @@ defmodule Mealplan.Features.KrogerSteps do
   defp write_list(context, from, to) do
     target = "shopping-lists/#{from}--#{to}.md"
 
-    context =
-      run_bash(context, "mealplan shopping-list --from #{from} --to #{to} --out #{target}")
-
-    assert context.last.exit_code == 0,
-           "writing the list failed:\n#{context.last.stdout}#{context.last.stderr}"
-
-    Map.put(context, :list_path, target)
+    context
+    |> FeatureCorpus.write_list(from, to, target)
+    |> Map.put(:list_path, target)
   end
 
   # --- reading it back -------------------------------------------------------
 
   defp list_path(context), do: context[:list_path] || @list
 
-  defp list_text(context), do: File.read!(Path.join(context.folder, list_path(context)))
+  defp list_text(context), do: FeatureCorpus.read!(context, list_path(context))
 
   defp section(context, heading) do
     document = list_text(context)

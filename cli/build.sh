@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build the mealplan command as one static musl binary, per ADR 0007, and stage
-# it into the sandbox image.
+# Build the mealplan command as one static musl binary, per ADR 0007. The server
+# runs it from here, over a temporary copy of a household's documents
+# (ADR 0038); MEALPLAN_CLI_PATH can point somewhere else.
 #
 #   ./cli/build.sh
 #
@@ -22,8 +23,8 @@ command -v cargo >/dev/null || {
 cargo build --release --target "$target" --manifest-path "$here/Cargo.toml"
 
 binary="$here/target/$target/release/mealplan"
-# One static binary is the whole point of the musl target: the sandbox image is
-# small and a dynamically linked command would need things it does not have.
+# One static binary is the whole point of the musl target: it runs under an
+# empty environment (`env -i`) and needs nothing from the machine.
 head -c 4 "$binary" | od -An -tx1 | tr -d ' \n' | grep -qx '7f454c46' \
   || { echo "$binary is not an ELF binary" >&2; exit 1; }
 if command -v ldd >/dev/null && ldd "$binary" 2>&1 | grep -qv 'not a dynamic executable\|statically linked'; then
@@ -31,10 +32,3 @@ if command -v ldd >/dev/null && ldd "$binary" 2>&1 | grep -qv 'not a dynamic exe
 fi
 
 echo "built $binary ($(du -h "$binary" | cut -f1))" >&2
-
-rootfs="$here/../sandbox-image/rootfs"
-if [ -d "$rootfs/usr/bin" ]; then
-  install -m 0755 "$binary" "$rootfs/usr/bin/mealplan"
-  echo "staged into $rootfs/usr/bin/mealplan" >&2
-  echo "note: rerun ./sandbox-image/build.sh to refresh manifest.txt" >&2
-fi

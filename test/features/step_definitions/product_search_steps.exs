@@ -4,7 +4,7 @@ defmodule Mealplan.Features.ProductSearchSteps do
   writes back (ADR 0036).
 
   The same rule as the other retailer steps: a `When` goes through the real tool
-  handler — `mealplan shopping-list --json` in the real sandbox, then a real
+  handler — the real `mealplan` parser over the household's documents, then a real
   HTTP search against `Mealplan.Mock.Kroger`, whose catalogue is keyed on the
   EXACT lower-cased term. So an assertion on "the candidate attached" is an
   assertion on the precise string the server sent.
@@ -138,7 +138,7 @@ defmodule Mealplan.Features.ProductSearchSteps do
 
   defp list_path(context), do: context[:list_path] || @list
 
-  defp list_text(context), do: File.read!(Path.join(context.folder, list_path(context)))
+  defp list_text(context), do: Mealplan.FeatureCorpus.read!(context, list_path(context))
 
   defp sub_lines(context, anchor) do
     lines = String.split(list_text(context), "\n")

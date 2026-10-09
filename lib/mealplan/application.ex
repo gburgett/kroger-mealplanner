@@ -7,33 +7,20 @@ defmodule Mealplan.Application do
 
   @impl true
   def start(_type, _args) do
-    # Collect what a previous run was killed before it could. A sandboxed
-    # command's scratch files are removed in an `after`, which covers every
-    # ordinary exit and no signal at all; the leftovers of a process that was
-    # killed can only be found later, by someone who can tell that its owner is
-    # gone. This is that someone. See Mealplan.Sandbox.Scratch.
-    Mealplan.Sandbox.Scratch.sweep_stale()
-
-    # In microsandbox mode a SIGKILLed BEAM runs no `Session.terminate/2`, so
-    # its tenants' microVMs would be left running. Same idea as the scratch
-    # sweep above, one layer out: remove every `mealplan-*` microVM that no
-    # live session owns.
-    if Mealplan.Sandbox.mode() == :microsandbox do
-      Mealplan.Sandbox.Backend.Microsandbox.sweep_orphans()
-    end
+    # Collect what a previous run was killed before it could. The parser's
+    # temporary copy of a household's documents is removed in an `after`, which
+    # covers every ordinary exit and no signal at all; the leftovers of a
+    # process that was killed can only be found later, by someone who can tell
+    # that its owner is gone. This is that someone. See Mealplan.Store.Scratch.
+    Mealplan.Store.Scratch.sweep_stale()
 
     children = [
       MealplanWeb.Telemetry,
       Mealplan.Repo,
       {DNSCluster, query: Application.get_env(:mealplan, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Mealplan.PubSub},
-      # The sandbox session layer: one Session process per tenant, registered
-      # by tenant id. See Mealplan.Sandbox.
-      {Registry, keys: :unique, name: Mealplan.Sandbox.Registry},
-      {DynamicSupervisor, strategy: :one_for_one, name: Mealplan.Sandbox.DynamicSupervisor},
-      # Opens the household's session, scaffolds the corpus, runs migrations,
-      # and prints the start-up health check. Left out under ExUnit, where each
-      # test opens its own tenant over its own folder — see Mealplan.Boot.
+      # Migrates the state database and prints the start-up health check. Left
+      # out under ExUnit, where `mix test` migrates itself — see Mealplan.Boot.
       Mealplan.Boot,
       # HTTP pool for the outbound API calls (Kroger, Walmart, the LLM gateway).
       {Finch, name: Mealplan.Finch},
@@ -79,7 +66,7 @@ defmodule Mealplan.Application do
   # collects it on the next start — that is the belt the braces are for.
   @impl true
   def stop(_state) do
-    Mealplan.Sandbox.Scratch.release()
+    Mealplan.Store.Scratch.release()
     :ok
   end
 

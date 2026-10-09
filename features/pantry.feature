@@ -31,7 +31,7 @@ Feature: Leaving out what we already have
   by the shopping list every time it runs.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
     And I have recorded the recipe "Pancakes" serving 4 with the ingredients:
       | quantity | unit | item  |
       | 1.5      | cup  | flour |
@@ -50,37 +50,34 @@ Feature: Leaving out what we already have
       - salt
       - flour
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
 
   Scenario: Staples are dropped from the list
     Given the pantry staples are "salt" and "flour"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list has 2 items
     And the shopping list includes "2 eggs"
     And the shopping list does not include "salt"
 
   Scenario: I can see what was left out as a staple, and why
     Given the pantry staples are "salt"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the output says "salt" was left out as a pantry staple
 
   Scenario: Buying a staple anyway when we have run out
     Given the pantry staples are "flour"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25 --include-staples"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the staples
     Then the shopping list includes "1.5 cup flour"
 
   Scenario: Dropping something from the staples
     Given the pantry staples are "salt" and "flour"
-    When I run:
-      """
-      sed -i '/^- flour$/d' pantry/staples.md
-      mealplan shopping-list --from 2026-08-25 --to 2026-08-25
-      """
+    When I edit "pantry/staples.md" removing the line "- flour"
+    And I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list includes "1.5 cup flour"
 
   Scenario: A folder with no staples document is fine
     Given the file "pantry/staples.md" does not exist
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the command succeeds
     And the shopping list has 4 items
 
@@ -95,50 +92,50 @@ Feature: Leaving out what we already have
       - eggs: stocked
       - milk: needs recheck
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
 
   Scenario: A stocked consumable is left off the list
     Given the pantry consumable "eggs" is "stocked"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list does not include "eggs"
 
   Scenario: A consumable needing a recheck is bought like any ingredient
     Given the pantry consumable "eggs" is "needs recheck"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list includes "2 eggs"
 
   Scenario: A consumable needing a recheck is marked on the list
     Given the pantry consumable "eggs" is "needs recheck"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list marks "eggs" for a check
 
   Scenario: A stocked consumable is never marked for a check
     Given the pantry consumable "eggs" is "stocked"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25 --include-consumables"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the consumables
     Then the shopping list does not mark "eggs" for a check
 
   Scenario: An ingredient with no consumable entry is never marked
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list does not mark "eggs" for a check
 
   Scenario: The output tells the agent to have the household check
     Given the pantry consumable "eggs" is "needs recheck"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the output says to check with the household about "eggs"
 
   Scenario: I can see what was left out as a consumable, and why
     Given the pantry consumable "eggs" is "stocked"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the output says "eggs" was left out as a pantry consumable
 
   Scenario: Buying a stocked consumable anyway
     Given the pantry consumable "eggs" is "stocked"
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25 --include-consumables"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the consumables
     Then the shopping list includes "2 eggs"
 
   Scenario: A folder with no consumables document is fine
     Given the file "pantry/consumables.md" does not exist
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the command succeeds
     And the shopping list has 4 items
 
@@ -149,5 +146,5 @@ Feature: Leaving out what we already have
 
       - eggs: somewhere in the garage, ask grandma
       """
-    And I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-25"
+    And I ask for the shopping list from "2026-08-25" to "2026-08-25"
     Then the shopping list includes "2 eggs"

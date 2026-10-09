@@ -1,48 +1,28 @@
-defmodule Mealplan.Sandbox.Scratch do
+defmodule Mealplan.Store.Scratch do
   @moduledoc """
-  Where a sandboxed command's short-lived files live, and how they are removed
-  when nothing gets the chance to remove them politely.
+  Where the `mealplan` parser's short-lived copy of a household's documents
+  lives, and how it is removed when nothing gets the chance to remove it
+  politely (ADR 0038).
 
-  A command needs four things that must not outlive it: a file for its stdout, a
-  file for its stderr, a file holding its stdin, and a `TMPDIR` of its own. They
-  used to be four siblings in `System.tmp_dir!()` with unique names, deleted at
-  the end of `Mealplan.Sandbox.Runner.run/2`. That works exactly as long as
-  `run/2` reaches its last line.
-
-  It does not always. A command that is killed — the wall-clock timeout, a
-  supervisor shutting the session down, the BEAM going away — leaves every one
-  of those files behind, and nothing looks for them again. On this VM that left
-  383 files in `/tmp`, one of which was a 45,000-file `sort` spill of **11 GB**
-  from the memory-limit scenario, taken far enough to fill the disk to 94%.
-  The scratch directory did its job (the spill was contained in one place
-  instead of loose in `/tmp`); what was missing was anything that removed it.
-
-  So the lifetime is expressed in the layout instead of only in the code:
+  `Mealplan.Store.Cli` lays the documents out in a directory of their own for
+  the length of one parser run and removes it in an `after`. `after` does not
+  run for SIGKILL, so the lifetime is also expressed in the layout:
 
       <base>/mealplan-<os pid>/           the run,     removed by whoever outlives it
-      <base>/mealplan-<os pid>/cmd-<n>/   one command, removed by run/2
+      <base>/mealplan-<os pid>/cmd-<n>/   one parser run, removed by Cli.run/3
 
-  That buys two things a flat directory of uniquely-named files cannot:
-
-    * **One name to delete.** `run/2` removes one directory in an `after`, so an
-      exception on any path between opening the port and reading the output
-      cannot leak the command's files, and cannot leak whatever the command
-      itself wrote to `TMPDIR`.
-
-    * **A sweep that knows what is stale.** `after` does not run for SIGKILL, so
-      something must still collect the leftovers of a process that was killed.
-      The owner is in the name, so `sweep_stale/0` can remove exactly the roots
-      whose owning process is gone and leave every live one alone. A wildcard
-      over uniquely-named files cannot make that distinction, and would delete
-      the files of a `mix test --partitions` sibling that is still running.
+  The owner is in the name, so `sweep_stale/0` removes exactly the roots whose
+  owning process is gone and leaves every live one alone. The layout dates from
+  the sandbox, where a killed `yes | sort` once left 11 GB of spill behind; the
+  rule it taught — one name to delete, and a sweep that knows what is stale —
+  holds for any temporary copy.
 
   ## Where the base is
 
   `System.tmp_dir!()` unless `MEALPLAN_TMPDIR` names somewhere else. A tmpfs is
-  a good choice for a test run and `test/test_helper.exs` picks one when the
-  machine has one: it is faster for the git-heavy corpus copying, and it is
-  bounded, so a command that runs away hits `ENOSPC` in RAM instead of filling
-  the disk PostgreSQL is on.
+  a good choice for a test run and `config/runtime.exs` picks one when the
+  machine has one: it is fast, and it is
+  bounded.
   """
 
   @doc """
@@ -66,8 +46,8 @@ defmodule Mealplan.Sandbox.Scratch do
   end
 
   @doc """
-  A fresh directory for one command. The caller removes it — see
-  `Mealplan.Sandbox.Runner.run/2`, which does so in an `after`.
+  A fresh directory for one parser run. The caller removes it — see
+  `Mealplan.Store.Cli.run/3`, which does so in an `after`.
   """
   @spec command_dir!() :: String.t()
   def command_dir! do
@@ -134,8 +114,7 @@ defmodule Mealplan.Sandbox.Scratch do
 
   # A root is stale when the process named in it is gone.
   #
-  # Linux only, deliberately: so is bubblewrap, so is the musl CLI, so is the
-  # systemd scope. Anything that is not `mealplan-<digits>` is not ours to
+  # Linux only, deliberately: so is the musl CLI. Anything that is not `mealplan-<digits>` is not ours to
   # judge and is left alone — including `mealplan-scenario-*` and
   # `mealplan-state-*`, which belong to the TypeScript harness.
   #

@@ -9,7 +9,7 @@ Feature: Keeping recipes
   the list of everything we eat.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
 
   Scenario: Recording a recipe
     When I write the file "recipes/chicken-tacos.md":
@@ -34,7 +34,7 @@ Feature: Keeping recipes
 
       Sear the chicken, shred it, warm the tortillas in a dry skillet.
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the recipe "Chicken Tacos" serves 4
     And the recipe "Chicken Tacos" has 5 ingredients
 
@@ -44,7 +44,7 @@ Feature: Keeping recipes
       | Chicken Tacos    | 4        |
       | Sunday Pot Roast | 6        |
       | Pancakes         | 4        |
-    When I run "ls recipes/"
+    When I list "recipes"
     Then the output lists:
       | chicken-tacos.md    |
       | pancakes.md         |
@@ -56,7 +56,7 @@ Feature: Keeping recipes
       | Chicken Tacos    | 4        |
       | Chicken Pot Pie  | 6        |
       | Sunday Pot Roast | 6        |
-    When I run "grep -ril chicken recipes/"
+    When I find the documents in "recipes" that mention "chicken" ignoring case
     Then the output lists:
       | recipes/chicken-pot-pie.md |
       | recipes/chicken-tacos.md   |
@@ -68,14 +68,14 @@ Feature: Keeping recipes
     And I have recorded the recipe "Pancakes" serving 4 with the ingredients:
       | quantity | unit | item  |
       | 1.5      | cup  | flour |
-    When I run "grep -ril cheddar recipes/"
+    When I find the documents in "recipes" that mention "cheddar" ignoring case
     Then the output lists:
       | recipes/chicken-tacos.md |
 
   Scenario: Planning around what the children will actually eat
     Given I have recorded the recipe "Chicken Tacos" serving 4 tagged "quick, kid-friendly"
     And I have recorded the recipe "Liver and Onions" serving 4 tagged "cheap"
-    When I run "grep -rl kid-friendly recipes/"
+    When I find the documents in "recipes" that mention "kid-friendly"
     Then the output lists:
       | recipes/chicken-tacos.md |
 
@@ -83,7 +83,7 @@ Feature: Keeping recipes
     Given I have recorded the recipe "Chicken Tacos" serving 4 with the ingredients:
       | quantity | unit | item           |
       | 12       |      | corn tortillas |
-    When I run "cat recipes/chicken-tacos.md"
+    When I read "recipes/chicken-tacos.md"
     Then the output contains the line "- 12 corn tortillas"
 
   Scenario: Correcting a recipe I already recorded
@@ -115,7 +115,7 @@ Feature: Keeping recipes
       | quantity | unit | item  |
       | 1 1/2    | cup  | flour |
       | 1/4      | tsp  | salt  |
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the ingredient "flour" in "Pancakes" is read as "1.5 cup"
     And the ingredient "salt" in "Pancakes" is read as "0.25 tsp"
 
@@ -123,43 +123,42 @@ Feature: Keeping recipes
     When I record the recipe "Hard Boiled Eggs" serving 2 with the ingredients:
       | quantity | unit | item |
       | 6        |      | eggs |
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
     And the ingredient "eggs" in "Hard Boiled Eggs" is read as "6" with no unit
 
   Scenario: Deleting a recipe we will never make again
     Given I have recorded the recipe "Liver and Onions" serving 4
-    When I run "rm recipes/liver-and-onions.md"
+    When I delete the document "recipes/liver-and-onions.md"
     Then the command succeeds
-    And the file "recipes/liver-and-onions.md" does not exist in the meal-plan folder
+    And the file "recipes/liver-and-onions.md" does not exist in the meal plan
 
-  Scenario: Deleting a recipe a planned meal still points at is caught by the validator
+  Scenario: Deleting a recipe a planned meal still points at is refused
+    The day would be left pointing at nothing, and the shopping list would fail
+    on it later. The refusal names each day, so the links can be moved first.
+
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I run "rm recipes/chicken-tacos.md"
-    And I run "mealplan validate"
+    When I delete the document "recipes/chicken-tacos.md"
     Then the command fails
     And the output names the file "meals/2026-08-25.md"
-    And the output says "recipes/chicken-tacos.md" is missing
+    And the file "recipes/chicken-tacos.md" exists in the meal plan
 
   Scenario: Checking before deleting
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned the days:
       | date       | recipes       |
       | 2026-08-25 | Chicken Tacos |
-    When I run "grep -rl chicken-tacos.md meals/"
+    When I find the documents in "meals" that mention "chicken-tacos.md"
     Then the output lists:
       | meals/2026-08-25.md |
 
-  Scenario: Renaming a recipe means moving the file and fixing what points at it
+  Scenario: Renaming a recipe means recording it anew and fixing what points at it
     Given I have recorded the recipe "Chicken Tacos" serving 4
     And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I run:
-      """
-      mv recipes/chicken-tacos.md recipes/taco-night.md
-      sed -i 's|\[Chicken Tacos\](../recipes/chicken-tacos.md)|[Taco Night](../recipes/taco-night.md)|' meals/2026-08-25.md
-      sed -i 's|^name: Chicken Tacos$|name: Taco Night|' recipes/taco-night.md
-      mealplan validate
-      """
+    When I record the recipe "Taco Night" serving 4
+    And I edit "meals/2026-08-25.md" replacing "[Chicken Tacos](../recipes/chicken-tacos.md)" with "[Taco Night](../recipes/taco-night.md)"
+    And I delete the document "recipes/chicken-tacos.md"
+    And I validate the meal plan
     Then the command succeeds
     And the output says the folder is valid
 
@@ -169,5 +168,5 @@ Feature: Keeping recipes
       | date       | recipes       |
       | 2026-08-10 | Chicken Tacos |
       | 2026-08-17 | Chicken Tacos |
-    When I run "grep -rl chicken-tacos.md meals/ | sort | tail -1"
-    Then the output is "meals/2026-08-17.md"
+    When I find the documents in "meals" that mention "chicken-tacos.md"
+    Then the last line of the output is "meals/2026-08-17.md"

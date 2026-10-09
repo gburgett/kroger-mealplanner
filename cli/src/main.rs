@@ -1,8 +1,8 @@
 //! `mealplan` — the two jobs in the meal plan that are not exploration.
 //!
-//! Everything else an agent does with this folder is bash: `ls`, `grep`,
-//! `find`, `cat`, writing files. A command exists here only because an LLM
-//! should not do the job from memory:
+//! Everything else an agent does with a meal plan is a file verb: list, read,
+//! grep, write, edit. A command exists here only because an LLM should not do
+//! the job from memory:
 //!
 //!   * unit-aware arithmetic across every recipe of every night in a range;
 //!   * checking a corpus that is written freehand, before drift becomes
@@ -18,6 +18,7 @@ mod sections;
 mod shopping_list;
 mod validate;
 
+use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -25,10 +26,12 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 mealplan — the two jobs that are not exploration
 
-  mealplan validate [--json] [PATH]
+  mealplan validate [--json] [--changed PATH]... [PATH]
       Check the meal-plan folder, or one document in it, against the format
       README.md describes. Reports every problem, naming the file and the line.
       --json prints what the parser read, rather than what is wrong with it.
+      --changed names a day that is the change in front of the agent; serving
+      warnings are given for those days only. Without it, for every day.
 
   mealplan shopping-list --from YYYY-MM-DD --to YYYY-MM-DD [--include-staples]
                          [--include-consumables] [--out PATH] [--json]
@@ -43,7 +46,7 @@ mealplan — the two jobs that are not exploration
       the Kroger store from config/kroger.md in front matter. --json prints
       the same list as structure. Both together do both.
 
-Run in the meal-plan folder. Everything else is bash.";
+Run in the meal-plan folder. The server runs it over a household's documents.";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
@@ -159,12 +162,25 @@ fn shopping_list_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
 fn validate_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
     let mut as_json = false;
     let mut only: Option<String> = None;
+    let mut changed: Option<HashSet<String>> = None;
 
-    for argument in arguments {
-        match argument.as_str() {
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
             "--json" => as_json = true,
+            "--changed" => {
+                let Some(value) = arguments.get(index + 1) else {
+                    eprintln!(
+                        "mealplan validate: --changed needs a path, for example \
+                         `--changed meals/2026-08-25.md`."
+                    );
+                    return ExitCode::from(2);
+                };
+                index += 1;
+                changed.get_or_insert_with(HashSet::new).insert(value.clone());
+            }
             flag if flag.starts_with('-') => {
-                eprintln!("mealplan validate: there is no `{flag}` option. Only `--json`.");
+                eprintln!("mealplan validate: there is no `{flag}` option. Only `--json` and `--changed`.");
                 return ExitCode::from(2);
             }
             path => {
@@ -178,7 +194,8 @@ fn validate_command(root: &PathBuf, arguments: &[String]) -> ExitCode {
                 only = Some(path.to_string());
             }
         }
+        index += 1;
     }
 
-    ExitCode::from(validate::run(root, only.as_deref(), as_json) as u8)
+    ExitCode::from(validate::run(root, only.as_deref(), as_json, changed.as_ref()) as u8)
 }

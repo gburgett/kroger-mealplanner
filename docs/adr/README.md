@@ -20,9 +20,9 @@ decision, write a new record. Give the old record the status
 | [0003](0003-use-rust-for-the-mealplan-cli.md) | Use Rust for the mealplan CLI | superseded by ADR-0007 |
 | [0004](0004-use-pnpm-for-node-dependencies.md) | Use pnpm for Node.js dependencies | superseded by ADR-0020 |
 | [0005](0005-use-microsandbox-for-the-sandbox.md) | Use microsandbox for the sandbox | superseded by ADR-0008 |
-| [0006](0006-the-sandbox-has-no-interpreter-and-no-network-client.md) | The sandbox has no interpreter and no network client | accepted |
+| [0006](0006-the-sandbox-has-no-interpreter-and-no-network-client.md) | The sandbox has no interpreter and no network client | superseded by ADR-0039 |
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |
-| [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | accepted; multi-tenancy posture partially superseded by ADR-0027 |
+| [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | superseded by ADR-0039 |
 | [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted; the exe.dev gate superseded by ADR-0028 |
 | [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012 |
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
@@ -35,24 +35,25 @@ decision, write a new record. Give the old record the status
 | [0018](0018-run-a-weekly-llm-job-to-recheck-consumables.md) | Run a weekly LLM job to recheck consumables | proposed |
 | [0019](0019-import-pinterest-boards-as-a-pins-and-links-ledger.md) | Import Pinterest boards as a pins-and-links ledger the agent converts | proposed |
 | [0020](0020-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the MCP server and the weekly job to Elixir, Phoenix and PostgreSQL | proposed; unblocked by ADR 0021; PostgreSQL restored by ADR-0029 |
-| [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | accepted |
-| [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted |
+| [0021](0021-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | superseded by ADR-0039 |
+| [0022](0022-run-the-scenarios-in-process-with-a-host-sandbox-mode-for-ci.md) | Run the scenarios in process, with a host sandbox mode for CI | accepted; host sandbox mode superseded by ADR-0039 |
 | [0023](0023-drive-the-screens-the-transport-and-the-third-parties-over-real-http-in-test.md) | Drive the screens, the transport and the third parties over real HTTP in test | accepted |
 | [0024](0024-keep-the-server-state-in-sqlite.md) | Keep the server state in SQLite, in one file beside the meal-plan folder | superseded by ADR-0029; decision restored by ADR-0031 |
 | [0025](0025-run-the-suite-as-one-process-not-partitioned-workers.md) | Run the suite as one process, not partitioned workers | accepted |
 | [0026](0026-onboard-a-new-household-through-tool-results-not-the-handshake.md) | Onboard a new household through tool-call results, not the handshake, and add the public install page Phase 8 left open | proposed |
-| [0027](0027-give-the-session-layer-a-microvm.md) | Give the session layer a microVM: microsandbox as a selectable backend | proposed |
+| [0027](0027-give-the-session-layer-a-microvm.md) | Give the session layer a microVM: microsandbox as a selectable backend | superseded by ADR-0039 |
 | [0028](0028-authenticate-the-household-with-sms-otp.md) | Authenticate the household with an SMS one-time code, through a self-hosted SuperTokens core | accepted; the self-hosted core superseded by ADR-0030 |
 | [0029](0029-move-the-server-state-back-to-postgresql.md) | Move the server state back to PostgreSQL, because the SuperTokens core needs it | superseded by ADR-0031 |
 | [0030](0030-use-the-supertokens-managed-service-not-a-self-hosted-core.md) | Use the SuperTokens managed service, not a self-hosted core | accepted |
 | [0031](0031-return-the-server-state-to-sqlite.md) | Return the server state to SQLite | accepted |
 | [0032](0032-run-the-test-suite-in-microsandbox-mode-by-default.md) | Run the test suite in microsandbox mode by default | superseded by ADR-0034 |
 | [0033](0033-admit-invited-households-with-their-own-tenant-and-corpus.md) | Admit invited households, each with its own tenant and corpus | accepted |
-| [0034](0034-reap-each-host-mode-command-process-group.md) | Reap each host-mode command's process group, and take the test default back from microsandbox | accepted |
-| [0035](0035-make-the-sandbox-session-explicit.md) | Make the sandbox session explicit: `open` and `close` tools, warm reuse, a ten-minute idle close | accepted |
+| [0034](0034-reap-each-host-mode-command-process-group.md) | Reap each host-mode command's process group, and take the test default back from microsandbox | superseded by ADR-0039 |
+| [0035](0035-make-the-sandbox-session-explicit.md) | Make the sandbox session explicit: `open` and `close` tools, warm reuse, a ten-minute idle close | superseded by ADR-0039 |
 | [0036](0036-reduce-a-shopping-list-line-to-a-search-term-before-the-retailer-call.md) | Reduce a shopping-list line to a search term before the retailer call, and record it on the line | accepted |
 | [0037](0037-hide-the-walmart-tools-until-the-server-has-a-credential.md) | Hide the Walmart tools until the server has a credential | accepted |
-| [0038](0038-store-the-meal-plan-as-documents-in-the-database.md) | Store the meal plan as documents in the database, and give the agent file verbs instead of a shell | accepted |
+| [0038](0038-store-the-meal-plan-as-documents-in-the-database.md) | Store the meal plan as documents in the database, and give the agent file verbs instead of a shell | accepted; the folder store and MEALPLAN_STORE superseded by ADR-0039 |
+| [0039](0039-retire-the-folder-store-and-the-sandbox.md) | Retire the folder store and the sandbox | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

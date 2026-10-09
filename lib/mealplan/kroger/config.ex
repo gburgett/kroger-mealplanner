@@ -4,7 +4,7 @@ defmodule Mealplan.Kroger.Config do
   Ported from `src/kroger/config.ts`.
 
   The store is a preference and goes in the repository; the credential is a
-  secret that spends money and never does. `cat config/kroger.md` answers "is
+  secret that spends money and never does. `read_file config/kroger.md` answers "is
   Kroger set up", so no tool answers it.
   """
 
@@ -48,8 +48,8 @@ defmodule Mealplan.Kroger.Config do
 
     A Kroger account is connected. The shopping is matched against **#{name}**#{address_part}, for #{choice.modality}.
 
-    `mealplan shopping-list --out shopping-lists/<from>--<to>.md` writes a list
-    against this store, and the prices on it are this store's prices.
+    `shopping_list` with `out` set to `shopping-lists/<from>--<to>.md` writes a
+    list against this store, and the prices on it are this store's prices.
 
     #{how_to(base_url)}
     """
@@ -67,11 +67,11 @@ defmodule Mealplan.Kroger.Config do
   end
 
   @doc """
-  Write `config/kroger.md` and commit it. `choice` is
+  Write `config/kroger.md` and record it. `choice` is
   `%{location_id, name, address, modality}` or nil to reset to "not connected".
   Ported from `writeKrogerConfig` in `src/kroger/config.ts`.
   """
-  def write(session, %DateTime{} = now, choice, base_url) do
+  def write(corpus, %DateTime{} = now, choice, base_url) do
     message =
       if choice do
         "kroger: shop at #{one_line(choice.name)} for #{choice.modality}"
@@ -79,14 +79,14 @@ defmodule Mealplan.Kroger.Config do
         "kroger: disconnect the account"
       end
 
-    Store.write_and_commit(session, @path, document(choice, base_url), message, now)
+    Store.write_and_commit(corpus, @path, document(choice, base_url), message, now)
   end
 
   @doc "The store the folder currently says to shop at. Only the front matter is read."
   @spec read(Store.t()) :: %{store: String.t(), modality: String.t()}
-  def read(session) do
+  def read(corpus) do
     text =
-      case Store.read_corpus(session, @path) do
+      case Store.read_corpus(corpus, @path) do
         {:ok, text} -> text
         {:error, _} -> ""
       end

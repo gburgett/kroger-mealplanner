@@ -113,17 +113,6 @@ defmodule Mealplan.Features.BrowserSteps do
     {:ok, context}
   end
 
-  # --- the environment the server itself carries -----------------------------
-
-  step "the server process has the environment variable {string} set to {string}",
-       %{args: [name, value]} = context do
-    # Set on the real server process — this one. Keeping it out of the sandbox,
-    # and out of /proc/1/environ, is what the scenario is about.
-    System.put_env(name, value)
-    ExUnit.Callbacks.on_exit(fn -> System.delete_env(name) end)
-    {:ok, context}
-  end
-
   # --- the household -------------------------------------------------------
 
   step "the meal plan belongs to {string}", %{args: [_who]} = context do
@@ -261,9 +250,9 @@ defmodule Mealplan.Features.BrowserSteps do
     {:ok, context}
   end
 
-  step "the consent page names the meal-plan folder", context do
-    assert String.contains?(response(context).body, context.folder),
-           "the page never names the folder being opened up"
+  step "the consent page names the meal plan", context do
+    assert String.contains?(response(context).body, context.tenant),
+           "the page never names the meal plan being opened up"
 
     {:ok, context}
   end
@@ -351,9 +340,13 @@ defmodule Mealplan.Features.BrowserSteps do
     {:ok, Map.put(context, :client, client)}
   end
 
-  step "the client runs {string}", %{args: [command]} = context do
-    {client, result} = McpClient.run(client!(context), String.replace(command, ~S(\"), ~S(")))
-    {:ok, context |> Map.put(:client, client) |> Map.put(:last, result)}
+  step "the client lists the meal plan", context do
+    {:ok, client_call(context, "list_files", %{})}
+  end
+
+  step "the client searches the whole meal plan for its access token", context do
+    {:ok,
+     client_call(context, "grep", %{"pattern" => Regex.escape(client!(context).access_token)})}
   end
 
   step "the household revokes the client's token", context do
@@ -424,51 +417,12 @@ defmodule Mealplan.Features.BrowserSteps do
 
   # --- where the tokens live -------------------------------------------------
 
-  step "the token store is outside the meal-plan folder", context do
-    # The tokens are database rows (ADR 0020) in a SQLite file (ADR 0024), so
-    # there is a path to compare against again — and it is the first thing to
-    # check, because a database inside the mount would hand the agent the
-    # household's Kroger credential whatever the rows look like.
-    database = Path.expand(Mealplan.Config.database())
-    folder = Path.expand(context.folder)
-
-    refute database == folder or String.starts_with?(database, folder <> "/"),
-           "the state database is inside the meal-plan folder:\n#{database}"
-
-    # And the folder the agent can write to holds nothing that buys access.
-    client = client!(context)
-
-    {client, result} =
-      McpClient.run(
-        client,
-        "grep -rl #{quote_for_shell(client.access_token)} . 2>/dev/null || true"
-      )
-
-    assert String.trim(result.stdout) == "",
-           "the access token is inside the meal-plan folder:\n#{result.stdout}"
-
-    {:ok, Map.put(context, :client, client)}
-  end
-
-  step "the client tries to read the token store through the bash tool", context do
-    # The store was a JSON file when this scenario was written, and the step read
-    # it by path. It is a SQLite file now (ADR 0024), so the path is a path
-    # again — and this step uses the REAL one, read from the running repo's own
+  step "the client tries to read the token store by its path", context do
+    # The REAL path of the state database, read from the running repo's own
     # configuration rather than guessed, so the scenario cannot pass by looking
-    # in the wrong place.
-    #
-    # `cat`, not `sqlite3`: the sandbox image carries no database client
-    # (ADR 0006), and it does not need one. A SQLite file is not encrypted, so
-    # reading the bytes is enough to lift a token out of it. What stops this is
-    # that the path is not inside the mount, which is why the scenario is
-    # @security and cannot pass under MEALPLAN_SANDBOX=host, where the file is
-    # right there on the host filesystem.
-    database = Mealplan.Config.database()
-
-    {client, result} =
-      McpClient.run(client!(context), "cat #{quote_for_shell(Path.expand(database))}")
-
-    {:ok, context |> Map.put(:client, client) |> Map.put(:last, result)}
+    # in the wrong place. A path is a document's name and nothing more
+    # (ADR 0038): there is no file system under it to reach the database with.
+    {:ok, client_call(context, "read_file", %{"path" => Path.expand(Mealplan.Config.database())})}
   end
 
   step "the output does not contain the client's access token", context do
@@ -476,23 +430,22 @@ defmodule Mealplan.Features.BrowserSteps do
     assert client.access_token, "the client holds no token, so this scenario proves nothing"
 
     refute String.contains?(output(context), client.access_token),
-           "the access token is readable from inside the sandbox"
+           "the access token is readable through the tools"
 
     # The refresh token is worth as much: it buys a new access token.
     if client.refresh_token do
       refute String.contains?(output(context), client.refresh_token),
-             "the refresh token is readable from the sandbox"
+             "the refresh token is readable through the tools"
     end
 
     {:ok, context}
   end
 
-  step "no command ran in the sandbox", context do
-    # The caller was never authenticated, so the tool handler was never reached
-    # and this scenario ran nothing. Any command a scenario DID run would be on
-    # the context.
-    assert context[:last] == nil,
-           "a command ran even though the caller was never authenticated"
+  step "nothing was recorded in the meal plan", context do
+    # The caller was never authenticated, so the tool handler was never reached.
+    # The scaffold is the only change a fresh meal plan holds.
+    assert Mealplan.FeatureCorpus.change_count(context) == 1,
+           "something changed the meal plan although the caller was never authenticated"
 
     {:ok, context}
   end
@@ -559,7 +512,12 @@ defmodule Mealplan.Features.BrowserSteps do
     Map.get(last, :stdout, "") <> Map.get(last, :stderr, "") <> Map.get(last, :text, "")
   end
 
-  defp quote_for_shell(word), do: "'" <> String.replace(word, "'", "'\\''") <> "'"
+  # One tool call over the real transport, kept where the output steps read it.
+  defp client_call(context, tool, args) do
+    {client, result} = McpClient.call(client!(context), tool, args)
+    last = %{stdout: result.text, stderr: "", exit_code: if(result.is_error, do: 1, else: 0)}
+    context |> Map.put(:client, client) |> Map.put(:last, last)
+  end
 
   @doc "A real PKCE pair. A malformed challenge is refused before a page renders."
   def pkce do

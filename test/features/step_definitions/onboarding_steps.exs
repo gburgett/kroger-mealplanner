@@ -3,10 +3,10 @@ defmodule Mealplan.Features.OnboardingSteps do
   A brand-new household's first commands, and the note that stops appearing
   once its own content shows onboarding is done. See ADR 0026.
 
-  The generic steps this feature also uses — "a meal-plan folder mounted at",
-  "the meal-plan folder is brand new", "I run", "I write the file", "the
-  household prefers:", "the command succeeds", "the file ... exists in the
-  meal-plan folder" — live in `corpus_steps.exs` and run unchanged; this file
+  The generic steps this feature also uses — "a meal plan", "the meal plan is
+  brand new", "I list the meal plan", "I write the file", "the household
+  prefers:", "the command succeeds", "the file ... exists in the meal plan" —
+  live in `corpus_steps.exs`; this file
   holds only what is specific to onboarding.
   """
 

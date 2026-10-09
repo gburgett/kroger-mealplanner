@@ -1,77 +1,29 @@
 defmodule Mealplan.Features.DocumentSteps do
   @moduledoc """
-  The steps of `features/documents.feature` (ADR 0038).
-
-  The same two rules as every other step file:
-
-    * **A `Given` step may write directly** — here that is a row through
-      `Mealplan.Store.Documents.commit/4`, the way a folder `Given` writes a
-      file. It is setup, and it is not checked by the parser.
-    * **A `When` step goes through the real interface**:
-      `Mealplan.Mcp.Tools.call/4`, the function the MCP server calls.
-
-  A tool result is put in `context.last` in the shape the folder steps use, so
-  "the output is", "the output mentions" and the rest are shared rather than
-  written twice.
+  The steps of `features/documents.feature` (ADR 0038, ADR 0039): the file
+  verbs, their refusals, history and restore, and one household's documents
+  against another's. `Mealplan.FeatureCorpus` holds the two rules — plant in a
+  `Given`, call the real tool in a `When`.
   """
 
   use Cucumber.StepDefinition
 
   import ExUnit.Assertions
-  import Ecto.Query
 
   alias Mealplan.Accounts.Tenant
   alias Mealplan.Documents, as: Shapes
+  alias Mealplan.FeatureCorpus
   alias Mealplan.Mcp.Tools
   alias Mealplan.Repo
-  alias Mealplan.Store.{Change, Corpus, Document, Documents}
+  alias Mealplan.Store.Documents
 
-  # --- the household's store ------------------------------------------------
-
-  # The scenario's tenant was provisioned over a folder by the before_scenario
-  # hook. It becomes a document tenant here, with no folder to import, so it
-  # starts from the scaffold alone.
-  step "the household's meal plan is stored as documents", context do
-    Mealplan.Features.CorpusHooks.close_session(context.tenant)
-
-    tenant(context)
-    |> Ecto.Changeset.change(store: "documents", corpus_path: nil)
-    |> Repo.update!()
-
-    {:ok, Map.put(context, :corpus, open(context))}
-  end
-
-  step "the household's folder holds the recipe {string} serving {int}",
-       %{args: [name, servings]} = context do
-    path = Path.join(context.folder, Shapes.recipe_path(name))
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, Shapes.recipe_document(name: name, servings: servings))
-    {:ok, context}
-  end
-
-  # A tenant that moves keeps its folder: the store finds it empty, so the
-  # first open imports the folder. The scaffold the Background made is wiped
-  # first, so the move is from a folder to an empty store, as it is for real.
-  step "the household's meal plan moves from its folder to documents", context do
-    tenant = tenant(context)
-    Repo.delete_all(from d in Document, where: d.tenant_id == ^tenant.id)
-    Repo.delete_all(from c in Change, where: c.tenant_id == ^tenant.id)
-
-    tenant
-    |> Ecto.Changeset.change(store: "documents", corpus_path: context.folder)
-    |> Repo.update!()
-
-    {:ok, Map.put(context, :corpus, open(context))}
-  end
+  # --- another household ------------------------------------------------------
 
   step "another household's meal plan holds the document {string}:",
        %{args: [path]} = context do
     other =
       Repo.insert!(
-        Tenant.changeset(%Tenant{}, %{
-          slug: "other-#{System.unique_integer([:positive])}",
-          store: "documents"
-        })
+        Tenant.changeset(%Tenant{}, %{slug: "other-#{System.unique_integer([:positive])}"})
       )
 
     {:ok, _} = Documents.commit(other.id, [{path, context.docstring}], "theirs", context.now)
@@ -261,43 +213,11 @@ defmodule Mealplan.Features.DocumentSteps do
     {:ok, context}
   end
 
-  step "the household's folder on disk has no {string}", %{args: [path]} = context do
-    refute File.exists?(Path.join(context.folder, path)), "#{path} was written to disk"
-    {:ok, context}
-  end
-
   # --- helpers ----------------------------------------------------------------
 
-  defp tenant(context), do: Repo.get_by!(Tenant, slug: context.tenant)
+  defp plant(context, path, body), do: FeatureCorpus.plant(context, path, body)
 
-  defp open(context),
-    do: Corpus.open(context.tenant, now: context.now, base_url: Mealplan.Config.public_url())
+  defp offered(_context), do: Enum.map(Tools.list(), & &1["name"])
 
-  defp plant(context, path, body) do
-    {:ok, _} =
-      Documents.commit(context.corpus.tenant_id, [{path, body}], "given #{path}", context.now)
-
-    context
-  end
-
-  defp offered(context), do: Enum.map(Tools.list(context.tenant), & &1["name"])
-
-  defp call(context, name, args) do
-    {:ok, response} = Tools.call(name, args, context.tenant, context.now)
-
-    text =
-      response["content"]
-      |> Enum.filter(&(&1["type"] == "text"))
-      |> Enum.reject(&(&1["text"] == Mealplan.Onboarding.note()))
-      |> Enum.map_join("\n", & &1["text"])
-
-    Map.put(context, :last, %{
-      stdout: text,
-      stderr: "",
-      exit_code: if(response["isError"], do: 1, else: 0),
-      timed_out: false,
-      truncated: false,
-      text: text
-    })
-  end
+  defp call(context, name, args), do: FeatureCorpus.call(context, name, args)
 end

@@ -1,67 +1,16 @@
 defmodule Mealplan.Tenancy do
   @moduledoc """
-  Which folder a tenant reads, and which tenant a telephone owns. ADR 0033.
+  Which tenant a telephone owns. ADR 0033.
 
-  `Mealplan.Config.tenant/0` and `Mealplan.Config.folder/0` used to be the one
-  global answer to "which household" and "which folder", read in a dozen
-  places. They are gone. A request carries its own tenant — from the session
-  for a screen, from the bearer token for `/mcp` — and resolves the folder
-  here, from the `tenants` row.
+  A request carries its own tenant — from the session for a screen, from the
+  bearer token for `/mcp` — and the tenant's id is on every row of its meal
+  plan (ADR 0038).
   """
 
   import Ecto.Query
 
   alias Mealplan.Accounts.{Membership, Tenant}
   alias Mealplan.Repo
-
-  @doc """
-  The on-disk folder for `tenant` (a slug or a `%Tenant{}`).
-
-  Set at redemption to `<MEALPLAN_CORPUS_ROOT>/<slug>`. Raises when the tenant
-  is unknown or has no `corpus_path` — a served request must never fall back to
-  a shared default.
-  """
-  @spec corpus_path(String.t() | Tenant.t()) :: String.t()
-  def corpus_path(%Tenant{slug: slug, corpus_path: nil}) do
-    raise "tenant #{inspect(slug)} has no corpus_path — it has not been redeemed"
-  end
-
-  def corpus_path(%Tenant{corpus_path: path}), do: path
-
-  def corpus_path(slug) when is_binary(slug) do
-    case Repo.get_by(Tenant, slug: slug) do
-      nil -> raise "no tenant with slug #{inspect(slug)}"
-      tenant -> corpus_path(tenant)
-    end
-  end
-
-  @doc "The root every tenant folder sits under. Default `~/meal-plans`."
-  @spec corpus_root() :: String.t()
-  def corpus_root do
-    case Application.get_env(:mealplan, :corpus_root) do
-      nil -> Path.expand("~/meal-plans")
-      "" -> Path.expand("~/meal-plans")
-      dir -> Path.expand(dir)
-    end
-  end
-
-  @doc """
-  Where a NEW tenant's meal plan lives: `"folder"` or `"documents"` (ADR 0038).
-  `MEALPLAN_STORE` sets it; the default is `"folder"`.
-  """
-  @spec default_store() :: String.t()
-  def default_store, do: Application.get_env(:mealplan, :corpus_store, "folder")
-
-  @doc """
-  Which store `slug`'s meal plan lives in: `:folder` or `:documents`.
-  """
-  @spec store(String.t()) :: :folder | :documents
-  def store(slug) when is_binary(slug) do
-    case Repo.one(from t in Tenant, where: t.slug == ^slug, select: t.store) do
-      "documents" -> :documents
-      _ -> :folder
-    end
-  end
 
   @doc "A fresh slug for a new tenant: `household-<8 hex>`."
   @spec new_slug() :: String.t()
@@ -92,7 +41,10 @@ defmodule Mealplan.Tenancy do
     invited = Repo.aggregate(Mealplan.Accounts.Invitation, :count)
 
     provisioned =
-      Repo.aggregate(from(i in Mealplan.Accounts.Invitation, where: not is_nil(i.redeemed_at)), :count)
+      Repo.aggregate(
+        from(i in Mealplan.Accounts.Invitation, where: not is_nil(i.redeemed_at)),
+        :count
+      )
 
     %{invited: invited, provisioned: provisioned}
   end

@@ -17,11 +17,11 @@ defmodule Mealplan.Walmart.Help do
        walk into is their call, not yours.
     3. Write config/walmart.md with the pick: "store:" is the store id and
        "access_point:" is the access point id, both from the search output. It is
-       an ordinary document and write_file commits it.
+       an ordinary document, and write_file records it.
 
-    "cat config/walmart.md" answers "is a Walmart store set". There is no
+    read_file "config/walmart.md" answers "is a Walmart store set". There is no
     credential of the household's to link: the RSA key that signs the API calls is
-    the server's, and it lives outside this folder.
+    the server's, and it lives outside the meal plan.
 
     THE CART IS A LINK, NOT A CALL. walmart_cart_link builds a
     walmart.com/sc/cart/addToCart URL and returns it; building it adds NOTHING.
