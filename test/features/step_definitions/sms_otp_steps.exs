@@ -260,19 +260,6 @@ defmodule Mealplan.Features.SmsOtpSteps do
     {:ok, context}
   end
 
-  step "no answer from the core reaches the agent", context do
-    result = context[:last] || %{}
-    output = "#{result[:stdout]}#{result[:stderr]}#{result[:text]}"
-
-    # `\bHello\b` is the core's `/hello` body. The URL in the command holds a
-    # lowercase `/hello`, so the match is capitalised and word-bounded to catch
-    # a real answer without tripping on the request the agent typed.
-    refute output =~ ~r/\bHello\b/,
-           "the core answered the sandbox: #{String.slice(output, 0, 200)}"
-
-    {:ok, context}
-  end
-
   # --- helpers ---------------------------------------------------------------
 
   defp ask_for_code(context, phone) do

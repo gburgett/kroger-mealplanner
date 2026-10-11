@@ -1,7 +1,7 @@
 @core
 Feature: Only the household reaches the meal plan
   As the one person whose meal plan this is
-  I want the assistant to prove who it is before it is given a shell
+  I want the assistant to prove who it is before it reaches the meal plan
   So that a public address does not mean a public kitchen
 
   The server used to be reachable only over loopback, and that was the whole of
@@ -45,46 +45,44 @@ Feature: Only the household reaches the meal plan
     And "+15095550142" is signed in
     When the client asks for authorisation
     Then the consent page names the client
-    And the consent page names the meal-plan folder
+    And the consent page names the meal plan
 
-  Scenario: An approved client can run commands
+  Scenario: An approved client can use the meal plan
     Given the household has approved a client
-    When the client runs "ls"
+    When the client lists the meal plan
     Then the command succeeds
     And the output lists:
-      | README.md      |
-      | config         |
-      | meals          |
-      | pantry         |
-      | preferences    |
-      | recipes        |
-      | shopping-lists |
+      | README.md       |
+      | config/         |
+      | meals/          |
+      | pantry/         |
+      | preferences/    |
+      | recipes/        |
+      | shopping-lists/ |
 
   Scenario: The token still works after the server restarts
     Given the household has approved a client
     When the server restarts
-    And the client runs "echo still here"
+    And the client lists the meal plan
     Then the command succeeds
-    And the output is "still here"
 
   Scenario: An expired token is replaced without asking the household again
     Given the household has approved a client
     And the client's access token has expired
     When the client refreshes its token
     Then the client receives a new access token
-    And the client runs "echo still here"
+    And the client lists the meal plan
     And the command succeeds
 
   # -------------------------------------------------------------------------
-  # Containment. The sandbox is one boundary; this is the other one, and it is
-  # now the outer one. Every scenario below must fail closed.
+  # Who gets in at all. Every scenario below must fail closed.
   # -------------------------------------------------------------------------
 
   @security
   Scenario: A made-up token is refused
     When a client calls the meal planner with the token "not-a-real-token"
     Then the call is refused as unauthorised
-    And no command ran in the sandbox
+    And nothing was recorded in the meal plan
 
   @security
   Scenario: A token the household revoked stops working
@@ -129,34 +127,14 @@ Feature: Only the household reaches the meal plan
     Then the exchange is refused
 
   @security
-  Scenario: The tokens are not kept in the folder the agent can write to
+  Scenario: The tokens are not kept in the meal plan the agent can search
     Given the household has approved a client
-    Then the token store is outside the meal-plan folder
-    When the client runs "grep -ra . -e . -l | head -50; ls -aR"
+    When the client searches the whole meal plan for its access token
     Then the output does not contain the client's access token
 
   @security
   Scenario: The agent cannot read the token store even though it knows the path
     Given the household has approved a client
-    When the client tries to read the token store through the bash tool
+    When the client tries to read the token store by its path
     Then the command fails
     And the output does not contain the client's access token
-
-  @security
-  Scenario: The access token is not visible inside the sandbox
-    The shape of the KROGER_CLIENT_SECRET scenario in sandbox.feature, asking
-    the same question about the credential the agent could actually use.
-
-    This one deliberately does NOT also assert "the output holds nothing from
-    the server's own environment". That assertion compares every NAME=VALUE in
-    the server's environment against the output, and the sandbox sets
-    GIT_PAGER=cat and GIT_EDITOR=true on purpose (bubblewrap.ts) so that git
-    never waits for a pager or an editor nobody can see. A developer whose own
-    shell has GIT_EDITOR=true then fails this for a collision rather than a
-    leak. The environment property is proved on the /proc/1/environ dump alone,
-    in sandbox.feature, where nothing is deliberately set and the comparison
-    means what it says.
-
-    Given the household has approved a client
-    When the client runs "cat /proc/1/environ | tr '\0' '\n'; env"
-    Then the output does not contain the client's access token

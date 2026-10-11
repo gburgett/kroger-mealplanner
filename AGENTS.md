@@ -4,81 +4,98 @@ A meal-planning agent for a household: record recipes, plan a dinner for each
 date, derive one shopping list for a date range, and push that list into a real
 Kroger cart.
 
-## The interface is MCP, and MCP is a sandboxed shell
+## The interface is MCP, and MCP is file verbs over documents
 
-**The MCP server is the product.** It mounts the meal-plan folder into a sandbox
-and exposes command execution over it. There are no CRUD tools. An assistant
-plans meals the way a developer explores a repository — `ls`, `grep`, `find`,
-`cat`, writing files — and that is the whole interface.
+**The MCP server is the product.** A household's meal plan is markdown
+documents laid out like a folder, stored as rows in the server's database, and
+the assistant reaches them through file verbs: `list_files`, `read_file`,
+`grep`, `write_file`, `edit_file`, `delete_file`, `history`, `restore_file`,
+plus `validate` and `shopping_list` (`Mealplan.Mcp.DocumentTools`). An
+assistant plans meals the way a coding agent explores a repository, and that
+is the whole interface. There are no CRUD tools for recipes or days: a recipe
+is a document, and a document is written whole or edited in place.
+
+**There is no shell, and nothing an assistant writes is ever run.** That is the
+design (ADR 0038, ADR 0039). It used to be a sandboxed bash over a git folder —
+bubblewrap for one household, a libkrun microVM per household for more — and
+that whole layer is gone. Tenant isolation is a `tenant_id` on every query in
+`Mealplan.Store.Documents`, not a kernel per tenant. The studies that built the
+sandbox stay in `docs/` as the record of why this product does not run code an
+agent wrote.
 
 Consequences worth internalising before changing anything:
 
-- **The folder is the database.** Its layout and document conventions are the
-  schema. They must stay guessable from a directory listing and stable enough to
-  grep for. See `features/corpus.feature` — that file is the schema definition.
-  A bare `ls` prints seven names: `README.md`, `config`, `meals`, `pantry`,
-  `preferences`, `recipes`, `shopping-lists`. That listing is asserted in
+- **The layout is the schema.** Paths and document conventions must stay
+  guessable from a listing and stable enough to grep for. See
+  `features/corpus.feature` — that file is the schema definition. A bare
+  `list_files` prints seven names: `README.md`, `config/`, `meals/`, `pantry/`,
+  `preferences/`, `recipes/`, `shopping-lists/`. That listing is asserted in
   **three** places — `features/corpus.feature`, `features/auth.feature` and
   `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
-  (`Mealplan.Corpus.Scaffold`) — and all three have to
-  change together. This note said "two" until a seventh name was added and
-  `auth.feature` was the one that failed.
-- **The filename is the primary key.** `recipes/chicken-tacos.md`,
-  `meals/2026-08-25.md`. Uniqueness and ordering come free from the
-  filesystem; do not add an index that can drift out of step.
-- **The folder is a git repository, and the server commits for the agent.** Every
-  command that changes a file is committed automatically, with the command line
-  as the message. An agent writing files freehand has no undo otherwise, and
-  `cat >` silently destroys a recipe collected over years. See
+  (`Mealplan.Corpus.Scaffold`) — and all three have to change together.
+- **The path is the primary key.** `recipes/chicken-tacos.md`,
+  `meals/2026-08-25.md`; `(tenant_id, path)` is the primary key of `documents`.
+  Do not add a derived table (ingredients, meal links) that can drift out of
+  step with the body — the body is the truth, and one household's documents are
+  small enough to search in memory.
+- **Every change is recorded, by the server.** Each write, edit and delete is
+  one row in `document_changes`, named with the message the agent gave, with the
+  body of every document it touched in `document_versions`. `history` lists
+  them and `restore_file` puts any document back as it was after any of them.
+  An agent writing freehand has no undo otherwise, and a careless `write_file`
+  would silently destroy a recipe collected over years. See
   `features/history.feature`.
-- **Scaffolding commits itself, so the corpus can grow.** `scaffold()` returns
-  the paths it wrote and the server commits them as `scaffold <paths>` on the
-  next start. Without that, a new corpus directory added to a folder that
-  already has history sat untracked until some later tool call swept it into a
-  commit labelled `write_file recipes/foo.md`. Adding a name is therefore three
-  edits and no migration: `@corpus_directories`, `features/corpus.feature`,
-  `features/auth.feature`.
-- **Forward migrations are dated shell scripts in `migrations/`, run inside the
-  sandbox at session open.** Each script that has not run changes the corpus the
-  way the agent would (bash inside the sandbox) and is committed as
-  `migration <id>`. What has run is recorded in the hidden root dotfile
-  `.mealplan-migrations.json`, written and committed with the migration. See
-  `features/migrations.feature` and `Mealplan.Corpus.Migrations`
-  (`lib/mealplan/corpus/migrations.ex`).
+- **A write the agent makes is checked before it is stored.** A markdown
+  document goes through `mealplan validate <path>` against the household's
+  documents with the change in place (`Mealplan.Store.Corpus.write/6`); a
+  problem refuses the write with the parser's own text, naming the line. A
+  recipe a planned day links to cannot be deleted. Writes the SERVER composes —
+  scaffold, candidates found, a cart send — go through `Mealplan.Store` and are
+  not checked, so a refusal can never lose the record of a cart add.
+- **Scaffolding writes what is missing, and records itself.**
+  `Mealplan.Store.Corpus.open/2` runs on every request, writes any missing
+  scaffold document (`Mealplan.Corpus.Scaffold.documents/2`) as one change
+  named `scaffold <paths>`, and never rewrites a document that is there. Adding
+  a corpus directory is three edits and no migration: `@corpus_directories`,
+  `features/corpus.feature`, `features/auth.feature`.
+- **There are no corpus migrations.** The dated shell scripts went with the
+  sandbox. A change to the document format that existing documents must follow
+  is an Elixir function over the bodies, in its own ADR.
 - **Everything is markdown a human can open and edit.** If a change would make a
   document unreadable in a text editor, it is the wrong change.
-- **Prefer bash over new tools.** Before adding a command, ask whether `grep`
-  already answers it. Only two things justify a command: unit-aware arithmetic
-  (`mealplan shopping-list`) and schema validation (`mealplan validate`).
-- **A tool exists only when the sandbox cannot do the job by construction.**
-  There is exactly one such job — the network, which the sandbox does not have
-  and must never get — so four of the five non-sandbox tools are network calls:
-  `kroger_find_products`, `kroger_send_to_cart`, `walmart_find_stores` and
-  `walmart_find_products`. "Is Kroger set up" is not one: `cat config/kroger.md`
-  answers it, which is why the store is a document. The fifth,
-  `walmart_cart_link`, makes no network call: it is the choke point where
-  "nothing unchosen reaches the household's cart" is enforced, and bash cannot
-  be trusted to keep that property from memory. That exception is recorded in
-  ADR 0017, and it is the only one. See ADR 0010, and `Mealplan.Mcp.Tools`
-  (`lib/mealplan/mcp/tools.ex`), where the test is written down.
-- **`open` and `close` are the session lifecycle, not a job in the folder.**
-  ADR 0035 made the sandbox session addressable. `open` boots it and hands the
-  agent the folder tree and recent history on the tool-result channel every
-  client shows the model (ADR 0026); `close` tears it down now. `bash`,
-  `read_file` and `write_file` refuse with "call `open` first" until it has
-  run — the same one word the restart refusal gives — and a session also
-  closes itself after `MEALPLAN_SESSION_IDLE_TIMEOUT` (ten minutes) with no
-  command. That is a third tool category, between the three sandbox tools and
-  the five non-sandbox ones, so `tools/list` now reports ten. ADR 0010 admits
-  it for the reason it admits the cart choke point: the seam cannot be a shell
-  command. The network tools still auto-open; the gate is those three alone.
-- **Error messages are the documentation.** An agent recovers from "line 7 of
-  recipes/chicken-tacos.md: expected `- <qty> [unit] <item>`". It cannot recover
-  from "invalid input". Name the file, the line, or the argument.
-- **The sandbox is the security boundary.** Reads and writes inside the mount,
-  nothing outside it, and no network — including no DNS. Sandbox containment is
-  specified in `features/sandbox.feature` under `@security`; those scenarios are
-  not optional and not "later".
+- **Prefer the file verbs over new tools.** Before adding a tool, ask whether
+  `grep` already answers it. Only two things justify a job of their own:
+  unit-aware arithmetic (`shopping_list`) and schema validation (`validate`).
+- **A tool beyond those exists only when the documents cannot do the job by
+  construction.** There is exactly one such job — the network — so four of the
+  five retailer tools are network calls: `kroger_find_products`,
+  `kroger_send_to_cart`, `walmart_find_stores` and `walmart_find_products`.
+  "Is Kroger set up" is not one: reading `config/kroger.md` answers it, which
+  is why the store is a document. The fifth, `walmart_cart_link`, makes no
+  network call: it is the choke point where "nothing unchosen reaches the
+  household's cart" is enforced (ADR 0017). See ADR 0010, and
+  `Mealplan.Mcp.Tools` (`lib/mealplan/mcp/tools.ex`).
+- **`open` is orientation, not a session.** It returns the tree, the recent
+  changes and where to start. It opens nothing and gates nothing; there is no
+  `close`, and a client that still calls `bash` or `close` is told what to use
+  instead.
+- **Error messages are the documentation.** An agent recovers from
+  "recipes/chicken-tacos.md:12: cannot read `- salt to taste`". It cannot
+  recover from "invalid input". Name the document, the line, or the argument.
+- **The path is the boundary.** A path is plain relative segments
+  (`Mealplan.Store.Paths`): no `..`, no leading `/`, nothing hidden. There is no
+  file system under it, so there is no symlink to plant and no mount to escape.
+  Limits are per document (256 KiB) and per household (2,000 documents), and a
+  `grep` pattern is untrusted (PCRE match limit, a deadline). The `@security`
+  scenarios in `features/documents.feature`, `features/history.feature`,
+  `features/auth.feature` and `features/invitations.feature` assert it, and
+  they run in every run.
+- **The parser runs with no sandbox, and that is safe on purpose.**
+  `Mealplan.Store.Cli` lays the household's documents out in a private
+  temporary directory (`Mealplan.Store.Scratch`), runs the `mealplan` binary
+  there under `env -i` with an argument vector the server builds, and removes
+  the directory in an `after`. The agent chooses document bodies and dates,
+  never a command.
 
 **UI exists only for setup the MCP interface cannot do**, i.e. a flow that needs
 a browser and a human at a keyboard. There are three, and all are built: **the
@@ -88,26 +105,24 @@ assistant (ADR 0009); and **the `/kroger` screens**, where the household signs
 in to Kroger and picks which shop it walks into (ADR 0010). The last two sit
 behind the session the first one issues — `/kroger/callback` included, because
 Kroger redirects a top-level browser navigation and the cookie is on it.
-Anything else belongs behind the
-sandbox.
+Anything else belongs behind the tools.
 
 ## The stack
 
 | Component | Primary driver | Choice | Record |
 | --- | --- | --- | --- |
-| Sandbox | speed and cost for one household | bubblewrap + seccomp + cgroup limits; microsandbox (libkrun) as a selectable session-layer backend for more than one household on one machine | ADR 0008, ADR 0027 |
-| Sandbox image | containment by omission | built, never borrowed: no interpreter, no network client | ADR 0006 |
+| Meal plan store | tenant isolation without a kernel per tenant | `documents` / `document_changes` / `document_versions` in the server's Ecto repo, file-verb MCP tools | ADR 0038, ADR 0039 |
 | MCP server | simplicity | Elixir/Phoenix on OTP 28, `anubis_mcp` transport, `mix release` | ADR 0020 |
-| `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl` | ADR 0007 |
-| Server state | one household, one writer; a test run that needs nothing running | SQLite, one file beside the folder, through Ecto | ADR 0031 |
+| `mealplan` CLI | exact arithmetic and fast start | Rust → `x86_64-unknown-linux-musl`, run unsandboxed over a temporary copy of the documents | ADR 0007, ADR 0038 |
+| Server state | one writer; a test run that needs nothing running | SQLite, one file, through Ecto — and it holds every meal plan | ADR 0031, ADR 0038 |
 | Authentication | a program must connect with no browser | OAuth 2.1 in this server: DCR, PKCE, bearer tokens | ADR 0009 |
 | Who may approve | a header is only worth the network path it arrived on | an SMS one-time code; the SuperTokens managed service is the code authority | ADR 0028, ADR 0030 |
-| Kroger | the sandbox has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
+| Kroger | the meal plan has no network and must not get one | two MCP tools in the server, `Req`, no Kroger package | ADR 0010 |
 | Walmart | no household credential exists; the API is the server's own, and the cart is a link | three MCP tools: two signed calls, one link builder; `:public_key` RSA, no package | ADR 0017 |
 
-**The server is on the public internet, so there are two boundaries, not one.**
-The sandbox decides what an agent may do once it is inside; OAuth decides whether
-it gets in at all. Three traps that the exe.dev proxy sets, all recorded in
+**The server is on the public internet, and OAuth is the boundary that decides
+whether an assistant gets in at all.** Once in, the token's tenant decides which
+documents it reaches. Three traps that the exe.dev proxy sets, all recorded in
 ADR 0009 and worth knowing before touching `MealplanWeb.Router` and
 `lib/mealplan_web/`:
 
@@ -126,53 +141,27 @@ ADR 0009 and worth knowing before touching `MealplanWeb.Router` and
   host-header injection into the metadata document.
 
 The identity headers were never proven unforgeable —
-`docs/exedev-identity-header-study.md` is still open, and still explains why the
-measurement cannot be made from the VM. **It no longer decides anything.**
-ADR 0028 replaced that gate with an SMS one-time code, because of the study's
-other finding, which needed no measurement: anything that can route to
-`10.42.0.0/16` reaches the port with no proxy in front of it, so a header gate
-is worth exactly as much as a network boundary nobody documented. Nothing in
+`docs/exedev-identity-header-study.md` is still open. **It no longer decides
+anything.** ADR 0028 replaced that gate with an SMS one-time code. Nothing in
 `lib/` reads those headers now.
 
-**The lens was one household on one machine.** That is what ADR 0008 settled,
-and it is why the default sandbox is 3.3 ms of bubblewrap rather than a microVM
-per tenant. ADR 0033 opened the way in for more than one: any telephone the
-operator invites gets its own tenant, its own corpus under
-`MEALPLAN_CORPUS_ROOT`, and — on the deployed server — its own libkrun microVM.
-The session interface (`open` / `run` / `close`) that stayed thin in the design
-since ADR 0008 is what carries that: `MEALPLAN_SANDBOX=microsandbox` runs each
-tenant in its own microVM (ADR 0027), and `deploy/mealplan-elixir.service` sets
-it because bubblewrap between tenants is one UID namespace, not a kernel.
-Bubblewrap stays the default for a single-household dev box and the
-command-layer boundary in every mode. Multi-tenancy above ~15 concurrent
-tenants, or a stronger failure domain than one shared VM, is still open — see
-`docs/multi-tenant-isolation-trade-study.md` §10 for the threshold that moves
-the session layer to Fly Sprites.
-
-The sandbox took three records to settle, and the wrong turns are worth reading:
-agentOS (ADR 0001) cannot execute `git`; microsandbox (ADR 0005) works but buys a
-per-tenant kernel this product does not need. `docs/agent-runtime-spike.md` and
-`docs/bubblewrap-lockdown-study.md` hold the measurements.
-
-Two traps that measurement found, both easy to walk back into:
-
-- **Never `--ro-bind /usr /usr`.** The host `/usr` holds `python3`, `perl`, `curl`,
-  `gcc` and a dozen more. The trade study's §8 command line says to do this. Do not.
-- **A busybox base is a network client.** `busybox wget` works even when `wget` is
-  off `PATH`.
+**More than one household is ordinary now.** ADR 0033 lets any telephone the
+operator invites have its own tenant, and since ADR 0039 a tenant's whole meal
+plan is rows carrying its id: no folder, no session, no microVM, and no live
+cost for an idle household. The sandbox took three records to settle (ADR 0001,
+ADR 0005, ADR 0008) and two more to scale (ADR 0027, ADR 0035) before ADR 0038
+asked what the agent actually used the shell for; `docs/sandbox-trade-study.md`
+and `docs/multi-tenant-isolation-trade-study.md` are the history.
 
 Two languages, on purpose: the drivers genuinely differ, and the interface
 between them is a command line and an exit status — no shared library, no
 shared types. The corpus parser lives **only** in the CLI. The server never
-reads a recipe; it runs commands and commits. That is what keeps the document
-format defined in exactly one place.
+parses a recipe; it lays the documents out and runs the parser. That is what
+keeps the document format defined in exactly one place.
 
 The server is a `mix release`: `MIX_ENV=prod mix release` builds it and
-`systemctl --user restart mealplan-elixir` deploys it (ADR 0020). There is a
-build step now, unlike the retired Node server. One BEAM node still holds both
-the server and the sandbox: `run()` spawns a `bwrap` child (or, on the deployed
-server, drives a libkrun microVM per tenant — ADR 0033), so there is no
-separate daemon and no RPC.
+`systemctl --user restart mealplan-elixir` deploys it (ADR 0020). One BEAM node
+holds the server and the weekly job; there is no separate daemon and no RPC.
 
 ### How it actually runs, and how to restart it
 
@@ -182,11 +171,13 @@ different manager and will not find it. Lingering is on, so it survives a logout
 and comes back after a reboot.
 
 **There is one service.** `mealplan-elixir.service` is the product, and it is
-the only thing to start. The state is one SQLite file (ADR 0024, restored by
-ADR 0031) — no database server — and `MEALPLAN_STATE` names it. A fresh deploy
-has no households: invite one with
+the only thing to start. The state — server state AND every household's meal
+plan — is one SQLite file (ADR 0031, ADR 0038), named by `MEALPLAN_STATE`, so
+backing up that file backs up everything. A fresh deploy has no households:
+invite one with
 `bin/mealplan eval 'Mealplan.Invitations.create("+15095550142", label: "…")'`
-(ADR 0033), and they provision their tenant and folder on their first code.
+(ADR 0033), and they provision their tenant on their first code; the meal plan
+is scaffolded on their first request.
 
 **The SuperTokens core is the managed deployment** (ADR 0030), off this VM, at
 `st-dev-ff40b340-a989-11f1-abbd-07395602a114.aws.supertokens.io`. The meal
@@ -217,11 +208,11 @@ systemctl --user restart mealplan-elixir.service
 Two things sit outside that procedure:
 
 - **A change to `cli/`** needs `./cli/build.sh`, which compiles the musl binary
-  and stages it into `sandbox-image/rootfs/`. That takes effect on the **next
-  command** with no restart at all, because every command is a fresh `bwrap` that
-  binds the image afresh. `sandbox-image/rootfs/` is gitignored, so a fresh
-  checkout has to run `./sandbox-image/build.sh` and `./cli/build.sh` before
-  anything works.
+  into `cli/target/`. That takes effect on the **next tool call** with no
+  restart, because every parser run starts the binary afresh.
+  `MEALPLAN_CLI_PATH` can name another directory. Without the binary every
+  agent write to a markdown document is refused, so the "meal plans:" journal
+  line names where it was found, or says MISSING.
 - **A change to the unit file** is a change to `deploy/mealplan-elixir.service`,
   which then has to be copied into place and followed by
   `systemctl --user daemon-reload`, or systemd restarts the old one and says
@@ -237,14 +228,11 @@ diff deploy/mealplan-elixir.service ~/.config/systemd/user/mealplan-elixir.servi
 ```
 
 It is **concrete, not a template** — every path and address in it is this
-machine's, and a template with placeholders would describe a story this product
-does not have. It carries `MEALPLAN_PUBLIC_URL`, `MEALPLAN_CORPUS_ROOT`,
-`MEALPLAN_STATE`, `MEALPLAN_SANDBOX=microsandbox` (ADR 0033), `MEALPLAN_FOLDER`
-(a dead pointer to the abandoned single-household corpus, kept only for a
-follow-up migration), `SUPERTOKENS_CONNECTION_URI` and `MEALPLAN_PORT=8000`,
-which has to match what `ssh exe.dev share port` pinned. There is no
-`MEALPLAN_OWNER` or `MEALPLAN_OWNER_PHONE` any more — every household is invited
-with `mix mealplan.invite` (or `bin/mealplan eval` in a release).
+machine's. It carries `MEALPLAN_PUBLIC_URL`, `MEALPLAN_STATE`,
+`SUPERTOKENS_CONNECTION_URI`, `MEALPLAN_SMS_PROVIDER` and `MEALPLAN_PORT=8000`,
+which has to match what `ssh exe.dev share port` pinned. `MEALPLAN_SANDBOX`,
+`MEALPLAN_CORPUS_ROOT`, `MEALPLAN_FOLDER` and `MEALPLAN_STORE` are gone
+(ADR 0039), and so are `MEALPLAN_OWNER` and `MEALPLAN_OWNER_PHONE`.
 
 **The public domain is `plantrify.com`.** The household opens
 `https://plantrify.com/` and an assistant connects to the MCP entrypoint at
@@ -252,10 +240,6 @@ with `mix mealplan.invite` (or `bin/mealplan eval` in a release).
 value `MEALPLAN_PUBLIC_URL` — the OAuth issuer — carries. The default share
 name `https://gb-kroger-mealplanner.exe.xyz` reaches the same server; what is
 registered with Kroger or pasted into a connector uses `plantrify.com`.
-
-`MEALPLAN_STATE` is the state file's path (ADR 0031); it carries no password,
-so it lives in this file, and `Mealplan.Boot` refuses to start if it points
-inside `MEALPLAN_CORPUS_ROOT` or any tenant's folder.
 
 **What it does not carry is anything secret.** `SUPERTOKENS_API_KEY`, the SMS
 credentials and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` all arrive through
@@ -265,23 +249,11 @@ failures are graded on purpose: a missing Kroger or SMS credential still starts
 the server and is named in the journal.
 
 **The start-up lines in the journal are the health check.** They name the
-corpus root, the database, the count of invited and provisioned households,
-whether a household can sign in at all, the sandbox mechanism, the isolation
-that backend gives between households, and whether Kroger is configured. Read
-them after every restart rather than trusting `active (running)` — a server
-nobody can sign in to looks exactly as healthy as one they can. There is no
-corpus opened at start any more: each tenant's folder opens on that tenant's
-first request (`Mealplan.Corpus.ensure_open/1`).
-
-**The unit sets `MEALPLAN_SANDBOX=microsandbox` (ADR 0033)**, because it admits
-more than one household and bubblewrap between tenants is one UID namespace,
-not a kernel. That runs each tenant in its own libkrun microVM (ADR 0027). It
-needs `msb` on `PATH`, read/write on `/dev/kvm` (`msb doctor`), and
-`sandbox-image/oci.tar` built with `./sandbox-image/build.sh --microsandbox`.
-The server runs `msb load` on that tar itself at boot; the health line then
-reads `sandbox: microsandbox (libkrun microVM) …`. `MEALPLAN_MAX_LIVE_SESSIONS`
-(default 16) caps concurrent microVMs; the oldest idle session is evicted to
-admit a new tenant. `docs/deploying-behind-exe-dev.md` has the rest.
+database, where the meal plans live and the parser that checks them, the count
+of invited and provisioned households, whether a household can sign in at all,
+and whether Kroger and Walmart are configured. Read them after every restart
+rather than trusting `active (running)` — a server nobody can sign in to looks
+exactly as healthy as one they can.
 
 `Restart=on-failure`, and the server exits 0 on `SIGTERM`, so
 `systemctl --user stop` stays stopped. Running `mix phx.server` or the release
@@ -292,8 +264,9 @@ first, or use a different `MEALPLAN_PORT`.
 public, the variables in full, and what to register with Kroger.
 
 **`mix.lock` is committed; run `mix deps.get --only prod` on deploy** (ADR 0020).
-The server's dependencies run *outside* the sandbox, in the process holding
-tenant credentials, so the lockfile is the supply-chain control that matters.
+The server's dependencies run in the process holding tenant credentials and
+every household's meal plan, so the lockfile is the supply-chain control that
+matters.
 
 ## We practice BDD
 
@@ -310,95 +283,42 @@ Working rhythm:
 
 **The scenarios run in the test BEAM** (`mix test`, ADR 0022). A `When` step
 calls `Mealplan.Mcp.Tools.call/4` — the same function the MCP server calls when
-a client asks for a tool — and a `Then` step asserts against the files that
-ended up on disk. Nothing is spawned per scenario. The runner is the `cucumber`
-hex package reading the same `features/*.feature` files; only the runner
-changed, never the scenarios.
+a client asks for a tool — and a `Then` step asserts against the documents that
+were stored. Nothing is spawned per scenario except the `mealplan` binary. The
+runner is the `cucumber` hex package reading the same `features/*.feature`
+files.
 
-Below the tool nothing is stubbed: a real sandbox session, real shell commands,
-a real git repository, and the real `mealplan` binary. The only thing ever
-mocked is a third-party HTTP API — Kroger, Walmart and the exe.dev LLM gateway,
-and nothing else.
+Below the tool nothing is stubbed: the real document store, the real Ecto
+repository and the real `mealplan` binary. The only thing ever mocked is a
+third-party HTTP API — Kroger, Walmart, the exe.dev LLM gateway, and the
+SuperTokens core with the SMS provider — and nothing else.
 
-**Some scenarios still go over a socket, and they are the ones that should**
+**Some scenarios go over a socket, and they are the ones that should**
 (ADR 0023). `mix test` runs the endpoint on 127.0.0.1, so:
 
 - **The screens** — the consent page and the `/kroger` flow — are walked with a
-  real HTTP client. The exe.dev gate, the redirects and the form posts are the
-  real ones, and a redirect is never followed, because where it goes IS the
-  assertion.
+  real HTTP client. The redirects and the form posts are the real ones, and a
+  redirect is never followed, because where it goes IS the assertion.
 - **`auth.feature` drives the whole client** — dynamic registration, PKCE,
   consent, the token exchange, then `initialize` and `tools/call` over the real
-  Streamable HTTP transport. A command in those scenarios reaches the sandbox
-  through anubis_mcp and the bearer plug, exactly as a real client's would.
-
-That is what ADR 0022 said it had lost and would need to pay back. It is paid.
-
-**`MEALPLAN_SANDBOX=host` runs the commands unconfined**, and it is the fast
-mode for application logic — about half a minute against microsandbox's nine.
-It is what a CI runner with no KVM uses, and what to reach for while working.
-Every `@security` and `@microsandbox` scenario is EXCLUDED in that mode and
-`mix test` prints a banner saying so.
-
-Host mode used to OOM this machine — the full suite left hundreds of live
-`bash` processes because nothing reaped a command's process tree when the
-command returned, only on timeout (`docs/test-suite-oom-findings.md`). ADR 0034
-fixed that: the command is the leader of its own process group (the BEAM starts
-every port in its own session), so once it returns `Mealplan.Sandbox.Runner`
-sends `kill -KILL` to that group and the kernel takes the whole tree in one
-call. Nothing accumulates. A host-mode `mix test` is safe on this VM again,
-even while the service is up.
-
-```bash
-MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
-```
-
-`MEALPLAN_CLI_PATH` is a host-mode need only: under microsandbox and bubblewrap
-the binary is staged into the image, so a checkout with an image built does not
-set it. A machine with no KVM and no image built has only host mode, and the
-preflight raise names the piece that is missing.
-
-The `@security` exclusion is wider than it needs to be, and knowing so is worth
-more than pretending otherwise: `mix test --include security` passes 22 of the
-23 `@security` scenarios in the ported files under host mode, because most of
-them are about the AUTHORISATION boundary, which host mode does not weaken.
-Only "History cannot be pushed anywhere" needs real confinement. Narrowing the
-rule needs a second tag and changes what a green run claims, so it has not been
-done — see ADR 0023.
-
-**`MEALPLAN_SANDBOX=microsandbox` runs the `@microsandbox` companions** — the
-`@security` scenarios that assert containment against a libkrun microVM per
-tenant (ADR 0027). It needs `msb` on `PATH`, read/write on `/dev/kvm`
-(`msb doctor`), and `sandbox-image/oci.tar` built with
-`./sandbox-image/build.sh --microsandbox`. It is slower than host mode by an
-order of magnitude, so reach for it when the change is about the sandbox, not
-for every iteration.
-
-**`MEALPLAN_SANDBOX=bubblewrap` is the product and the default**, test
-included (ADR 0034 took the test default back from microsandbox, ADR 0032). It
-is the only mode that runs every `@security` scenario, the `@bubblewrap` ones
-included. Run it before a release:
-
-```bash
-./sandbox-image/build.sh && ./cli/build.sh && MEALPLAN_SANDBOX=bubblewrap mix test
-```
+  Streamable HTTP transport (`Mealplan.McpClient.call/3`).
 
 ### Running the suite
 
 ```bash
-# fast, for application logic — @security and @microsandbox excluded, loudly
-MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release mix test
-
-# the product, and what `mix test` with no MEALPLAN_SANDBOX picks
-./sandbox-image/build.sh && ./cli/build.sh && mix test
+./cli/build.sh && mix test        # about 18 seconds, every scenario included
 ```
 
-**Nothing else has to be running.** The state is one SQLite file (ADR 0024,
-restored by ADR 0031), so a test run needs no server, no user, no password and
-no port. `mix test` runs `ecto.create` and `ecto.migrate` against
-`mealplan_test.db` beside the checkout; `mix ecto.reset` or `rm mealplan_test.db`
-is the reset. ADR 0029 had briefly needed a PostgreSQL server here — for a
-self-hosted SuperTokens core, which ADR 0030 moved off the machine.
+There is one mode. `MEALPLAN_SANDBOX` is gone (ADR 0039), and so is the
+`@security` exclusion: every `@security` scenario asserts an authorisation
+boundary — a path cannot leave the household, a token reaches only its own
+tenant — and runs in every run. `MEALPLAN_CLI_PATH` names the binary's
+directory when it is not `cli/target/x86_64-unknown-linux-musl/release`.
+
+**Nothing else has to be running.** The state is one SQLite file, so a test run
+needs no server, no user, no password and no port. `mix test` runs
+`ecto.create` and `ecto.migrate` against `mealplan_test.db` beside the
+checkout; `mix ecto.reset` or `rm mealplan_test.db` is the reset.
 
 The SuperTokens core is **not** reached in a test run: it is a third-party HTTP
 API, which is the one kind of thing this suite mocks, and
@@ -408,69 +328,50 @@ port. No scenario can reach the managed core or send a real text message.
 Narrowing a run:
 
 ```bash
-mix test test/mealplan/sandbox/scratch_test.exs     # a unit test file
-mix test test/mealplan/sandbox/microsandbox_test.exs # the microVM backend, real KVM
-mix test --only security                            # @security scenarios only
-mix test test/mealplan/auth/sms_test.exs            # the Twilio and Telnyx request shapes
+mix test test/mealplan/store/documents_test.exs   # the store's own rules
+mix test test/mealplan/store/scratch_test.exs     # the parser's temporary copy
+mix test --only security                          # @security scenarios only
+mix test --only documents                         # features/documents.feature
+mix test test/mealplan/auth/sms_test.exs          # the Twilio and Telnyx request shapes
 ```
 
 Filtering by file does NOT narrow the scenarios: `Cucumber.compile_features!()`
 in `test/test_helper.exs` compiles every feature in `config :cucumber, :features`
 whatever else is on the command line. Use tags to narrow scenarios.
 
-`features/sandbox.feature` now runs here too, through
-`test/features/step_definitions/sandbox_steps.exs` (ADR 0023). Its `@security`
-scenarios assert something real only under bubblewrap; `test_helper.exs`
-excludes the `:security` tag under `MEALPLAN_SANDBOX=host`.
+**A run leaves nothing behind.** The meal plans are rows, and the Ecto sandbox
+rolls every scenario back. The parser's temporary copy of a household's
+documents lives in one directory under a root named for the OS process id;
+`Mealplan.Store.Cli.run/3` removes it in an `after`, and `sweep_stale/0`
+collects the roots of dead processes at the next start
+(`test/mealplan/store/scratch_test.exs`).
 
-**A run leaves nothing behind, and that is asserted rather than assumed.** Each
-sandboxed command gets one directory under a root named for the OS process id;
-`Mealplan.Sandbox.Runner.run/2` removes it in an `after`, so no path out — a
-timeout, a raise, a non-zero exit — can leak it. The root itself goes at exit,
-and `sweep_stale/0` collects the roots of dead processes at the next start, which
-is what covers a SIGKILL. The root sits on `/dev/shm` when there is 64 MB free
-there; `MEALPLAN_TMPDIR` overrides. `test/mealplan/sandbox/scratch_test.exs`
-holds the regression tests, and they exist because the removal was once the last
-line of the function: a killed `yes | sort` left an 11 GB spill and filled the
-VM to 94%.
-
-**Processes leave nothing behind either.** Bubblewrap and the microVM collect a
-command's whole process tree in a pid namespace when the command's pid 1 exits.
-Host mode has no pid namespace, so the command runs as its own process-group
-leader and `Mealplan.Sandbox.Runner.reap_group/1` sends `kill -KILL` to that
-group once the command returns — one call, the kernel takes the tree
-(ADR 0034). Before that, a host-mode suite left hundreds of stray `bash`
-processes and OOM'd the VM.
-
-After a run, all of these should print nothing:
+After a run, these should print nothing:
 
 ```bash
 ls /tmp /dev/shm | grep mealplan
-pgrep -af 'sleep 424242|bwrap'                                  # no stray command trees
-sqlite3 mealplan_test.db 'select count(*) from oauth_clients'   # 0
+sqlite3 mealplan_test.db 'select count(*) from documents'        # 0
+sqlite3 mealplan_test.db 'select count(*) from oauth_clients'    # 0
 ```
 
-The database file itself DOES stay behind, on purpose: `ecto.create` made it and
-the next run reuses it. What must not stay behind is rows — the Ecto sandbox
-rolls every scenario back, so a count of anything but zero means a write escaped
-the
-sandbox connection.
+The database file itself DOES stay behind, on purpose: `ecto.create` made it
+and the next run reuses it. What must not stay behind is rows — a count of
+anything but zero means a write escaped the sandbox connection.
 
 Rules of thumb:
 
-- **`Given` steps may write files directly** — that is setup. **`When` steps go
-  through the tool handler**: `Mealplan.Mcp.Tools.call/4`, real sandbox, real
-  command. Never short-circuit the interface under test. Where the scenario is
-  about the transport or a screen, go one level further out and drive real
-  HTTP — `Mealplan.McpClient` and `Mealplan.Browser` — rather than the handler.
+- **`Given` steps may write directly** — that is setup
+  (`Mealplan.FeatureCorpus.plant/3`, not checked by the parser, so a scenario
+  about the validator can plant the broken document it is about). **`When`
+  steps go through the tool handler**: `Mealplan.Mcp.Tools.call/4`
+  (`Mealplan.FeatureCorpus.call/3`). Never short-circuit the interface under
+  test. Where the scenario is about the transport or a screen, go one level
+  further out and drive real HTTP — `Mealplan.McpClient` and `Mealplan.Browser`.
 - **Scenarios are deterministic**: fixed ISO dates, frozen clock, a fresh
-  meal-plan folder per scenario.
+  tenant and meal plan per scenario.
 - **A bug gets a failing scenario before it gets a fix.**
 - `@core` and `@security` must pass before any release. `@future` documents
-  intent and is excluded from the default run. `@security` cannot pass under
-  `MEALPLAN_SANDBOX=host`, where it does not run at all; microsandbox covers the
-  `@microsandbox` half, and a release still runs bubblewrap for the
-  `@bubblewrap` scenarios.
+  intent and is excluded from every run.
 
 See `features/README.md` for the conventions the scenarios follow.
 
@@ -505,25 +406,28 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   them, is prose in `preferences/household.md` — read it before writing a day.
 - An ingredient is one markdown list item: `- <quantity> [unit] <item>`. No unit
   means a count (`- 2 eggs`).
-- The shopping list is **derived from the folder every time, never stored**: read
-  the days in range, follow every meal's links to recipes, scale to that
-  meal's servings, aggregate.
+- The shopping list is **derived from the meal plan every time, never stored**:
+  read the days in range, follow every meal's links to recipes, scale to that
+  meal's servings, aggregate. `shopping_list` with `out` writes a copy into
+  `shopping-lists/` for the retailer tools to work on.
 - Unit math is conservative. Combine quantities only when the units convert
   (tbsp→cup, oz→lb); otherwise keep separate lines rather than guessing.
 - Countable items round up. You cannot buy 1.5 onions.
 - A broken document fails the shopping list loudly. Quietly under-buying is
-  worse than an error, because the housewife only finds out at the store.
+  worse than an error, because the housewife only finds out at the store. The
+  store refuses to hold a broken recipe or day in the first place, so this is
+  now a second line of defence.
 - **Nothing is chosen for the household.** `filter.term` on "boneless chicken
   thighs" returns noise, so `kroger_find_products` writes every candidate down
   and stops. Choosing is deleting the lines you do not want, which is an
-  ordinary edit to an ordinary file. "I was shown candidates and chose nothing"
+  ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
   is an outcome, not a failure.
 - **How the household chooses is written down, in `preferences/household.md`.**
   Read it before deleting candidates; when it does not settle the question, ask,
   then write the answer into it. **It has no schema on purpose** — it is prose,
-  `mealplan validate` never opens it, and the example the folder ships is meant
-  to be rewritten into whatever shape the household likes. That is the one
-  document in the folder with no format to get wrong, and the exception is
+  `mealplan validate` never opens it, and the example a new meal plan ships is
+  meant to be rewritten into whatever shape the household likes. That is the
+  one document in the meal plan with no format to get wrong, and the exception is
   deliberate: a preference nobody can express is a preference nobody records.
   See `features/preferences.feature`.
 - **A cart add is at most once.** No idempotency key, no response body, no way
@@ -540,30 +444,25 @@ actual deliverable.
 Practically, that means weighing decisions under two lenses and saying which one
 a conclusion belongs to. They often disagree:
 
-- One household on one VM: the folder is real, on local disk, owned by the user;
-  the threat is prompt injection in recipe text; per-command latency is what the
-  user feels.
+- One household on one VM: the threat is prompt injection in recipe text;
+  per-call latency is what the user feels.
 - Many tenants on shared infrastructure: the threat is tenant-vs-tenant and the
   adversary may be a paying customer with unlimited attempts; idle cost per
-  tenant and time-to-first-command dominate; anything leaking the server's
-  environment into the sandbox is a cross-tenant credential breach.
+  tenant and time-to-first-call dominate; anything leaking the server's
+  environment to an agent is a cross-tenant credential breach.
 
-`docs/sandbox-trade-study.md` works both lenses and marks where they diverge.
-The load-bearing consequence so far: the sandbox interface needs a **session**
-concept (`open(tenant)` / `run(command)` / `close()`), not just stateless
-commands. Free to design in now, a rewrite to retrofit.
-
-`docs/multi-tenant-isolation-trade-study.md` prices the second lens against named
-candidates and supersedes §11 of the older study. Its answer: **stay on this VM.**
-The §10 trigger fired on 2026-09-05, so the session layer **is** microsandbox now
-where `MEALPLAN_SANDBOX=microsandbox` is set — one libkrun microVM per tenant
-(ADR 0027). Bubblewrap stays the command layer either way and the default. Fly
-Sprites is the offload target if the failure domain — not cost, and not capacity
-— forces one. Cloudflare Dynamic Workers run JavaScript, not a shell, so they
-are out permanently.
-Two numbers to carry: a mostly-idle tenant costs under a tenth of a dollar a month
-anywhere, and the concurrency defect in `sandbox-trade-study.md` §11.7 blocks quoting
-any of it with confidence.
+**The finding so far, and the one that generalises:** the first answer was a
+shell, because a shell is the interface a model knows best. It was right for
+one household and expensive for many — a sandbox image built by hand, a session
+layer, a microVM per tenant with a live cost and a ceiling of about two dozen
+on this VM (`docs/sandbox-trade-study.md`,
+`docs/multi-tenant-isolation-trade-study.md`). ADR 0038 asked what the agent
+actually used the shell for, and the answer was file-shaped verbs: list, read,
+grep, write, edit, undo. Handing it those verbs over rows, and running only
+the server's own parser, moved isolation from containment (a kernel per
+tenant) to authorisation (a `tenant_id` per query) without losing the markdown
+or the repository-shaped way of working. What was given up is pipelines and
+ad-hoc text tools; nobody has yet measured how much an agent misses them.
 
 ## Out of scope for now
 
@@ -580,9 +479,9 @@ is a link the household opens on walmart.com, so whether they opened it — and
 what the cart holds — cannot be known either. Messages say what a link WOULD
 add.
 
-**Multi-tenancy above one machine.** ADR 0033 made the `open(tenant)` seam
-carry real traffic — every invited household has its own tenant, corpus and
-microVM — but it is still one shared VM. A second telephone in one household
-(`mix mealplan.invite --household <slug>`), corpus garbage collection for a
-revoked household, and moving the session layer off this VM past the trade
-study's §10 threshold are all still open. See ADR 0008 and ADR 0033.
+**Multi-tenancy above one machine.** Every invited household has its own tenant
+and its own rows (ADR 0033, ADR 0038), but it is still one SQLite file on one
+VM. A second telephone in one household
+(`mix mealplan.invite --household <slug>`), removing the documents of a revoked
+household, and moving the state to a database server when one file stops being
+enough are all still open. See ADR 0033 and ADR 0038.

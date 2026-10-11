@@ -7,16 +7,13 @@ defmodule Mix.Tasks.Mealplan.Invite do
       mix mealplan.invite +15095550142 [--label "The Smiths"]
       mix mealplan.invite --revoke +15095550142
 
-  There is no HTTP path and no screen for this. An invite grants a shell over a
-  corpus for years, and the authority to grant that is shell access to the VM —
+  There is no HTTP path and no screen for this. An invite grants an assistant a
+  household's meal plan for years, and the authority to grant that is shell
+  access to the VM —
   the same bar as `mix mealplan.recheck` and the ADR 0028 recovery task. A
   release runs it with:
 
       bin/mealplan eval 'Mealplan.Invitations.create("+15095550142", label: "...")'
-
-  It also says, every time, when the sandbox backend cannot isolate one
-  household from another: bubblewrap shares one kernel, and real isolation is
-  `MEALPLAN_SANDBOX=microsandbox` (ADR 0027).
   """
 
   use Mix.Task
@@ -38,8 +35,6 @@ defmodule Mix.Tasks.Mealplan.Invite do
       end
 
     if opts[:revoke], do: revoke(phone), else: invite(phone, opts[:label])
-
-    warn_about_sandbox()
   end
 
   defp invite(phone, label) do
@@ -49,7 +44,7 @@ defmodule Mix.Tasks.Mealplan.Invite do
 
         Mix.shell().info(
           "They can now sign in at the login page. The first code they enter provisions " <>
-            "their own tenant and a fresh scaffolded folder."
+            "their own tenant, and their first request scaffolds a fresh meal plan."
         )
 
       {:error, :already_invited} ->
@@ -68,40 +63,11 @@ defmodule Mix.Tasks.Mealplan.Invite do
       {:ok, :redeemed} ->
         Mix.shell().info(
           "removed the owner membership for #{phone}. Their clients are locked out on the " <>
-            "next request. The tenant row and its folder stay on disk for you to remove."
+            "next request. The tenant row and its documents stay in the database for you to remove."
         )
 
       {:error, :not_found} ->
         Mix.shell().info("no invitation for #{phone}. Nothing to do.")
-    end
-  end
-
-  # Named every run, not only when it is a problem: a person inviting a second
-  # household on the default backend has weakened the boundary and should see it
-  # said. See docs/multi-tenant-isolation-trade-study.md §10.
-  defp warn_about_sandbox do
-    case sandbox_warning() do
-      nil -> :ok
-      text -> Mix.shell().info("\n" <> text)
-    end
-  end
-
-  @doc """
-  The isolation warning, or nil when the backend already isolates households.
-
-  `bubblewrap` (and `host`) share one kernel between tenants; real isolation is
-  `MEALPLAN_SANDBOX=microsandbox` (ADR 0027, ADR 0033). Public so a scenario
-  can assert on it without shelling out.
-  """
-  def sandbox_warning do
-    if Mealplan.Sandbox.mode() == :microsandbox do
-      nil
-    else
-      "warning: the sandbox backend is #{Mealplan.Sandbox.mode()}, which shares one " <>
-        "kernel between households. Real isolation between tenants is the " <>
-        "microsandbox backend (a libkrun microVM per household, ADR 0027) — set " <>
-        "MEALPLAN_SANDBOX=microsandbox in deploy/mealplan-elixir.service before a " <>
-        "second household is reachable."
     end
   end
 

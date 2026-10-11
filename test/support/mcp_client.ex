@@ -45,25 +45,29 @@ defmodule Mealplan.McpClient do
     }
   end
 
-  @doc "Run a command through the `bash` tool, over MCP. The whole stack."
-  def run(%__MODULE__{} = client, command, message \\ nil) do
+  @doc """
+  Call one tool over MCP — the whole stack: the bearer plug, anubis_mcp's
+  Streamable HTTP transport, and the tool handler.
+
+  Returns `{client, %{text, is_error, structured, error}}`.
+  """
+  def call(%__MODULE__{} = client, tool, arguments) do
     client = initialized(client)
-
-    response =
-      rpc(client, "tools/call", %{
-        "name" => "bash",
-        "arguments" => %{"command" => command, "message" => message || "bash #{command}"}
-      })
-
+    response = rpc(client, "tools/call", %{"name" => tool, "arguments" => arguments})
     result = response["result"] || %{}
-    structured = result["structuredContent"] || %{}
 
     {client,
      %{
-       stdout: Map.get(structured, "stdout", ""),
-       stderr: Map.get(structured, "stderr", ""),
-       exit_code: Map.get(structured, "exitCode", 0),
-       text: result |> Map.get("content", []) |> Enum.map_join("\n", &Map.get(&1, "text", "")),
+       # The onboarding note rides on every reply while a household is new
+       # (ADR 0026); it is not part of what the tool answered.
+       text:
+         result
+         |> Map.get("content", [])
+         |> Enum.map(&Map.get(&1, "text", ""))
+         |> Enum.reject(&(&1 == Mealplan.Onboarding.note()))
+         |> Enum.join("\n"),
+       is_error: result["isError"] == true,
+       structured: result["structuredContent"] || %{},
        error: response["error"]
      }}
   end
@@ -207,8 +211,7 @@ defmodule Mealplan.McpClient do
     client = %{client | session_id: response.session_id}
     _ = post_rpc(client, %{"jsonrpc" => "2.0", "method" => "notifications/initialized"})
 
-    # ADR 0035: bash / read_file / write_file refuse until `open` has run. A
-    # real client calls it once at the start of a session; so does this one.
+    # A real client starts with `open`, to see the meal plan; so does this one.
     _ = rpc(client, "tools/call", %{"name" => "open", "arguments" => %{}})
     client
   end

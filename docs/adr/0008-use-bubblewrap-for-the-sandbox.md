@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2026-08-23
 decision-makers: gburgett
 consulted: bubblewrap lockdown study (docs/bubblewrap-lockdown-study.md), agent runtime spike (docs/agent-runtime-spike.md), sandbox trade study (docs/sandbox-trade-study.md)

@@ -6,8 +6,7 @@ defmodule MealplanWeb.SitePages do
   ADR 0026).
 
   Plain HTML in a heredoc, for the reason `MealplanWeb.ConsentPage` and
-  `MealplanWeb.KrogerPages` give: a template engine running outside the sandbox,
-  in the process that holds the household's credentials, is a bad trade for one
+  `MealplanWeb.KrogerPages` give: a template engine running in the process that holds the household's credentials, is a bad trade for one
   page of markup. `e/1` is the same five-character escape. Shared colors and
   fonts live in `MealplanWeb.Theme`.
 
@@ -564,6 +563,7 @@ defmodule MealplanWeb.SitePages do
 
   defp day_row(label, text, opts \\ []) do
     css = if opts[:muted], do: " muted", else: ""
+
     ~s(<div class="day-row#{css}"><div class="day-label mono">#{label}</div><div class="day-text">#{text}</div></div>)
   end
 

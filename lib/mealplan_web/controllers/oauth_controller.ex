@@ -91,7 +91,7 @@ defmodule MealplanWeb.OAuthController do
             client: client,
             params: auth_params,
             phone: identity.phone,
-            folder: Mealplan.Tenancy.corpus_path(conn.assigns.tenant),
+            household: conn.assigns.tenant,
             offer_kroger: Mealplan.Config.kroger_client_id() != "",
             kroger_connected: false
           )

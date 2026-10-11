@@ -52,32 +52,24 @@ config :phoenix,
 # same way the Kroger and Walmart mocks do. `MEALPLAN_OWNER_PHONE` travels with
 # them, from `Mealplan.Mock.SuperTokens`.
 
-# ExUnit does not open the one household's corpus at application start. There is
-# no one household under test: each scenario opens its own tenant over its own
-# temporary folder, through `Mealplan.Boot.open_corpus/3`. Leaving the boot in
-# would point a session at the developer's real meal plan, and on a machine with
-# no sandbox image built it would refuse to start the application at all.
+# ExUnit does not run the boot: `mix test` migrates the test database itself,
+# and each scenario scaffolds its own tenant's meal plan through
+# `Mealplan.Store.Corpus.open/2`.
 config :mealplan, boot_household: false
 
 # The scenarios stay in features/, where AGENTS.md puts them and where the
 # Cucumber suite read them from. Only the runner changed. Named one by one
 # rather than globbed, so a new feature file has to be added here on purpose
-# (ADR 0023) — the last one, sandbox.feature, landed with its own step
-# definitions in test/features/step_definitions/sandbox_steps.exs. Its 51
-# @security scenarios only assert something real under bubblewrap mode, so
-# test_helper.exs excludes the :security tag rather than the file when
-# MEALPLAN_SANDBOX=host has no image to test against.
+# (ADR 0023).
 config :cucumber,
   features: [
     "features/corpus.feature",
     "features/family_size.feature",
     "features/history.feature",
     "features/meals.feature",
-    "features/migrations.feature",
     "features/pantry.feature",
     "features/preferences.feature",
     "features/recipes.feature",
-    "features/sandbox.feature",
     "features/shopping_list.feature",
     "features/product_search.feature",
     "features/kroger_cart.feature",
@@ -87,7 +79,9 @@ config :cucumber,
     "features/walmart.feature",
     "features/consumable_recheck.feature",
     "features/onboarding.feature",
-    "features/sms_otp.feature"
+    "features/sms_otp.feature",
+    "features/documents.feature",
+    "features/tools.feature"
   ],
   steps: ["test/features/step_definitions/**/*.exs"],
   support: ["test/features/support/**/*.exs"]

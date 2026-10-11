@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2026-09-06
 decision-makers: gburgett
 consulted: ADR 0022, ADR 0027, ADR 0032, docs/test-suite-oom-findings.md

@@ -8,30 +8,11 @@ defmodule Mealplan.Config do
   """
 
   @doc """
-  The root every tenant's meal-plan folder sits under (ADR 0033).
-
-  Default `~/meal-plans`. A tenant's own folder is `<root>/<slug>`, recorded on
-  the `tenants` row and read through `Mealplan.Tenancy.corpus_path/1`. There is
-  no single `folder/0` or `tenant/0` any more: a request carries its own.
-  """
-  def corpus_root, do: get(:corpus_root) || Path.expand("~/meal-plans")
-
-  @doc """
-  The abandoned single-household folder (ADR 0033).
-
-  `MEALPLAN_FOLDER` is kept defined only as a pointer for a follow-up record
-  that moves the old household's recipes and meals into its new tenant. Nothing
-  reads it at runtime.
-  """
-  def legacy_folder, do: presence(get(:folder))
-
-  @doc """
   The SQLite file holding the server state (ADR 0024, restored by ADR 0030).
 
   Read from the repo's own configuration rather than from a `MEALPLAN_*` key of
   our own, so there is exactly one answer to "which database is open" and it is
-  the one Ecto actually connected to. `Mealplan.Boot` checks it is outside the
-  meal-plan folder before it writes a row.
+  the one Ecto actually connected to.
   """
   def database do
     Application.get_env(:mealplan, Mealplan.Repo, [])

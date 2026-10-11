@@ -1,49 +1,26 @@
 name: test
 
-# The scenarios under features/ run in host mode here, on purpose: an
-# ubuntu-latest runner has no /dev/kvm, so microsandbox cannot run, and building
-# a bubblewrap image needs Docker plus unprivileged user namespaces. Host mode
-# is explicit here because the default is bubblewrap (ADR 0034 took the test
-# default back from ADR 0032's microsandbox) — see ADR 0022 and ADR 0034. The
-# database is one SQLite file
-# (ADR 0024, restored by ADR 0030), so this job needs no service — ADR 0028's
-# PostgreSQL was only there for a self-hosted SuperTokens core, and ADR 0029
-# moved that core off the machine.
+# The scenarios under features/ and the unit tests, in the test BEAM (ADR 0022).
+# There is one mode: the meal plan is documents in the state database and the
+# assistant gets file verbs, not a shell (ADR 0038, ADR 0039), so there is no
+# sandbox to build, no KVM to need, and no @security scenario to exclude — each
+# asserts an authorisation boundary, which nothing on a runner weakens.
 #
-# The tool scenarios run in the test BEAM against the handlers. The ones about
-# the screens and the transport go over a real socket to an endpoint this same
-# BEAM is running, so the session gate, the sign-in screens, the OAuth handshake
-# and anubis_mcp's Streamable HTTP transport are all under test here too —
-# ADR 0023. The third parties (Kroger, Walmart, the exe.dev LLM gateway, and now
-# the SuperTokens core and the SMS provider) are real listeners on 127.0.0.1, so
+# The database is one SQLite file `ecto.create` makes, so this job needs no
+# service. The third parties (Kroger, Walmart, the exe.dev LLM gateway, the
+# SuperTokens core and the SMS provider) are real listeners on 127.0.0.1, so
 # nothing in this job can reach a real one — and nothing in it can send a real
 # text message.
 #
-# What this job does NOT prove is containment. Every @security scenario is
-# excluded in host mode, and mix test says so in a banner rather than reporting
-# a quiet green. Those scenarios need bubblewrap and a built image — the
-# `sandboxed` job below, which is where a release gets its evidence.
-#
-# (That exclusion is wider than it needs to be: 22 of the 23 @security scenarios
-# in the ported files pass under host mode, because most are about the
-# authorisation boundary rather than containment. Narrowing it needs a second
-# tag and a decision about what @security promises — see ADR 0023.)
-
-# DISABLED 2026-09-06: on ubuntu-latest the runner loses communication with the
-# server partway through `mix test` ("The hosted runner lost communication with
-# the server", ~46 min in). The host-mode suite was memory-heavy — the same OOM
-# that hit the VM, see docs/test-suite-oom-findings.md — because nothing reaped
-# a command's process tree when the command returned. ADR 0034 fixed that: the
-# runner now `kill -KILL`s the command's process group when it returns, so the
-# accumulation is gone. Re-enabling this workflow is a follow-up that needs a
-# run on a hosted runner to confirm it now fits. Until then the scenarios run
-# on the VM before a release, per AGENTS.md.
-# Re-enable by restoring the push / pull_request triggers below:
-#
-#   push:
-#     branches: [main, elixir-migration]
-#   pull_request:
+# This workflow was disabled on 2026-09-06, when the host-mode suite left
+# hundreds of shell process trees behind and the hosted runner lost contact.
+# The shell went with the sandbox (ADR 0039); the suite now spawns only the
+# `mealplan` parser, removes its scratch directory on every path out, and runs
+# in about 18 seconds.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -52,22 +29,16 @@ env:
   LANG: C.UTF-8
 
 jobs:
-  logic:
-    name: application logic (host mode)
+  test:
+    name: scenarios and unit tests
     runs-on: ubuntu-latest
-
-    # No service container. The state is a SQLite file `ecto.create` makes, and
-    # the SuperTokens core and the SMS provider are third-party HTTP APIs —
-    # `Mealplan.Mock.SuperTokens` stands in for both on a port the operating
-    # system picks.
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: erlef/setup-beam@v1
         with:
-          # Matches the VM (plan 0005: OTP 28.5.0.6, Elixir 1.19.6-otp-28), so
-          # CI and the machine that serves the household agree.
+          # Matches the VM (OTP 28.5, Elixir 1.19.6-otp-28).
           otp-version: "28"
           elixir-version: "1.19"
 
@@ -79,9 +50,8 @@ jobs:
           key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
           restore-keys: ${{ runner.os }}-mix-
 
-      # The corpus reaches for `mealplan` on PATH. Under bubblewrap it is staged
-      # into the image; in host mode it has to be a real binary on the runner,
-      # so it is built here and found through MEALPLAN_CLI_PATH.
+      # Every agent write to a recipe or a day is checked by the `mealplan`
+      # parser before it is stored, so the binary has to exist.
       - uses: actions/cache@v4
         with:
           path: cli/target
@@ -94,30 +64,4 @@ jobs:
 
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
-
-      # `mix format --check-formatted` is deliberately not here yet. The
-      # formatter's output moves between Elixir versions, and this branch was
-      # written on 1.18 while the VM runs 1.19 — a check added blind would fail
-      # on files nobody in this change touched. Add it in a commit that runs
-      # `mix format` on 1.19 first.
-
-      # Host mode is explicit here because ubuntu-latest has no /dev/kvm and no
-      # bubblewrap image; `mix test` with no MEALPLAN_SANDBOX picks bubblewrap
-      # (ADR 0034) and preflight would raise for the missing image.
-      - name: Run the scenarios
-        env:
-          MEALPLAN_SANDBOX: host
-          MEALPLAN_CLI_PATH: cli/target/x86_64-unknown-linux-musl/release
-        run: mix test
-
-  # Not wired to run yet: it needs a runner that can build the sandbox image
-  # (Docker) and use unprivileged user namespaces for bwrap. Until it does, the
-  # @security scenarios are run by a person on the VM before a release, per
-  # AGENTS.md — "those scenarios are not optional and not 'later'".
-  #
-  #  sandboxed:
-  #    name: containment (@security, bubblewrap)
-  #    runs-on: ubuntu-latest
-  #    steps:
-  #      - run: ./sandbox-image/build.sh && ./cli/build.sh
-  #      - run: mix test --only security
+      - run: mix test

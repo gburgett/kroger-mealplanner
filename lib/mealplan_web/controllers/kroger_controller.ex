@@ -23,11 +23,15 @@ defmodule MealplanWeb.KrogerController do
   def index(conn, _params) do
     case kroger(conn) do
       nil ->
-        html_resp(conn, 200, KrogerPages.status_page(%{configured: false, connected: false, store: nil}))
+        html_resp(
+          conn,
+          200,
+          KrogerPages.status_page(%{configured: false, connected: false, store: nil})
+        )
 
       _api ->
-        {:ok, session} = session(conn)
-        config = Kroger.Config.read(session)
+        {:ok, corpus} = corpus(conn)
+        config = Kroger.Config.read(corpus)
 
         store =
           if config.store != "" do
@@ -122,7 +126,9 @@ defmodule MealplanWeb.KrogerController do
 
       api ->
         asked = if is_binary(params["link"]), do: params["link"], else: ""
-        link = if asked != "", do: LinkDesk.get(asked), else: LinkDesk.open(conn.assigns.identity, nil)
+
+        link =
+          if asked != "", do: LinkDesk.get(asked), else: LinkDesk.open(conn.assigns.identity, nil)
 
         case link do
           nil ->
@@ -171,7 +177,9 @@ defmodule MealplanWeb.KrogerController do
             location_id = to_string(params["store"] || "")
 
             modality =
-              if Kroger.Config.modality?(params["modality"]), do: params["modality"], else: "pickup"
+              if Kroger.Config.modality?(params["modality"]),
+                do: params["modality"],
+                else: "pickup"
 
             zip = to_string(params["zip"] || "")
 
@@ -197,10 +205,10 @@ defmodule MealplanWeb.KrogerController do
   end
 
   defp finish_store(conn, link, chosen, modality) do
-    {:ok, session} = session(conn)
+    {:ok, corpus} = corpus(conn)
 
     Kroger.Config.write(
-      session,
+      corpus,
       now(),
       %{
         location_id: chosen.location_id,
@@ -219,7 +227,11 @@ defmodule MealplanWeb.KrogerController do
         |> put_resp_header("cache-control", "no-store")
         |> html_resp(
           200,
-          KrogerPages.linked_page(%{name: chosen.name, address: chosen.address, modality: modality})
+          KrogerPages.linked_page(%{
+            name: chosen.name,
+            address: chosen.address,
+            modality: modality
+          })
         )
 
       consent ->
@@ -233,7 +245,11 @@ defmodule MealplanWeb.KrogerController do
             conn
             |> put_resp_header("cache-control", "no-store")
             |> redirect_302(
-              with_query(consent.params["redirect_uri"], [{"code", code}], consent.params["state"])
+              with_query(
+                consent.params["redirect_uri"],
+                [{"code", code}],
+                consent.params["state"]
+              )
             )
 
           {:error, message} ->
@@ -242,11 +258,11 @@ defmodule MealplanWeb.KrogerController do
     end
   end
 
-  # POST /kroger/disconnect — forget the credential, reset the folder's half.
+  # POST /kroger/disconnect — forget the credential, reset the meal plan's half.
   def disconnect(conn, _params) do
     if kroger(conn), do: Kroger.Store.clear(tenant_id(conn))
-    {:ok, session} = session(conn)
-    Kroger.Config.write(session, now(), nil, base_url())
+    {:ok, corpus} = corpus(conn)
+    Kroger.Config.write(corpus, now(), nil, base_url())
 
     conn
     |> put_resp_header("cache-control", "no-store")
@@ -269,7 +285,8 @@ defmodule MealplanWeb.KrogerController do
 
   defp kroger(conn), do: Kroger.Api.for_tenant(conn.assigns.tenant)
 
-  defp session(conn), do: {:ok, Mealplan.Corpus.ensure_open(conn.assigns.tenant)}
+  # The household's meal plan, scaffolded if this is its first request (ADR 0038).
+  defp corpus(conn), do: {:ok, Mealplan.Store.for_tenant(conn.assigns.tenant)}
 
   defp now, do: Mealplan.Clock.now()
 

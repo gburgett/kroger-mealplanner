@@ -19,11 +19,11 @@ Feature: Choosing the way this household would choose
   preference nobody can express is a preference nobody records.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
 
   Scenario: A brand new folder already holds an example to edit
-    Given the meal-plan folder is brand new
-    When I run "cat preferences/household.md"
+    Given the meal plan is brand new
+    When I read "preferences/household.md"
     Then the command succeeds
     And the output says the document is an example to be rewritten
 
@@ -36,7 +36,7 @@ Feature: Choosing the way this household would choose
       - butter: unsalted
       - mayonnaise: Duke's, never the store brand
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
 
   Scenario: A preference is found by the thing it is about
     Given the household prefers:
@@ -47,9 +47,9 @@ Feature: Choosing the way this household would choose
       - butter: unsalted
       - mayonnaise: Duke's, never the store brand
       """
-    When I run "grep -i butter preferences/household.md"
+    When I search "preferences/household.md" for "(?i)butter"
     Then the command succeeds
-    And the output contains the line "- butter: unsalted"
+    And the output mentions "- butter: unsalted"
 
   Scenario: The household writes it in its own shape, and nothing complains
     When I write the file "preferences/household.md":
@@ -60,7 +60,7 @@ Feature: Choosing the way this household would choose
       own brand of everything except mayonnaise, which has to be Duke's, and
       butter, which has to be unsalted or the shortbread goes wrong.
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
 
   Scenario: How many meals a day is a preference, and prose can hold it
     When I write the file "preferences/household.md":
@@ -68,22 +68,22 @@ Feature: Choosing the way this household would choose
       We plan five small meals a day — breakfast, morning snack, lunch,
       afternoon snack and dinner. The snacks are just fruit and a biscuit.
       """
-    Then "mealplan validate" reports no problems
+    Then the meal plan validates
 
   Scenario: The example a new folder ships mentions meals per day
-    Given the meal-plan folder is brand new
-    When I run "cat preferences/household.md"
+    Given the meal plan is brand new
+    When I read "preferences/household.md"
     Then the command succeeds
     And the output contains the line "- breakfast, lunch and dinner — NOT CONFIRMED"
 
   Scenario: The validator has no opinion about this document at all
     Given the file "preferences/household.md" contains "- a good handful of cheese"
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
 
   Scenario: A folder with no preferences document is fine
     Given the file "preferences/household.md" does not exist
-    When I run "mealplan validate"
+    When I validate the meal plan
     Then the command succeeds
 
   Scenario: What the household wrote is never overwritten by the example
@@ -94,7 +94,7 @@ Feature: Choosing the way this household would choose
       - mayonnaise: Duke's, never the store brand
       """
     When the server restarts
-    And I run "cat preferences/household.md"
+    And I read "preferences/household.md"
     Then the output contains the line "- mayonnaise: Duke's, never the store brand"
     And the output does not contain "an example"
 

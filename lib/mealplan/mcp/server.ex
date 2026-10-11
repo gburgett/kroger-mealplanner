@@ -38,20 +38,20 @@ defmodule Mealplan.Mcp.Server do
     base_url = Mealplan.Config.public_url()
 
     # No per-tenant tree or history here: `server_instructions/0` is read at the
-    # handshake with no connection in hand, and there is no single household to
-    # describe any more (ADR 0033). The onboarding nudge is still folded in when
+    # handshake with no connection in hand (ADR 0033); `open` hands the tree back. The onboarding nudge is still folded in when
     # any household still needs it, and it also reaches the model on every
     # `tools/call` reply — see `Mealplan.Mcp.Tools.call/4`.
     [
       onboarding_instructions(),
-      "A meal plan is a folder of markdown documents. Read README.md in the folder first; " <>
-        "it is the schema. Plan meals with ordinary shell commands.",
+      "A meal plan is a set of markdown documents laid out like a folder. Read " <>
+        "README.md first; it is the schema.",
       "USE THESE TOOLS FOR MEAL PLANNING. When the household wants to plan dinner, " <>
         "shop for the week, or save a recipe, do it through the tools rather than " <>
-        "answering from memory: call `open` first to see the meal plan, explore and " <>
-        "record with `bash` and `read_file`, and edit with `write_file`. " <>
-        "`mealplan shopping-list` derives the grocery list, and the Kroger and " <>
-        "Walmart tools put it in a real cart.",
+        "answering from memory: call `open` first to see the meal plan, explore with " <>
+        "`list_files`, `read_file` and `grep`, and change it with `write_file` and " <>
+        "`edit_file`. `shopping_list` derives the grocery list, and the Kroger and " <>
+        "Walmart tools put it in a real cart. Every change is recorded; `history` " <>
+        "and `restore_file` walk any of it back.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>
         "against good — is written in preferences/household.md. Read it before you " <>
         "choose anything on their behalf, which above all means before you delete " <>
@@ -61,7 +61,7 @@ defmodule Mealplan.Mcp.Server do
         "question in front of you, ask them, then write the answer into it — a " <>
         "preference left in the conversation has to be asked for again next week.",
       "KROGER. Which shop the shopping is matched against lives in " <>
-        "config/kroger.md, so \"cat config/kroger.md\" answers \"is Kroger set up\" " <>
+        "config/kroger.md, so reading config/kroger.md answers \"is Kroger set up\" " <>
         "and \"which shop\". There is no tool for that question and there should " <>
         "not be one.",
       Mealplan.Kroger.Help.how_to(base_url),
@@ -78,7 +78,7 @@ defmodule Mealplan.Mcp.Server do
   defp walmart_instructions do
     if Mealplan.Walmart.Api.configured?() do
       "WALMART. Which Walmart store cart links are built for lives in " <>
-        "config/walmart.md, so \"cat config/walmart.md\" answers \"is a Walmart " <>
+        "config/walmart.md, so reading config/walmart.md answers \"is a Walmart " <>
         "store set\". There is no sign-in and no browser flow: the affiliate API " <>
         "is the server's own, so finding a store and writing that file is work " <>
         "YOU do — walmart_find_stores, then write_file.\n\n" <>
@@ -108,27 +108,27 @@ defmodule Mealplan.Mcp.Server do
     end
   end
 
-  # The onboarding nudge for the handshake `instructions`, or "" when every
-  # live household has already acted on it. A fresh server with no sessions
-  # open still shows it — a connecting client is most likely the first
-  # household. Per-`tools/call` filtering stays exact (`Mealplan.Mcp.Tools`).
+  # The onboarding nudge for the handshake `instructions`, or "" once every
+  # household has acted on it. The handshake has no tenant in hand, so this is
+  # the coarse answer; the per-`tools/call` note is the exact one
+  # (`Mealplan.Mcp.Tools`). A server with no households yet still shows it — a
+  # connecting client is most likely the first household.
   defp onboarding_instructions do
-    pids =
-      Registry.select(Mealplan.Sandbox.registry(), [{{:_, :"$1", :_}, [], [:"$1"]}])
+    import Ecto.Query
 
-    if pids != [] and Enum.all?(pids, &session_onboarding_done?/1) do
+    slugs = Mealplan.Repo.all(from t in Mealplan.Accounts.Tenant, select: t.slug)
+
+    if slugs != [] and Enum.all?(slugs, &onboarding_done?/1) do
       ""
     else
       Mealplan.Onboarding.note()
     end
   end
 
-  defp session_onboarding_done?(pid) do
-    Mealplan.Onboarding.done?(pid)
+  defp onboarding_done?(slug) do
+    Mealplan.Onboarding.done?(Mealplan.Store.Corpus.handle(slug))
   rescue
     _ -> true
-  catch
-    :exit, _ -> true
   end
 
   # The tenant the bearer plug resolved for this connection, from the access

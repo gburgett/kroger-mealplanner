@@ -3,10 +3,11 @@ defmodule Mealplan.Features.CorpusHooks do
   What every scenario gets before its first `Given`, and what is cleaned up
   after its last `Then`.
 
-  Its own tenant, its own temporary meal-plan folder, and its own sandbox
-  session over that folder — in this process. Nothing is spawned: no BEAM, no
-  `mix`, no HTTP server, no OAuth handshake. That is the whole point of the
-  move; see ADR 0022 and docs/test-suite-parallelisation-study.md.
+  Its own tenant, with a meal plan scaffolded exactly as a household's first
+  request scaffolds one (`Mealplan.Store.Corpus.open/2`), in this process.
+  Nothing is spawned and nothing is on disk: the meal plan is rows, and the Ecto
+  sandbox rolls every one of them back when the scenario ends (ADR 0038,
+  ADR 0039).
   """
 
   use Cucumber.Hooks
@@ -16,69 +17,7 @@ defmodule Mealplan.Features.CorpusHooks do
   @doc "The instant every scenario's clock is pinned to."
   def frozen_clock, do: @frozen_clock
 
-  @doc """
-  The directory this run's scenario folders live under.
-
-  Every scenario folder is a child of one run-scoped root, and the root is
-  removed at the end. Per-scenario cleanup alone was not enough: a scenario that
-  failed left its folder behind, and a full run stranded 167 corpora — enough,
-  with a `.git` in each, to fill the disk and take PostgreSQL down with it. The
-  root makes cleanup independent of whether any individual scenario got that
-  far.
-
-  It sits inside this OS process's sandbox scratch root, so the run's corpora
-  and the commands' scratch files have one owner and one name between them. That
-  is what makes them collectable after a kill, and it is why there is no
-  wildcard sweep here: `mix test --partitions` has several of these running at
-  once, and a wildcard cannot tell a partition that is still working from a run
-  that died. `Mealplan.Sandbox.Scratch.sweep_stale/0` can, and the application
-  calls it at start.
-  """
-  def run_root, do: :persistent_term.get({__MODULE__, :root})
-
-  before_all context, name: "scaffold the template corpus" do
-    root = Path.join(Mealplan.Sandbox.Scratch.root(), "features")
-    File.mkdir_p!(root)
-    :persistent_term.put({__MODULE__, :root}, root)
-
-    # Scaffolding a corpus costs about thirty-five sandbox round trips, and
-    # every scenario would otherwise pay all of them to arrive at a
-    # byte-identical folder: the clock is frozen and the scaffold is
-    # deterministic. Build it once and copy it.
-    #
-    # The template is not a fixture somebody wrote by hand and has to keep in
-    # step. It is produced by the same `Mealplan.Boot.open_corpus/3` the server
-    # runs at start-up, so a scenario begins from a real first boot's output,
-    # git history and migration ledger included.
-    template = Path.join(root, "template")
-    File.mkdir_p!(template)
-
-    {:ok, session, _scaffolded} =
-      Mealplan.Boot.open_corpus("template", template,
-        now: @frozen_clock,
-        base_url: Mealplan.Config.public_url()
-      )
-
-    DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), session)
-    :persistent_term.put({__MODULE__, :template}, template)
-
-    {:ok, context}
-  end
-
-  # Removes this run's corpora. It does NOT run when the run is killed — ^C, the
-  # OOM killer, a CI step timeout — which is what the scratch root above is for:
-  # the next application start collects the whole tree, corpora and command
-  # scratch together, once its owning process is gone.
-  after_all _context do
-    case :persistent_term.get({__MODULE__, :root}, nil) do
-      nil -> :ok
-      root -> File.rm_rf(root)
-    end
-
-    :ok
-  end
-
-  before_scenario context, name: "open a meal-plan folder" do
+  before_scenario context, name: "open a meal plan" do
     # The suite is not async, so one shared connection for the scenario is
     # enough and it reaches the processes that are not this one: the link desk
     # is a GenServer, and a mock server answers on a Bandit process.
@@ -86,37 +25,35 @@ defmodule Mealplan.Features.CorpusHooks do
     ExUnit.Callbacks.on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
 
     tenant = "scenario-#{System.unique_integer([:positive])}"
-    folder = Path.join(run_root(), tenant)
-    File.mkdir_p!(folder)
 
-    # File.cp_r rather than `cp -a`: it copies inside the BEAM, so a scenario
-    # costs one fewer forked process. That mattered — a full run forked enough
-    # to hit EAGAIN.
-    {:ok, _} = File.cp_r(:persistent_term.get({__MODULE__, :template}), folder)
+    # Somewhere OUTSIDE the meal plan for the files a scenario needs on disk —
+    # the Walmart private key. The meal plan itself has no disk to be outside of.
+    scratch = Path.join(Mealplan.Store.Scratch.root(), tenant)
+    File.mkdir_p!(scratch)
 
     Application.put_env(:mealplan, :clock, @frozen_clock)
 
-    # ADR 0033: a request carries its own tenant, and the tools resolve the
-    # folder from the `tenants` row's corpus_path. Set MEALPLAN_CORPUS_ROOT for
-    # the invitations scenarios that provision brand-new tenants, and give this
-    # scenario's own tenant a redeemed invitation for the canonical test
-    # telephone — its corpus_path pointing at this scenario's folder — so a
+    # ADR 0033: a request carries its own tenant. Give this scenario's tenant a
+    # redeemed invitation for the canonical test telephone, so a
     # `Browser.signed_in/0` lands in `tenant` rather than a fresh household.
-    Application.put_env(:mealplan, :corpus_root, Path.join(run_root(), "tenants"))
-    provision_scenario_tenant(tenant, folder, Mealplan.Browser.household_phone())
+    provision_scenario_tenant(tenant, Mealplan.Browser.household_phone())
 
     kroger = start_kroger_mock()
-    {walmart, walmart_key_path} = start_walmart_mock(root_of(folder))
+    {walmart, walmart_key_path} = start_walmart_mock(scratch)
     llm = start_llm_mock()
     supertokens = start_supertokens_mock()
 
-    {:ok, session} = Mealplan.Sandbox.open(tenant, folder)
+    corpus =
+      Mealplan.Store.Corpus.open(tenant,
+        now: @frozen_clock,
+        base_url: Mealplan.Config.public_url()
+      )
 
     {:ok,
      context
      |> Map.put(:tenant, tenant)
-     |> Map.put(:folder, folder)
-     |> Map.put(:session, session)
+     |> Map.put(:corpus, corpus)
+     |> Map.put(:scratch, scratch)
      |> Map.put(:now, @frozen_clock)
      |> Map.put(:last, nil)
      |> Map.put(:last_tool, nil)
@@ -128,65 +65,21 @@ defmodule Mealplan.Features.CorpusHooks do
      |> Map.put(:list_path, nil)}
   end
 
-  # "the history has 1 more commit than before" is the only step that reads
-  # `commits_before`, and it is one scenario. `commit_count/1` is a real
-  # sandboxed `git rev-list`, not a free call, so scenarios that never read it
-  # should not pay for it.
-  before_scenario "@remembers-commit-count", context, name: "remember the commit count" do
-    {:ok, Map.put(context, :commits_before, commit_count(context.session))}
-  end
-
-  @doc """
-  Close the session for `tenant` and wait for it to let go of its name.
-
-  `DynamicSupervisor.terminate_child/2` returns as soon as the process is dead,
-  but the `Registry` gives up the name on the DOWN message, which arrives
-  afterwards. `Mealplan.Sandbox.open/3` looks the name up first, so re-opening
-  inside that window hands back the pid that was just killed, and the next call
-  to it exits with `:noproc`.
-
-  Production never terminates a session and re-opens it in the same breath —
-  only a scenario that restarts the server does — so the wait lives here rather
-  than in `Mealplan.Sandbox`.
-  """
-  def close_session(tenant, timeout \\ 2_000) do
-    case Mealplan.Sandbox.whereis(tenant) do
-      pid when is_pid(pid) ->
-        DynamicSupervisor.terminate_child(Mealplan.Sandbox.dynamic_supervisor(), pid)
-        await_deregistered(tenant, System.monotonic_time(:millisecond) + timeout)
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp await_deregistered(tenant, deadline) do
-    cond do
-      Mealplan.Sandbox.whereis(tenant) == nil ->
-        :ok
-
-      System.monotonic_time(:millisecond) >= deadline ->
-        raise "the session for #{tenant} did not give up its name"
-
-      true ->
-        Process.sleep(1)
-        await_deregistered(tenant, deadline)
-    end
+  # "the history has 1 more change than before" is the only step that reads it.
+  before_scenario "@remembers-commit-count", context, name: "remember the change count" do
+    {:ok, Map.put(context, :changes_before, Mealplan.FeatureCorpus.change_count(context))}
   end
 
   # ADR 0033: this scenario's tenant, as a redeemed invitation for the canonical
-  # test telephone. `corpus_path` is this scenario's folder, so a real sign-in
-  # (`Otp.finish/2` -> `Invitations.redeem/2`, idempotent) re-attaches here
-  # instead of provisioning a new `household-<hex>`. The invitations feature's
+  # test telephone, so a real sign-in (`Otp.finish/2` -> `Invitations.redeem/2`,
+  # idempotent) re-attaches here instead of provisioning a new `household-<hex>`. The invitations feature's
   # own steps clear this and drive fresh provisioning where that is the point.
-  defp provision_scenario_tenant(slug, folder, phone) do
+  defp provision_scenario_tenant(slug, phone) do
     alias Mealplan.Accounts.{Invitation, Membership, Tenant}
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     tenant =
-      Mealplan.Repo.insert!(
-        Tenant.changeset(%Tenant{}, %{slug: slug, name: slug, corpus_path: folder})
-      )
+      Mealplan.Repo.insert!(Tenant.changeset(%Tenant{}, %{slug: slug, name: slug}))
 
     _user = Mealplan.Accounts.upsert_user!(%{phone: phone})
 
@@ -277,130 +170,8 @@ defmodule Mealplan.Features.CorpusHooks do
     mock
   end
 
-  # The run root, which is the folder's parent — outside every scenario's corpus.
-  defp root_of(_folder), do: run_root()
-
-  defp commit_count(session) do
-    case Integer.parse(
-           String.trim(Mealplan.Sandbox.Session.run(session, "git rev-list --count HEAD").stdout)
-         ) do
-      {n, _} -> n
-      :error -> 0
-    end
-  end
-
-  # A corpus in the shape a dated migration exists to change. The files are
-  # planted BEFORE the session opens over the folder, because the migration
-  # framework is what these scenarios are testing: the migration has to run at
-  # open, the way it does on a real folder that predates it.
-  before_scenario "@old-dinner-shape", context, name: "plant the one-dinner shape" do
-    # Not the template. The template was itself opened once, so it carries the
-    # migration commits in its git history and both migrations in its ledger.
-    # A folder that predates a migration has neither — that is the whole
-    # situation being tested — so this one is built from nothing.
-    folder = context.folder
-    File.rm_rf!(folder)
-    File.mkdir_p!(Path.join(folder, "recipes"))
-    File.mkdir_p!(Path.join(folder, "dinners"))
-
-    File.write!(
-      Path.join(folder, "recipes/chicken-tacos.md"),
-      Mealplan.Documents.recipe_document(name: "Chicken Tacos", servings: 4)
-    )
-
-    File.write!(Path.join(folder, "dinners/2026-08-25.md"), """
-    ---
-    date: 2026-08-25
-    servings: 4
-    ---
-
-    # Dinner for Tuesday, August 25, 2026
-
-    ## Recipes
-
-    - [Chicken Tacos](../recipes/chicken-tacos.md)
-
-    ## Notes
-
-    Family favorite.
-    """)
-
-    File.write!(Path.join(folder, "dinners/2026-08-26.md"), """
-    ---
-    date: 2026-08-26
-    servings: 4
-    ---
-
-    # Dinner for Wednesday, August 26, 2026
-
-    ## Recipes
-
-    ## Notes
-
-    Leftovers night.
-    """)
-
-    # Close the session the general hook opened and open the corpus again, so
-    # the dated migrations run over the old shape exactly as they would at boot.
-    close_session(context.tenant)
-
-    {:ok, session, _} =
-      Mealplan.Boot.open_corpus(context.tenant, folder,
-        now: @frozen_clock,
-        base_url: Mealplan.Config.public_url()
-      )
-
-    {:ok, Map.put(context, :session, session)}
-  end
-
-  # "A runaway command is stopped" is the one scenario that actually needs its
-  # command to hit the wall-clock timeout, and the default is 10 seconds —
-  # tolerable once, ruinous if every scenario paid it. Reopening with a short
-  # one keeps the scenario honest without taxing the other 225.
-  before_scenario "@slow-timeout", context, name: "shorten the command timeout" do
-    close_session(context.tenant)
-    {:ok, session} = Mealplan.Sandbox.open(context.tenant, context.folder, timeout_ms: 500)
-    {:ok, Map.put(context, :session, session)}
-  end
-
-  # ADR 0035: the idle window is ten minutes in production. A scenario that
-  # asserts a session closes itself when it elapses reopens with a short one,
-  # the same trick @slow-timeout uses for the command timeout.
-  before_scenario "@idle-close", context, name: "shorten the idle window" do
-    close_session(context.tenant)
-    {:ok, session} = Mealplan.Sandbox.open(context.tenant, context.folder, idle_timeout_ms: 500)
-    {:ok, Map.put(context, :session, session)}
-  end
-
-  # This DOES run for a scenario that failed: `Cucumber.Runtime` wraps the
-  # steps in a try and runs the after hooks before it re-raises. So the folder
-  # of a failing scenario goes here, not at the end of the run — which matters,
-  # because a failing run is exactly when a hundred corpora would otherwise pile
-  # up. The `after` covers the one way this hook can still leave one behind:
-  # `close_session/1` raises when a session will not give up its name.
-  #
-  # Every live session is closed, not only `context[:tenant]`. A scenario that
-  # provisions a household of its own — the invitations feature drives a real
-  # sign-in, which opens a session keyed by the new `household-<hex>` slug, not
-  # by this scenario's tenant — would otherwise strand that session in the
-  # registry for the rest of the run. `Mealplan.Mcp.Server.server_instructions/0`
-  # scans every live session for the onboarding nudge (ADR 0033), so a stranded
-  # un-onboarded household kept the note showing in unrelated scenarios
-  # (onboarding.feature:92). Closing them all here also holds the "a run leaves
-  # nothing behind" invariant the suite asserts elsewhere.
   after_scenario context do
-    try do
-      for slug <- live_session_slugs(), do: close_session(slug)
-    after
-      if context[:folder], do: File.rm_rf(context[:folder])
-    end
-
+    if context[:scratch], do: File.rm_rf(context[:scratch])
     :ok
-  end
-
-  defp live_session_slugs do
-    Mealplan.Sandbox.registry()
-    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
-    |> Enum.uniq()
   end
 end

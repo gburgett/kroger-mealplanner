@@ -7,8 +7,8 @@ defmodule Mealplan.Features.WalmartSteps do
   See ADR 0017.
 
   The same rule as the Kroger steps: a `When` goes through the real tool
-  handler, which runs `mealplan shopping-list --json` in the real sandbox and
-  makes a real SIGNED HTTP request; a `Then` reads the file on disk, or the
+  handler, which runs the real `mealplan` parser over the household's documents and
+  makes a real SIGNED HTTP request; a `Then` reads the stored document, or the
   mock's record. The mock VERIFIES the signature against the public half of the
   key the server signs with, so a wrong canonicalisation fails here exactly as
   it would against Walmart.
@@ -23,6 +23,7 @@ defmodule Mealplan.Features.WalmartSteps do
 
   import ExUnit.Assertions
 
+  alias Mealplan.FeatureCorpus
   alias Mealplan.Mcp.Tools
   alias Mealplan.Mock.{Server, Walmart}
   alias Mealplan.Walmart.Config
@@ -99,10 +100,7 @@ defmodule Mealplan.Features.WalmartSteps do
   step "the shopping list for {string} to {string} has been matched against Walmart",
        %{args: [from, to]} = context do
     target = "shopping-lists/#{from}--#{to}.md"
-    context = run_bash(context, "mealplan shopping-list --from #{from} --to #{to} --out #{target}")
-
-    assert context.last.exit_code == 0,
-           "writing the list failed:\n#{context.last.stdout}#{context.last.stderr}"
+    context = FeatureCorpus.write_list(context, from, to, target)
 
     context = context |> Map.put(:list_path, target) |> find_products(target)
     refute error_of(context), "finding products failed:\n#{text_of(context)}"
@@ -307,15 +305,15 @@ defmodule Mealplan.Features.WalmartSteps do
 
   # --- the containment -------------------------------------------------------
 
-  step "I try to read the Walmart private key through the bash tool", context do
-    # Knowing the path is not the protection. The mount namespace is: the key is
-    # not bound into the sandbox, so the path does not resolve there at all —
-    # and the environment is empty besides.
-    {:ok, run_bash(context, "cat #{context.walmart_key_path}; env")}
+  step "I try to read the Walmart private key by its path", context do
+    # Knowing the path is not the protection. A path names one of this
+    # household's documents and nothing else (ADR 0038): there is no file system
+    # under it to reach the key with.
+    {:ok, FeatureCorpus.call(context, "read_file", %{"path" => context.walmart_key_path})}
   end
 
   step "the output does not contain the Walmart private key", context do
-    # Read on the test side, not through the sandbox — the assertion needs the
+    # Read on the test side, not through the tools — the assertion needs the
     # real key to compare against. One full line of the PEM body is distinctive
     # enough that its absence settles the question.
     line =
@@ -327,7 +325,7 @@ defmodule Mealplan.Features.WalmartSteps do
     assert line, "the key file has no PEM body line, so this scenario proves nothing"
 
     refute String.contains?(output(context), line),
-           "the Walmart private key is readable from the sandbox"
+           "the Walmart private key is readable through the tools"
 
     refute String.contains?(output(context), "WALMART_PRIVATE_KEY"), "even the name leaked in"
     {:ok, context}
@@ -367,25 +365,6 @@ defmodule Mealplan.Features.WalmartSteps do
     })
   end
 
-  defp run_bash(context, command) do
-    {:ok, response} =
-      Tools.call(
-        "bash",
-        %{"command" => command, "message" => "bash #{command}"},
-        context.tenant,
-        context.now
-      )
-
-    structured = response["structuredContent"] || %{}
-
-    Map.put(context, :last, %{
-      stdout: Map.get(structured, "stdout", ""),
-      stderr: Map.get(structured, "stderr", ""),
-      exit_code: Map.get(structured, "exitCode", 0),
-      text: response |> Map.get("content", []) |> Enum.map_join("\n", &Map.get(&1, "text", ""))
-    })
-  end
-
   defp write_file(context, path, content) do
     {:ok, response} =
       Tools.call(
@@ -420,14 +399,9 @@ defmodule Mealplan.Features.WalmartSteps do
 
   defp list_path(context), do: context[:list_path] || @list
 
-  defp list_text(context), do: File.read!(Path.join(context.folder, list_path(context)))
+  defp list_text(context), do: FeatureCorpus.read!(context, list_path(context))
 
-  defp list_text_or_empty(context) do
-    case File.read(Path.join(context.folder, list_path(context))) do
-      {:ok, text} -> text
-      _ -> ""
-    end
-  end
+  defp list_text_or_empty(context), do: FeatureCorpus.read(context, list_path(context)) || ""
 
   defp text_of(context), do: (context[:last_tool] || %{})[:text] || ""
   defp error_of(context), do: (context[:last_tool] || %{})[:error]

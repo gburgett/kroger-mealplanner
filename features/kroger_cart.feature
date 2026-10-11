@@ -3,11 +3,11 @@ Feature: Sending the list to Kroger
   I want the week's shopping list put into my Kroger cart
   So that I can pick it up without retyping anything
 
-  The sandbox has no network, by two independent controls, and neither of them
-  is weakened here. The Kroger call is made by the server, outside the sandbox,
-  from a list the sandbox produced. That is the whole reason two tools exist
-  beside the three that are the sandbox: a tool exists only when the sandbox
-  cannot do the job by construction, and the network is the only such job.
+  The meal plan has no network: it is documents, and nothing an assistant
+  writes is ever run. The Kroger call is made by the server, from a list the
+  parser derived. That is the whole reason two Kroger tools exist beside the
+  file verbs: a tool exists only when the documents cannot do the job by
+  construction, and the network is the only such job (ADR 0010).
 
   KROGER'S PUBLIC CART IS ADD-ONLY. There is no read, no update and no delete,
   so the meal planner can never say what the cart holds — only what it sent.
@@ -34,9 +34,9 @@ Feature: Sending the list to Kroger
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-31 --out shopping-lists/2026-08-25--2026-08-31.md"
+    When I write the shopping list from "2026-08-25" to "2026-08-31" to "shopping-lists/2026-08-25--2026-08-31.md"
     Then the command succeeds
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal-plan folder
+    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
     And the shopping list file contains the line "- 8 oz shredded cheddar — 2026-08-25"
 
   @core
@@ -46,7 +46,7 @@ Feature: Sending the list to Kroger
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I run "mealplan shopping-list --from 2026-08-25 --to 2026-08-31 --out shopping-lists/2026-08-25--2026-08-31.md"
+    When I write the shopping list from "2026-08-25" to "2026-08-31" to "shopping-lists/2026-08-25--2026-08-31.md"
     Then the shopping list front matter says the store is "01400513"
     And the shopping list front matter says the modality is "pickup"
 
@@ -125,10 +125,7 @@ Feature: Sending the list to Kroger
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
-    When I run:
-      """
-      sed -i 's/ (check)$//' shopping-lists/2026-08-25--2026-08-31.md
-      """
+    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
     And I send the shopping list to my Kroger cart
     Then the file "pantry/consumables.md" contains the line "- shredded cheddar: stocked (last bought: 2026-08-23)"
 
@@ -145,7 +142,7 @@ Feature: Sending the list to Kroger
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
     When I send the shopping list to my Kroger cart
-    Then the file "pantry/consumables.md" does not exist in the meal-plan folder
+    Then the file "pantry/consumables.md" does not exist in the meal plan
 
   @core
   Scenario: A list with an unresolved check item refuses to send
@@ -178,10 +175,7 @@ Feature: Sending the list to Kroger
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
     And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
-    When I run:
-      """
-      sed -i 's/ (check)$//' shopping-lists/2026-08-25--2026-08-31.md
-      """
+    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
     And I send the shopping list to my Kroger cart
     Then my Kroger cart was sent:
       | upc           | quantity |
@@ -241,7 +235,7 @@ Feature: Sending the list to Kroger
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Kroger for the products on the shopping list
     Then the meal planner refuses, and names the Kroger endpoint and the status
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal-plan folder
+    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
     And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
 
   @core
@@ -260,7 +254,7 @@ Feature: Sending the list to Kroger
     And the shopping list for "2026-08-25" to "2026-08-31" has been written
     When I ask Kroger for the products on the shopping list
     Then the meal planner refuses, and names the Kroger endpoint and a readable reason
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal-plan folder
+    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
     And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
 
   @core
@@ -306,10 +300,10 @@ Feature: Sending the list to Kroger
     And my Kroger cart was sent nothing
 
   @security
-  Scenario: The Kroger access token never reaches the sandbox
+  Scenario: The Kroger access token is never handed to the agent
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I try to read the Kroger token store through the bash tool
+    When I try to read the Kroger token store by its name
     Then the output does not contain the Kroger access token
 
   @security

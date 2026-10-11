@@ -63,9 +63,9 @@ Feature: Connecting a Kroger account
     Then the file "config/kroger.md" contains the line "store: 01400513"
     And the file "config/kroger.md" contains the line "modality: pickup"
     And the file "config/kroger.md" contains the line "# Kroger"
-    When I run "cat config/kroger.md"
+    When I read "config/kroger.md"
     Then the output mentions "Kroger On the Rhine"
-    And the store was committed to the meal plan's history
+    And the store was recorded in the meal plan's history
 
   @core
   Scenario: Approving an assistant without connecting Kroger
@@ -96,7 +96,7 @@ Feature: Connecting a Kroger account
     And "gordon@gordonburgett.net" is signed in
     When I disconnect my Kroger account
     Then the meal planner holds no Kroger credential
-    When I run "cat config/kroger.md"
+    When I read "config/kroger.md"
     Then the output mentions "No Kroger account is connected"
 
   @core
@@ -113,20 +113,20 @@ Feature: Connecting a Kroger account
     And each of those names this server's own address
 
   @core
-  Scenario: The folder itself says how to change shops
-    `cat config/kroger.md` is how "is Kroger set up" gets answered, so it is also
+  Scenario: The meal plan itself says how to change shops
+    Reading config/kroger.md is how "is Kroger set up" gets answered, so it is also
     where "and how do I change it" has to be answered.
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I run "cat config/kroger.md"
+    When I read "config/kroger.md"
     Then the output says how to change shops
     And the output names this server's own address
 
   @core
   Scenario: A brand new folder says how to sign in to Kroger
-    Given the meal-plan folder is brand new
-    When I run "cat config/kroger.md"
+    Given the meal plan is brand new
+    When I read "config/kroger.md"
     Then the output says how to change shops
     And the output names this server's own address
 
@@ -168,19 +168,14 @@ Feature: Connecting a Kroger account
     Then the request is refused as forbidden
 
   @security
-  Scenario: The Kroger token store is outside the meal-plan folder
+  Scenario: The Kroger token is not in the meal plan
+    The household's Kroger token is held in the clear — it is replayed to
+    Kroger, so it cannot be hashed — which makes where it is kept the whole
+    defence. It is server state, not a document, and no tool reads it.
+
     Given my Kroger account is connected
-    Then the Kroger token store is outside the meal-plan folder
-    When I try to read the Kroger token store through the bash tool
+    When I search the whole meal plan for the Kroger access token
     Then the output does not contain the Kroger access token
-
-  @security
-  Scenario: The Kroger client secret is not visible inside the sandbox
-    This extends the scenario in features/sandbox.feature that plants
-    KROGER_CLIENT_SECRET by hand. Here the server is really configured with it,
-    which is the case that will exist in production.
-
-    Given the server process has the environment variable "KROGER_CLIENT_SECRET" set to "mealplan-test-secret-not-a-real-one"
-    And my Kroger account is connected
-    When I run "cat /proc/1/environ | tr '\0' '\n'; env"
-    Then the output does not contain the Kroger client secret
+    When I try to read the Kroger token store by its name
+    Then the command fails
+    And the output does not contain the Kroger access token

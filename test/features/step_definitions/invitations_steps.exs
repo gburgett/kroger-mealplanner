@@ -1,7 +1,7 @@
 defmodule Mealplan.Features.InvitationsSteps do
   @moduledoc """
   The operator inviting households, and each invited household planning in its
-  own folder. See `features/invitations.feature` and ADR 0033.
+  own meal plan. See `features/invitations.feature` and ADR 0033.
 
   These steps drive the real endpoint over loopback: `/login` and `/login/code`
   for a household's sign-in, `Mealplan.McpClient` for its approved client, and
@@ -18,19 +18,13 @@ defmodule Mealplan.Features.InvitationsSteps do
   use Cucumber.StepDefinition
 
   import ExUnit.Assertions
-  import Ecto.Query, only: [from: 2]
 
   alias Mealplan.{Accounts, Browser, Invitations, McpClient, Tenancy}
-  alias Mealplan.Features.CorpusHooks
   alias Mealplan.Mock.SuperTokens
 
   # --- the operator's command line ----------------------------------------
 
   step "no household has been invited", context do
-    for slug <- Mealplan.Repo.all(from(t in Accounts.Tenant, select: t.slug)) do
-      CorpusHooks.close_session(slug)
-    end
-
     Mealplan.Repo.delete_all(Accounts.Invitation)
     Mealplan.Repo.delete_all(Accounts.Membership)
     Mealplan.Repo.delete_all(Accounts.Tenant)
@@ -63,31 +57,6 @@ defmodule Mealplan.Features.InvitationsSteps do
 
   step "no household has been provisioned for {string} yet", %{args: [phone]} = context do
     refute Tenancy.tenant_for_phone(phone), "#{phone} already owns a tenant"
-    {:ok, context}
-  end
-
-  step "the sandbox backend is bubblewrap", context do
-    key = Mealplan.Sandbox
-    previous = Application.get_env(:mealplan, key, [])
-    Application.put_env(:mealplan, key, Keyword.put(previous, :mode, :bubblewrap))
-    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:mealplan, key, previous) end)
-    {:ok, context}
-  end
-
-  step "the task warns that bubblewrap shares one kernel between households", context do
-    assert context.task_output =~ ~r/bubblewrap/i,
-           "the task said nothing about bubblewrap:\n#{context.task_output}"
-
-    assert context.task_output =~ ~r/one kernel|shares one kernel/i,
-           "the task did not warn about a shared kernel:\n#{context.task_output}"
-
-    {:ok, context}
-  end
-
-  step "the task names microsandbox as the isolating backend", context do
-    assert context.task_output =~ ~r/microsandbox/i,
-           "the task did not name microsandbox:\n#{context.task_output}"
-
     {:ok, context}
   end
 
@@ -124,11 +93,17 @@ defmodule Mealplan.Features.InvitationsSteps do
   # --- a household's sign-in --------------------------------------------
 
   step "someone asks for a code for {string}", %{args: [phone]} = context do
-    {:ok, Map.put(context, :response, Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"}))}
+    {:ok,
+     Map.put(
+       context,
+       :response,
+       Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+     )}
   end
 
   step "the household {string} asks for a code", %{args: [phone]} = context do
-    response = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+    response =
+      Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
 
     {:ok,
      context
@@ -153,7 +128,9 @@ defmodule Mealplan.Features.InvitationsSteps do
   end
 
   step "the household {string} signs in again", %{args: [phone]} = context do
-    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+    asked =
+      Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+
     context = put_login(context, phone, login_cookie: cookie_of(asked))
     {:ok, enter_code(context, phone)}
   end
@@ -178,7 +155,9 @@ defmodule Mealplan.Features.InvitationsSteps do
   end
 
   step "{string} signs in with the code that arrives", %{args: [phone]} = context do
-    asked = Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+    asked =
+      Browser.post("/login", %{"phone" => phone, "return_to" => "/", "agreed_to_terms" => "yes"})
+
     context = put_login(context, phone, login_cookie: cookie_of(asked))
     {:ok, enter_code(context, phone)}
   end
@@ -212,27 +191,9 @@ defmodule Mealplan.Features.InvitationsSteps do
     {:ok, context}
   end
 
-  step "both telephones plan meals in the same folder", context do
+  step "both telephones plan meals in the same meal plan", context do
     [a, b] = Map.keys(context.tenants)
     assert get_tenant(context, a) == get_tenant(context, b)
-    {:ok, context}
-  end
-
-  step "each client worked only in its own household's folder", context do
-    phones = Map.keys(context.clients)
-    assert length(phones) >= 2, "this scenario needs at least two clients"
-
-    tenants = for p <- phones, do: Tenancy.tenant_for_phone(p)
-    paths = for t <- tenants, do: Tenancy.corpus_path(t)
-
-    assert length(Enum.uniq(paths)) == length(paths),
-           "two households share a folder: #{inspect(paths)}"
-
-    pids = for t <- tenants, do: Mealplan.Sandbox.whereis(t.slug)
-
-    assert Enum.all?(pids, &is_pid/1) and length(Enum.uniq(pids)) == length(pids),
-           "the households do not each have their own live session: #{inspect(pids)}"
-
     {:ok, context}
   end
 
@@ -241,16 +202,18 @@ defmodule Mealplan.Features.InvitationsSteps do
   step "that household's assistant has written a recipe {string}", %{args: [name]} = context do
     phone = context.current_phone
     marker = "SECRET-#{name}-#{System.unique_integer([:positive])}"
-    content = "# #{name}\n\n#{marker}\n"
+
+    content =
+      Mealplan.Documents.recipe_document(name: name, servings: 4) <> "\n#{marker}\n"
 
     {client, result} =
-      McpClient.run(
-        get_client(context, phone),
-        "mkdir -p recipes && printf '%s' #{shq(content)} > recipes/#{name}.md",
-        "add recipe #{name}"
-      )
+      McpClient.call(get_client(context, phone), "write_file", %{
+        "path" => "recipes/#{name}.md",
+        "content" => content,
+        "message" => "add recipe #{name}"
+      })
 
-    assert result.exit_code == 0, "writing the recipe failed:\n#{result.text}"
+    refute result.is_error, "writing the recipe failed:\n#{result.text}"
 
     {:ok,
      context
@@ -258,17 +221,30 @@ defmodule Mealplan.Features.InvitationsSteps do
      |> Map.put(:secret_recipe, %{name: name, marker: marker})}
   end
 
-  step "that client runs {string}", %{args: [command]} = context do
-    run_client(context, context.current_phone, command)
+  step "that client lists the meal plan", context do
+    call_client(context, context.current_phone, "list_files", %{})
   end
 
-  step "the {string} client runs {string}", %{args: [phone, command]} = context do
-    run_client(context, phone, command)
+  step "the {string} client lists the meal plan", %{args: [phone]} = context do
+    call_client(context, phone, "list_files", %{})
   end
 
-  step "the {string} client still runs {string} and it succeeds",
-       %{args: [phone, command]} = context do
-    {:ok, context} = run_client(context, phone, command)
+  step "the {string} client lists {string}", %{args: [phone, path]} = context do
+    call_client(context, phone, "list_files", %{"path" => path})
+  end
+
+  step "the {string} client reads {string}", %{args: [phone, path]} = context do
+    call_client(context, phone, "read_file", %{"path" => path})
+  end
+
+  step "the {string} client searches its whole meal plan for {string}",
+       %{args: [phone, pattern]} = context do
+    call_client(context, phone, "grep", %{"pattern" => pattern})
+  end
+
+  step "the {string} client still lists the meal plan and it succeeds",
+       %{args: [phone]} = context do
+    {:ok, context} = call_client(context, phone, "list_files", %{})
 
     assert context[:last] && context.last.exit_code == 0,
            "expected #{phone}'s client to still work, got #{inspect(context[:last])}"
@@ -292,19 +268,23 @@ defmodule Mealplan.Features.InvitationsSteps do
     {:ok, context}
   end
 
-  step "the recipe {string} is still in its folder", %{args: [name]} = context do
+  step "the recipe {string} is still in its meal plan", %{args: [name]} = context do
     phone = context.current_phone
-    {client, result} = McpClient.run(get_client(context, phone), "cat recipes/#{name}.md")
 
-    assert result.exit_code == 0 and result.stdout =~ name,
-           "recipe #{name} is not in #{phone}'s folder:\n#{result.text}"
+    {client, result} =
+      McpClient.call(get_client(context, phone), "read_file", %{"path" => "recipes/#{name}.md"})
+
+    assert not result.is_error and result.text =~ name,
+           "recipe #{name} is not in #{phone}'s meal plan:\n#{result.text}"
 
     {:ok, put_client(context, phone, client)}
   end
 
   step "the answer does not say whether that number was invited", context do
     response = context.response
-    assert response.status == 200, "a refused number answered #{response.status}, not the code form"
+
+    assert response.status == 200,
+           "a refused number answered #{response.status}, not the code form"
 
     assert response.body =~ ~s(name="code"),
            "a refused number did not get the code form a real send gets"
@@ -342,19 +322,16 @@ defmodule Mealplan.Features.InvitationsSteps do
     )
   end
 
-  defp run_client(context, phone, command) do
+  defp call_client(context, phone, tool, args) do
     client = get_client(context, phone)
-    command = String.replace(command, ~S(\"), ~S("))
 
     try do
-      {client, result} = McpClient.run(client, command)
+      {client, result} = McpClient.call(client, tool, args)
 
       last = %{
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exit_code: result.exit_code,
-        timed_out: false,
-        truncated: false,
+        stdout: result.text,
+        stderr: "",
+        exit_code: if(result.is_error, do: 1, else: 0),
         text: result.text
       }
 
@@ -379,7 +356,7 @@ defmodule Mealplan.Features.InvitationsSteps do
 
   defp output_of(context) do
     last = context[:last] || flunk("no client command has run in this scenario yet")
-    String.trim_trailing("#{last.stdout}\n#{last.stderr}\n#{last.text}")
+    String.trim_trailing("#{last.stdout}\n#{last.stderr}")
   end
 
   defp drain_shell(acc \\ []) do
@@ -389,8 +366,6 @@ defmodule Mealplan.Features.InvitationsSteps do
       0 -> acc |> Enum.reverse() |> Enum.join("\n")
     end
   end
-
-  defp shq(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
 
   defp put_client(context, phone, client),
     do: Map.update(context, :clients, %{phone => client}, &Map.put(&1, phone, client))

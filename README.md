@@ -1,104 +1,62 @@
 # Kroger Meal Planner
 
-A meal-planning agent for one household. It records recipes, plans a dinner for
+A meal-planning agent for households. It records recipes, plans a dinner for
 each date, derives one shopping list for a date range, and pushes that list into
 a real Kroger cart.
 
-The interface is MCP, and MCP here is a sandboxed shell: the server mounts the
-meal-plan folder into a sandbox and exposes command execution over it. The
-folder is the database, markdown is the format, and git is the undo. There are
-no CRUD tools. `AGENTS.md` explains why, and `docs/adr/` records the decisions.
+The interface is MCP: each household's meal plan is markdown documents laid
+out like a folder, kept as rows in the server's database, and an assistant
+works on them with file verbs — `list_files`, `read_file`, `grep`,
+`write_file`, `edit_file`, `delete_file`, `history`, `restore_file`,
+`validate`, `shopping_list`. Markdown is the format, the path is the key, and
+`history` is the undo. There is no shell, and nothing an assistant writes is
+run (ADR 0038, ADR 0039). `AGENTS.md` explains why, and `docs/adr/` records
+the decisions.
 
 Two languages, on purpose. The server is Elixir/Phoenix, built as a `mix
-release` (ADR 0020); the `mealplan` CLI that parses the corpus and does the unit
-arithmetic is Rust, compiled to `x86_64-unknown-linux-musl` so it can be staged
-into a sandbox image that holds no interpreter. The migration from the original
-TypeScript-on-Node server is complete, and the test suite runs in the test BEAM
-(ADR 0022).
+release` (ADR 0020); the `mealplan` CLI that parses the documents and does the
+unit arithmetic is Rust, compiled to `x86_64-unknown-linux-musl`, and the
+server runs it over a temporary copy of a household's documents.
 
 ## Prerequisites
 
 | For | You need |
 | --- | --- |
-| The Elixir app and its test suite | Elixir 1.19 / OTP 28. No database server — the state is one SQLite file (ADR 0024) |
+| The Elixir app and its test suite | Elixir 1.19 / OTP 28. No database server — the state is one SQLite file (ADR 0031) |
 | The `mealplan` CLI | Rust, with the `x86_64-unknown-linux-musl` target added |
-| The `@security` scenarios | bubblewrap, and unprivileged user namespaces |
-
-Node 24 is needed only to regenerate the committed seccomp filter
-(`sandbox-image/seccomp/generate.ts`, run by `sandbox-image/build.sh`); nothing
-at run time or in the test suite uses it.
 
 ## First run
 
 ```bash
 mix deps.get
-./cli/build.sh          # compiles the musl binary and stages it for the sandbox
-./sandbox-image/build.sh # only needed for a real sandbox; skip it for host mode
+./cli/build.sh          # compiles the musl binary into cli/target/
 ```
-
-`sandbox-image/rootfs/` is gitignored, so a fresh checkout has to run both build
-scripts before anything sandboxed works.
 
 ## Running the tests
 
 The scenarios under `features/` are the specification. They run inside the test
-BEAM — nothing is spawned per scenario — with the `cucumber` hex package reading
-the same `.feature` files a human reads.
-
-### The everyday command
+BEAM with the `cucumber` hex package reading the same `.feature` files a human
+reads.
 
 ```bash
-MEALPLAN_SANDBOX=host \
-MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release \
-  mix test
+./cli/build.sh && mix test
 ```
 
-`MEALPLAN_SANDBOX=host` runs each command unconfined, which is what a machine
-with no sandbox image can do — a CI runner, or a checkout where you have not run
-`./sandbox-image/build.sh`. `MEALPLAN_CLI_PATH` is how the corpus finds the
-`mealplan` binary when it is not staged inside an image.
+That is the whole of it: one mode, about 18 seconds, every scenario included —
+the `@security` ones too, because the boundary they assert is authorisation
+and nothing in the environment weakens it. `MEALPLAN_CLI_PATH` names the
+binary's directory when it is not in `cli/target/`.
 
-**Host mode excludes every `@security` scenario, and prints a banner saying so.**
-A green run in host mode says the application logic works. It says nothing about
-containment.
+`mix test` creates and migrates `mealplan_test.db` for you, in the checkout.
+Nothing has to be running — no server, no user, no password, no port.
+`rm mealplan_test.db` is the reset.
 
-`mix test` creates and migrates `mealplan_test<partition>.db` for you, in the
-checkout. Nothing has to be running — no server, no user, no password, no port
-(ADR 0024). `rm mealplan_test*.db` is the reset.
-
-### The real thing, before a release
-
-```bash
-./sandbox-image/build.sh && ./cli/build.sh && mix test
-```
-
-With no `MEALPLAN_SANDBOX` set, commands run under bubblewrap and the
-`@security` scenarios run with them. A release needs this run, not the host one.
-
-### In parallel
-
-```bash
-MIX_TEST_PARTITION=1 mix test --partitions 4
-```
-
-Each partition gets its own database (`mealplan_test1`, `mealplan_test2`, …) and
-its own HTTP port (`4002 + N`), so partitions do not collide. Partitions are
-also safe to run beside each other's scratch directories: cleanup is keyed to
-the OS process id, never a wildcard.
-
-### Where the temporary files go
-
-Every sandboxed command gets one directory of its own, removed when the command
-returns however it returns — success, failure, timeout or raise. The directories
-live under one root per OS process, which the application removes at exit and
-sweeps at start if a previous run was killed before it could.
-
-By default that root goes on tmpfs (`/dev/shm`) when there is at least 64 MB
-free there, which is both faster and bounded: a runaway command hits ENOSPC in
-RAM rather than filling the disk the database and the corpora are on. Set
-`MEALPLAN_TMPDIR` to put it somewhere else.
-
-After a run, `ls /tmp /dev/shm | grep mealplan` should print nothing.
+The parser's temporary copy of a household's documents gets one directory per
+run, removed when the run returns however it returns, under one root per OS
+process that the application sweeps at start if a previous run was killed. It
+goes on tmpfs (`/dev/shm`) when there is room; `MEALPLAN_TMPDIR` puts it
+somewhere else. After a run, `ls /tmp /dev/shm | grep mealplan` should print
+nothing.
 
 ## Running the server
 
@@ -122,12 +80,13 @@ systemctl --user restart mealplan-elixir.service
 ```
 
 A change to `cli/` needs `./cli/build.sh` and takes effect on the next
-command with no restart. A change to `deploy/mealplan-elixir.service` has to be
+tool call with no restart. A change to `deploy/mealplan-elixir.service` has to be
 copied to `~/.config/systemd/user/` and followed by
 `systemctl --user daemon-reload`.
 
-The start-up lines in the journal are the health check: they name the folder, the
-household, the token store, and whether Kroger is configured and linked. Read
+The start-up lines in the journal are the health check: they name the database,
+the parser, the households, whether anyone can sign in, and whether Kroger and
+Walmart are configured. Read
 them after a restart rather than trusting `active (running)`.
 
 `docs/deploying-behind-exe-dev.md` has the rest.
@@ -138,10 +97,9 @@ them after a restart rather than trusting `active (running)`.
 | --- | --- |
 | `features/` | The specification, in Gherkin. Read this first. |
 | `test/features/` | Step definitions and hooks for the Elixir runner |
-| `lib/mealplan/` | The Elixir application: MCP tools, sandbox, auth, Kroger |
+| `lib/mealplan/` | The Elixir application: MCP tools, the document store, auth, Kroger, Walmart |
 | `cli/` | The Rust `mealplan` binary — the only corpus parser |
 | `lib/mealplan_web/` | The Phoenix endpoint: the OAuth server, the consent and `/kroger` screens, the MCP route |
 | `docs/adr/` | Architecture decision records, and the wrong turns |
-| `sandbox-image/` | The image the sandbox binds, built and never borrowed |
 
 `AGENTS.md` is the contributor guide, for people and agents both.

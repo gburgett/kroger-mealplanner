@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2026-09-01
 decision-makers: gburgett
 consulted: ADR 0006, ADR 0008, ADR 0020, docs/sandbox-trade-study.md §11.6

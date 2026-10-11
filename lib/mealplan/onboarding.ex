@@ -1,6 +1,6 @@
 defmodule Mealplan.Onboarding do
   @moduledoc """
-  The nudge a brand-new household's assistant gets, and the folder-derived
+  The nudge a brand-new household's assistant gets, and the document-derived
   check for whether it has already acted on it. See ADR 0026.
 
   Written once, the same shape as `Mealplan.Kroger.Help` and
@@ -9,21 +9,21 @@ defmodule Mealplan.Onboarding do
   and folded into the handshake `instructions` (`Mealplan.Mcp.Server.server_instructions/0`)
   for the clients that do read them.
 
-  "Done" is read from the folder, never a flag: `preferences/household.md` has
+  "Done" is read from the documents, never a flag: `preferences/household.md` has
   been rewritten away from the shipped example, AND a file under `pantry/`
-  holds something besides the scaffolded `.gitkeep`. Either alone leaves the
+  holds anything at all. Either alone leaves the
   note showing, because either alone is a household that has not yet
   described what a photo would tell it.
   """
 
   alias Mealplan.Corpus.Scaffold
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Store
 
   @note """
-  ONBOARDING: this meal-plan folder still looks brand new. Four things help
+  ONBOARDING: this meal plan still looks brand new. Four things help
   this household right away:
 
-  1. Save a note in YOUR OWN memory, NOT this folder, to use this
+  1. Save a note in YOUR OWN memory, NOT this meal plan, to use this
      connector whenever this household asks about meals, groceries or a
      shopping list.
   2. Ask the household for a photo of the fridge and the pantry shelves.
@@ -46,20 +46,20 @@ defmodule Mealplan.Onboarding do
   def note, do: @note
 
   @doc "True once the household has rewritten its own preferences and pantry."
-  @spec done?(pid()) :: boolean()
-  def done?(session) do
-    preferences_rewritten?(session) and pantry_filled?(session)
+  @spec done?(Store.t()) :: boolean()
+  def done?(corpus) do
+    preferences_rewritten?(corpus) and pantry_filled?(corpus)
   end
 
-  defp preferences_rewritten?(session) do
-    case Session.read_corpus(session, Scaffold.preferences_path()) do
+  defp preferences_rewritten?(corpus) do
+    case Store.read_corpus(corpus, Scaffold.preferences_path()) do
       {:ok, content} -> content != Scaffold.preferences_example()
       {:error, _} -> false
     end
   end
 
-  defp pantry_filled?(session) do
-    case Session.list_corpus(session, ["pantry"]) do
+  defp pantry_filled?(corpus) do
+    case Store.list_corpus(corpus, ["pantry"]) do
       {:ok, entries} -> Enum.any?(entries, &(&1.dir == "pantry"))
       {:error, _} -> false
     end

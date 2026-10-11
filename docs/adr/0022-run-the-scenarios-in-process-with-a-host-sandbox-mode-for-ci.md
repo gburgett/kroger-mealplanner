@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; host sandbox mode superseded by ADR-0039
 date: 2026-09-04
 decision-makers: gburgett
 consulted: ADR 0002, ADR 0006, ADR 0008, ADR 0020, docs/test-suite-parallelisation-study.md

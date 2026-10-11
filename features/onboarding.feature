@@ -17,54 +17,53 @@ Feature: Onboarding a new household through whichever assistant it picked
   in them, and write that down with `write_file`; ask for photos of the
   favourite recipes in the household's recipe books and record them under
   `recipes/`; and ask how many adults and children the household cooks for and
-  write that into `config/household.md`. None of it needs a new tool — bash and
-  `write_file` already reach it once the assistant has described or transcribed
-  what it saw.
+  write that into `config/household.md`. None of it needs a new tool —
+  `write_file` already reaches it once the assistant has described or
+  transcribed what it saw.
 
-  "Onboarding is done" is read from the folder, never a flag: the household
+  "Onboarding is done" is read from the documents, never a flag: the household
   has rewritten `preferences/household.md` away from the shipped example, AND
-  a file under `pantry/` holds something besides `.gitkeep`. Either alone
-  leaves the note showing.
+  a document under `pantry/` exists. Either alone leaves the note showing.
 
   Background:
-    Given a meal-plan folder mounted at "/workspace"
+    Given a meal plan
 
   Scenario: A brand-new household's first command carries the onboarding note
-    Given the meal-plan folder is brand new
-    When I run "ls"
+    Given the meal plan is brand new
+    When I list the meal plan
     Then the command succeeds
     And the tool result carries the onboarding note
 
   Scenario: The note says to remember this connector
-    Given the meal-plan folder is brand new
-    When I run "ls"
+    Given the meal plan is brand new
+    When I list the meal plan
     Then the onboarding note says to save a memory of this connector
     And the onboarding note says to use it whenever the household asks about meals or groceries
 
   Scenario: The note says what to do with fridge and pantry photos
-    Given the meal-plan folder is brand new
-    When I run "ls"
+    Given the meal plan is brand new
+    When I list the meal plan
     Then the onboarding note says to ask for a photo of the fridge and the pantry
     And the onboarding note says to write what it sees into "pantry/" and "preferences/household.md"
 
   Scenario: The note says what to do with recipe-book photos
-    Given the meal-plan folder is brand new
-    When I run "ls"
+    Given the meal plan is brand new
+    When I list the meal plan
     Then the onboarding note says to ask for photos of the recipes in the household's recipe books
 
   Scenario: The note says to ask how many adults and children they cook for
-    Given the meal-plan folder is brand new
-    When I run "ls"
+    Given the meal plan is brand new
+    When I list the meal plan
     Then the onboarding note says to ask how many adults and how many children they cook for
     And the onboarding note says to write that family size into "config/household.md" as "adults:" and "children:"
 
   Scenario: The handshake instructions carry the same note, for clients that read them
-    Given the meal-plan folder is brand new
+    Given the meal plan is brand new
     When a client connects to the meal planner over MCP
     Then the meal planner's instructions carry the onboarding note
 
   Scenario: Writing the brands down is not enough by itself
-    Given the meal-plan folder is brand new
+    Given the meal plan is brand new
     And the household prefers:
       """
       # What we buy
@@ -72,22 +71,22 @@ Feature: Onboarding a new household through whichever assistant it picked
       - the store brand, at the lowest price per unit
       - butter: unsalted
       """
-    When I run "ls"
+    When I list the meal plan
     Then the tool result carries the onboarding note
 
   Scenario: Writing the pantry down is not enough by itself
-    Given the meal-plan folder is brand new
+    Given the meal plan is brand new
     When I write the file "pantry/staples.md":
       """
       - salt
       - flour
       - olive oil
       """
-    And I run "ls"
+    And I list the meal plan
     Then the tool result carries the onboarding note
 
   Scenario: Once both are written, the note is gone
-    Given the meal-plan folder is brand new
+    Given the meal plan is brand new
     And the household prefers:
       """
       # What we buy
@@ -101,12 +100,12 @@ Feature: Onboarding a new household through whichever assistant it picked
       - flour
       - olive oil
       """
-    And I run "ls"
+    And I list the meal plan
     Then the tool result does not carry the onboarding note
     And the meal planner's instructions do not carry the onboarding note
 
   Scenario: The note never stops an ordinary command from working
-    Given the meal-plan folder is brand new
+    Given the meal plan is brand new
     When I write the file "recipes/chicken-tacos.md":
       """
       ---
@@ -124,7 +123,7 @@ Feature: Onboarding a new household through whichever assistant it picked
 
       Sear the chicken.
       """
-    Then the file "recipes/chicken-tacos.md" exists in the meal-plan folder
+    Then the file "recipes/chicken-tacos.md" exists in the meal plan
 
   Scenario: The landing page names the MCP address and both apps' current steps
     When a browser asks for the meal planner's landing page

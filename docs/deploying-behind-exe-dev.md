@@ -155,13 +155,10 @@ No database server (ADR 0030). The state is one SQLite file, named by
 same path. `Mealplan.Boot` creates the directory on first start and runs the
 migration itself.
 
-**The file must be outside `MEALPLAN_CORPUS_ROOT` and every tenant's folder**
-(ADR 0033). A sandbox mounts a household's folder, an agent reads every byte of
-it, and the file holds that household's Kroger refresh token in the clear.
-`Mealplan.Boot` refuses to start when the path is inside the corpus root or any
-provisioned tenant's folder, and names both paths when it refuses.
-
-The backup is a file copy:
+**The file holds every household's meal plan too** (ADR 0038, ADR 0039), next
+to the OAuth clients and the Kroger tokens. No tool reads anything but a
+household's own documents out of it, so its location is no longer part of the
+boundary — but it is now the whole of the data, and the backup is a file copy:
 
 ```bash
 sqlite3 ~/.local/state/mealplan/mealplan.db ".backup '/some/backup/mealplan.db'"
@@ -179,7 +176,7 @@ SUPERTOKENS_API_KEY=<the key from the SuperTokens dashboard>
 
 The URL is `deploy/mealplan-elixir.service`'s `SUPERTOKENS_CONNECTION_URI` and
 defaults to the same value in `config/runtime.exs`. Check the core and the key
-from this VM — not from the sandbox, which has no network:
+from this VM:
 
 ```bash
 curl -sS "$SUPERTOKENS_CONNECTION_URI/hello"                         # -> Hello
@@ -247,14 +244,14 @@ diff deploy/mealplan.service ~/.config/systemd/user/mealplan.service
 
 The unit is concrete rather than a template: every path and address in it is
 this machine's. On another machine, change `WorkingDirectory`, `ExecStart`,
-`MEALPLAN_PUBLIC_URL`, `MEALPLAN_CORPUS_ROOT`, `MEALPLAN_STATE` and
+`MEALPLAN_PUBLIC_URL`, `MEALPLAN_STATE` and
 `EnvironmentFile`. There is no `MEALPLAN_OWNER` — households are invited with
 `mix mealplan.invite` (ADR 0033).
 
 There is no build step, so `git pull` plus that restart is the whole deployment
 of a server change. A change under `cli/` needs `./cli/build.sh` instead, and
-takes effect on the next sandbox command with no restart, because every command
-is a fresh `bwrap` that binds the image again. A change to the unit file itself
+takes effect on the next tool call with no restart, because every parser run
+starts the binary afresh. A change to the unit file itself
 needs `systemctl --user daemon-reload` before the restart.
 
 Lingering is what makes a *user* service survive a logout and come back after a
@@ -262,9 +259,9 @@ reboot. Without it the service stops when the last session ends. It is already
 enabled here; `loginctl show-user "$USER" --property=Linger` says so.
 
 **Read the start-up lines in the journal after every restart.** They name the
-corpus root, the state database, the count of invited and provisioned
-households, whether a household can sign in at all, the sandbox mechanism and
-the isolation it gives, and whether Kroger is configured. `active (running)`
+state database, where the meal plans live and the parser that checks them, the
+count of invited and provisioned households, whether a household can sign in at
+all, and whether Kroger and Walmart are configured. `active (running)`
 says a process exists; it does not say whether anyone can sign in.
 
 `Restart=on-failure`, and the server exits 0 on `SIGTERM`, so a deliberate
@@ -278,7 +275,6 @@ or this collides with it on the port.
 ```bash
 MEALPLAN_HOST=0.0.0.0 \
 MEALPLAN_PUBLIC_URL=https://gb-kroger-mealplanner.exe.xyz \
-MEALPLAN_CORPUS_ROOT=~/meal-plans \
 KROGER_CLIENT_ID=... \
 KROGER_CLIENT_SECRET=... \
 mix phx.server
@@ -308,18 +304,13 @@ code to the attacker's token endpoint.
 | `MEALPLAN_HOST` | `127.0.0.1` | bind address. `0.0.0.0` to be reachable through the proxy |
 | `MEALPLAN_PORT` | `8765` | must match `share port`, and be within 3000–9999. The unit sets 8000 |
 | `MEALPLAN_PUBLIC_URL` | — | the OAuth issuer. Required off loopback |
-| `MEALPLAN_CORPUS_ROOT` | `~/meal-plans` | the directory every invited household's folder sits under, at `<root>/<slug>` (ADR 0033) |
-| `MEALPLAN_FOLDER` | — | dead pointer to the abandoned single-household corpus; nothing reads it (ADR 0033) |
-| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, invitations, the Kroger credential. Refused if inside the corpus root or any tenant folder |
-| `MEALPLAN_SANDBOX` | `bubblewrap` (dev) / `microsandbox` (the deploy unit, ADR 0033) | the confinement mechanism. `host` for a runner with no image; `microsandbox` for a libkrun microVM per tenant (ADR 0027) |
-| `MEALPLAN_MICROSANDBOX_IMAGE` | `sandbox-image/oci.tar` | the `.tar` the microsandbox backend `msb load`s, or a bare `msb` image reference. Only read under `MEALPLAN_SANDBOX=microsandbox` |
-| `MEALPLAN_MAX_LIVE_SESSIONS` | `16` (microsandbox); unbounded otherwise | how many live tenant microVMs before `open/3` evicts the least-recently-used one |
+| `MEALPLAN_STATE` | `~/.local/state/mealplan/mealplan.db` | the SQLite state file: clients, tokens, invitations, the Kroger credential, and every household's meal plan (ADR 0038) |
+| `MEALPLAN_CLI_PATH` | `cli/target/x86_64-unknown-linux-musl/release` | the directory holding the `mealplan` binary |
 | `KROGER_CLIENT_ID` | — | the Kroger developer client id. Without it there is no cart |
-| `KROGER_CLIENT_SECRET` | — | the matching secret. Never reaches the sandbox |
-| `MEALPLAN_KROGER_STATE` | beside `MEALPLAN_STATE`, as `kroger.json` | the household's Kroger credential. Also refused if inside the meal-plan folder |
+| `KROGER_CLIENT_SECRET` | — | the matching secret. Never handed to an agent |
 | `KROGER_API_BASE` | `https://api.kroger.com` | the Kroger mock seam. Leave it alone in production |
 | `WALMART_CONSUMER_ID` | — | the consumer id walmart.io issued for this server. Without it there are no cart links |
-| `WALMART_PRIVATE_KEY_PATH` | — | PEM file of the RSA private key whose public half was uploaded. 0600, outside the meal-plan folder. Never reaches the sandbox |
+| `WALMART_PRIVATE_KEY_PATH` | — | PEM file of the RSA private key whose public half was uploaded. 0600. Never handed to an agent |
 | `WALMART_PRIVATE_KEY` | — | the same PEM, inline. The path form is easier in a systemd EnvironmentFile |
 | `WALMART_KEY_VERSION` | `1` | the key version walmart.io shows for the uploaded key |
 | `WALMART_PUBLISHER_ID` | — | the Impact Radius publisher id, when the household has one. Optional |
@@ -329,41 +320,11 @@ code to the attacker's token endpoint.
 **On the Elixir server, `MEALPLAN_STATE` names a SQLite file, not `auth.json`,**
 and it defaults to `~/.local/state/mealplan/mealplan.db` (ADR 0024, restored by
 ADR 0030). That one file holds what `auth.json` and `kroger.json` held between
-them, so
-`MEALPLAN_KROGER_STATE` is gone with no replacement. The rule is unchanged and
-now enforced at start-up: the file must be outside `MEALPLAN_CORPUS_ROOT` and
-every provisioned tenant's folder, and the server refuses to start rather than
-serve with a household's Kroger credential inside a folder a sandbox mounts.
-There is no `DATABASE_URL`, no user and no password — the file's own
-permissions are the access control.
-
-## Running each tenant in a microVM
-
-The deploy unit sets `MEALPLAN_SANDBOX=microsandbox` (ADR 0033), because it
-admits more than one invited household and bubblewrap between tenants is one UID
-namespace, not a kernel. Each tenant then gets its own libkrun microVM — a real
-tenant boundary, per ADR 0027. A single-household dev box can leave
-`MEALPLAN_SANDBOX` unset and run bubblewrap, whose threat is prompt injection in
-recipe text. The microVM path needs three things:
-
-* `msb` (microsandbox 0.6.x) on `PATH`;
-* read/write on `/dev/kvm` — check with `msb doctor` (`KVM access read/write`),
-  and that the service user is in the `kvm` group;
-* the image: `./sandbox-image/build.sh --microsandbox` writes
-  `sandbox-image/oci.tar`. The server runs `msb load` on it itself at boot.
-
-The start-up journal then reads `sandbox: microsandbox (libkrun microVM) …`
-instead of `sandbox: bubblewrap …`. A missing prerequisite is a start-up
-failure, not a downgrade to bubblewrap — the mechanism is chosen on purpose or
-not at all.
-
-`MEALPLAN_MAX_LIVE_SESSIONS` (default 16) caps concurrent microVMs; the oldest
-idle session is closed to admit a new tenant, and its microVM goes with it. The
-trade study (`multi-tenant-isolation-trade-study.md` §8) puts this VM's ceiling
-near two dozen. A change to `cli/` needs `./sandbox-image/build.sh
---microsandbox` re-run and the affected sessions reopened, because the microVM
-boots from the baked image rather than binding `sandbox-image/rootfs/` afresh
-each command the way bubblewrap does.
+them, and since ADR 0038 every household's meal plan as well. There is no
+`DATABASE_URL`, no user and no password — the file's own permissions are the
+access control. `MEALPLAN_SANDBOX`, `MEALPLAN_CORPUS_ROOT`, `MEALPLAN_FOLDER`,
+`MEALPLAN_MICROSANDBOX_IMAGE` and `MEALPLAN_MAX_LIVE_SESSIONS` are gone with the
+sandbox (ADR 0039).
 
 ## Registering with Kroger
 
@@ -388,9 +349,8 @@ and the two Kroger tools refuse and say what is missing.
 
 Once it is running, open `https://plantrify.com/kroger` in a
 browser as the owner, sign in to Kroger and choose the shop you walk into. The
-shop is written into `config/kroger.md` in the meal-plan folder and committed.
-The credential is written outside it, mode 0600, where the sandbox cannot reach
-it.
+shop is written into `config/kroger.md` in the meal plan and recorded. The
+credential is server state, where no tool can reach it.
 
 ## Registering with Walmart
 

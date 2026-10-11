@@ -8,8 +8,7 @@ defmodule Mealplan.Auth.Store do
   nothing replayable if the database leaks. Client secrets CANNOT be hashed —
   the SDK compares plaintext — so the whole client document is stored as JSON,
   behind the file's own permissions, the same position the 0600 JSON file was
-  in. That file lives outside the meal-plan folder, and `Mealplan.Boot` refuses
-  to start if it does not.
+  in. No tool an agent is handed reads this table (ADR 0038).
 
   "One code, one exchange" is now an atomic `DELETE ... RETURNING` instead of a
   read-then-write on a JSON string.

@@ -1,13 +1,13 @@
 //! Reading the folder.
 //!
-//! The corpus parser lives here and nowhere else. The MCP server never reads a
-//! recipe — it runs commands and commits — which is what keeps the document
-//! format defined in exactly one place despite the two languages. See ADR 0007.
+//! The corpus parser lives here and nowhere else. The MCP server never parses a
+//! recipe — it lays the documents out and runs this — which is what keeps the
+//! document format defined in exactly one place despite the two languages. See
+//! ADR 0007 and ADR 0038.
 
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 use crate::quantity::{parse_quantity, to_display_number, unit_named, Number, Unit};
 
@@ -85,7 +85,6 @@ pub struct Consumable {
 }
 
 pub struct Corpus {
-    pub root: PathBuf,
     pub recipes: Vec<Recipe>,
     pub days: Vec<Day>,
     pub staples: Vec<String>,
@@ -108,7 +107,6 @@ impl Corpus {
 /// Load the whole folder, or one document inside it.
 pub fn load(root: &Path, only: Option<&str>) -> Corpus {
     let mut corpus = Corpus {
-        root: root.to_path_buf(),
         recipes: Vec::new(),
         days: Vec::new(),
         staples: Vec::new(),
@@ -489,23 +487,21 @@ fn read_household_servings(root: &Path, corpus: &mut Corpus) -> Option<Number> {
 /// household. A lighter meal than the whole household is ordinary (a weekday
 /// breakfast for one), so these are advisory, not corruption.
 ///
-/// The warning is emitted only for a day that is the change in front of the
-/// agent right now — uncommitted, or touched by the latest commit — so a
-/// standing plan whose Tuesday lunch serves one does not get re-flagged on
-/// every later `mealplan validate` that has nothing to do with it. See
-/// `changed_meal_files`.
-pub fn check_servings(corpus: &mut Corpus) {
+/// `changed` names the days that are the change in front of the agent right
+/// now — the server passes the documents its latest change touched, and the
+/// one being written (`--changed`). Only those are warned about, so a standing
+/// plan whose Tuesday lunch serves one does not get re-flagged on every later
+/// `mealplan validate` that has nothing to do with it. `None` — nobody said
+/// what changed — warns about every offending day rather than silently none.
+pub fn check_servings(corpus: &mut Corpus, changed: Option<&HashSet<String>>) {
     let Some(expected) = corpus.household_servings else {
         return;
     };
     let twice = expected * Number::from_integer(2);
-    let changed = changed_meal_files(&corpus.root);
     let mut warnings = Vec::new();
 
     for day in &corpus.days {
-        // When git cannot say (a folder that is not a repository), warn about
-        // every offending day rather than silently none of them.
-        if let Some(changed) = &changed {
+        if let Some(changed) = changed {
             if !changed.contains(day.path.as_str()) {
                 continue;
             }
@@ -543,62 +539,6 @@ pub fn check_servings(corpus: &mut Corpus) {
     }
 
     corpus.warnings = warnings;
-}
-
-/// The meal files the agent is looking at right now: the ones with uncommitted
-/// changes, plus the ones the latest commit touched.
-///
-/// `mealplan validate` is normally run straight after an edit, and the server
-/// commits after every mutating command — so "the latest commit" is the edit
-/// the agent just made, and uncommitted changes are the edit still in progress
-/// inside this one command. Gating to those two keeps the warning attached to
-/// what is being changed.
-///
-/// Returns `None` when git cannot say, which `check_servings` treats as "no
-/// gating".
-fn changed_meal_files(root: &Path) -> Option<HashSet<String>> {
-    let status = Command::new("git")
-        .current_dir(root)
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()?;
-    if !status.status.success() {
-        return None;
-    }
-
-    let last_commit = Command::new("git")
-        .current_dir(root)
-        .args(["diff-tree", "--no-commit-id", "--name-only", "--root", "-r", "HEAD"])
-        .output()
-        .ok()?;
-    if !last_commit.status.success() {
-        return None;
-    }
-
-    let mut files = HashSet::new();
-
-    for line in String::from_utf8_lossy(&status.stdout).lines() {
-        if line.len() < 4 {
-            continue;
-        }
-        // Porcelain: "XY path", or "XY old -> new" for a rename. The path is
-        // everything after the two status characters and the following space;
-        // for a rename, the destination is the right side of the arrow.
-        let path = line[3..].trim();
-        let path = path.rsplit(" -> ").next().unwrap_or(path).trim();
-        if path.starts_with("meals/") {
-            files.insert(path.to_string());
-        }
-    }
-
-    for line in String::from_utf8_lossy(&last_commit.stdout).lines() {
-        let path = line.trim();
-        if path.starts_with("meals/") {
-            files.insert(path.to_string());
-        }
-    }
-
-    Some(files)
 }
 
 /// What a meal feeds: its own `servings:` line, or — without one — what its

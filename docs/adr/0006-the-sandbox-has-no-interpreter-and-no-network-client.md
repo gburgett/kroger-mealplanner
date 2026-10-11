@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2026-08-23
 decision-makers: gburgett
 consulted: agent runtime spike (docs/agent-runtime-spike.md)

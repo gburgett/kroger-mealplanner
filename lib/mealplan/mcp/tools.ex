@@ -4,247 +4,25 @@ defmodule Mealplan.Mcp.Tools do
 
   The MCP transport, JSON-RPC framing and session lifecycle come from
   `anubis_mcp` (ADR 0020). Everything a client actually reads or an agent acts
-  on stays here, ported from `src/mcp/tools.ts` and the `registerTool` block of
-  `src/mcp/server.ts`:
+  on stays here:
 
-  - the description strings, verbatim, because they are the documentation;
-  - the input schemas, authored by hand rather than generated, so the wire
-    shape does not drift;
-  - the "name the argument" refusals — a missing or blank required argument
-    comes back as an ordinary tool result with `isError: true`, never a
-    protocol error, exactly as the TypeScript server did (see
-    `features/sandbox.feature`).
+  - the meal plan's own tools — the file verbs, `validate` and
+    `shopping_list` — which live in `Mealplan.Mcp.DocumentTools` (ADR 0038);
+  - the network tools, which the documents cannot do by construction
+    (ADR 0010, ADR 0017), with their descriptions, hand-authored schemas and
+    "name the argument" refusals.
+
+  A missing or blank required argument comes back as an ordinary tool result
+  with `isError: true`, never a protocol error.
 
   This module returns plain maps ready for JSON-RPC. `Mealplan.Mcp.Server`
   wires them into `tools/list` and `tools/call`.
   """
 
-  alias Mealplan.Sandbox.Session
+  alias Mealplan.Mcp.DocumentTools
   alias Mealplan.Shopping.Tools, as: Shopping
 
   require Logger
-
-  # --- descriptions, verbatim from src/mcp/tools.ts -------------------------
-
-  @bash_description """
-  Plan meals by running a shell command in the meal-plan folder. Use this tool
-  for nearly every meal-planning task: recording a recipe, planning a dinner
-  for a date, seeing what is already planned, and building the shopping list.
-  Explore and edit the meal plan the way you would explore a repository —
-  ls, grep, find, cat, sed, and writing files.
-
-  The folder is mounted at /workspace and every command starts there:
-
-      README.md    the map — read it first
-      recipes/     one document per recipe, filename is the name slugged
-                   (recipes/chicken-tacos.md)
-      meals/     one document per day, filename is the ISO date
-                   (meals/2026-08-25.md). A day holds one "## <meal>"
-                   section per meal — breakfast, lunch, dinner, whatever
-                   this household calls them — and each meal links to its
-                   recipes and may carry a "servings:" line.
-      pantry/      staples.md: what the household never buys. consumables.md:
-                   what it keeps some of but runs out — "stocked" leaves it off
-                   the shopping list, "needs recheck" puts it back on
-      preferences/ household.md: how this household chooses — brands, what it
-                   will not eat, cheap against good, and how many meals it
-                   plans each day. Prose, with no schema. Read it before you
-                   choose anything on their behalf, and before you write a day.
-
-  An ingredient is one markdown list item, "- <quantity> [unit] <item>". No unit
-  means a count: "- 2 eggs". A meal links to its recipes with ordinary markdown
-  links, so "grep -rl chicken-tacos.md meals/" answers "when did we last make
-  this".
-
-  The folder is a git repository and every command that changes a file is
-  committed for you, with the message you provide. git log, git diff and
-  git restore all work, so nothing is lost by overwriting it.
-
-  Two commands are not exploration and should not be done from memory:
-
-      mealplan validate [path]
-          Check the folder, or one file, against the document format. Reports
-          every problem, naming the file and the line.
-
-      mealplan shopping-list --from YYYY-MM-DD --to YYYY-MM-DD
-                             [--include-staples] [--include-consumables]
-                             [--out PATH] [--json]
-          One shopping list for a range of nights, with the units added up, the
-          pantry staples left out, and any stocked consumable left out too. A
-          consumable marked "needs recheck" is bought, but its line is marked
-          "(check)" — ask the household whether they already have it before
-          buying it, since kroger_send_to_cart refuses to send while any line
-          is still marked that way. Derived from the folder every time. --out
-          writes it into shopping-lists/, which is what the Kroger tools then
-          work on.
-
-  Two more folders:
-
-      config/          kroger.md: which Kroger store the shopping is matched
-                       against. "cat config/kroger.md" answers "is Kroger set up".
-                       walmart.md: which Walmart store cart links are built for.
-                       No sign-in is needed for Walmart; walmart_find_stores
-                       finds the stores and you write the file.
-                       household.md: how many adults and children the household
-                       cooks for, as "adults:" and "children:" in front matter —
-                       mealplan validate compares each meal's servings against
-                       it and warns on too few, or more than double.
-      shopping-lists/  one document per range of nights, written by
-                       "mealplan shopping-list --out".
-
-  There is no network, and no interpreter: no python, node, perl or compiler.
-  Everything outside the folder is unreachable.\
-  """
-
-  @open_description """
-  Start meal planning here. Use this first for any request about recipes,
-  dinners, the weekly menu, a grocery list, or what to cook: it opens the
-  household's meal plan and shows the lay of the land.
-
-  Call this first — once — before bash, read_file or write_file. It opens the
-  meal plan — recipes, planned days (meals/), pantry, preferences and shopping
-  lists — and hands back a picture of it: a tree of the folders with their most
-  recent files, the last few commits, and where the documents that matter live.
-
-  The session stays warm between commands and closes itself after a spell with
-  no command. Call `open` again to resume a closed session, and to get a fresh
-  tree after a burst of writes. It is safe to call any number of times.\
-  """
-
-  @close_description """
-  End the meal-planning session now that the request is finished.
-
-  Optional — the session also closes itself after a spell with no command — but
-  an assistant that has finished a request should call this, so the resources
-  the session holds are freed at once. The next bash, read_file or write_file
-  will need `open` again.\
-  """
-
-  @read_file_description """
-  Read a recipe, a planned day of meals, the pantry, a shopping list, or any
-  other file in the meal plan.
-
-  The path is relative to the folder root, for example "recipes/chicken-tacos.md".
-  Equivalent to "cat" through the bash tool; this is the convenient form.\
-  """
-
-  @write_file_description """
-  Write or edit a recipe, a planned day of meals, a shopping list, or any other
-  file in the meal plan.
-
-  The path is relative to the folder root, for example "recipes/chicken-tacos.md".
-  The whole file is replaced, and the change is committed with the message you
-  provide, so an overwrite can always be walked back with git restore.
-
-  Missing directories on the way to the file are created.\
-  """
-
-  # --- "name the argument" refusals, verbatim ----------------------------
-
-  @bash_command_required ~s|the "bash" tool needs a "command": the shell command to run.|
-  @bash_message_required ~s|the "bash" tool needs a "message": a commit message describing what this command | <>
-                           ~s|changes. Every command that changes a file is committed with it.|
-
-  @read_file_path_required ~s|the "read_file" tool needs a "path": relative to the meal-plan folder root.|
-
-  @write_file_path_required ~s|the "write_file" tool needs a "path": relative to the meal-plan folder root.|
-  @write_file_content_required ~s|the "write_file" tool needs "content": the whole new contents of the file. | <>
-                                 ~s|Leave it empty ("") to write an empty file on purpose.|
-  @write_file_message_required ~s|the "write_file" tool needs a "message": a commit message describing what this | <>
-                                 ~s|change does. The change is committed with it.|
-
-  # --- input schemas, authored by hand ---------------------------------
-
-  @bash_input_schema %{
-    "type" => "object",
-    "properties" => %{
-      "command" => %{
-        "type" => "string",
-        "description" => "The shell command to run, as bash would read it."
-      },
-      "message" => %{
-        "type" => "string",
-        "description" =>
-          "A commit message describing what this change does. Required — " <>
-            "every command that changes a file is committed with this message."
-      }
-    },
-    "required" => ["command", "message"]
-  }
-
-  @bash_output_schema %{
-    "type" => "object",
-    "properties" => %{
-      "stdout" => %{"type" => "string", "description" => "What the command printed."},
-      "stderr" => %{
-        "type" => "string",
-        "description" => "What the command printed to its error stream."
-      },
-      "exitCode" => %{"type" => "integer", "description" => "Zero when the command succeeded."},
-      "timedOut" => %{
-        "type" => "boolean",
-        "description" => "True when the command ran too long and was stopped."
-      },
-      "truncated" => %{
-        "type" => "boolean",
-        "description" => "True when output was dropped. The notice says how much."
-      }
-    },
-    "required" => ["stdout", "stderr", "exitCode", "timedOut", "truncated"]
-  }
-
-  # `open` and `close` take no arguments: they are the session seam itself
-  # (ADR 0008, ADR 0021, ADR 0035), not a job inside the folder. An object
-  # schema with no properties is still a schema.
-  @open_input_schema %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
-  @close_input_schema %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
-
-  @read_file_input_schema %{
-    "type" => "object",
-    "properties" => %{
-      "path" => %{
-        "type" => "string",
-        "description" => "Path relative to the meal-plan folder root."
-      }
-    },
-    "required" => ["path"]
-  }
-
-  @read_file_output_schema %{
-    "type" => "object",
-    "properties" => %{"content" => %{"type" => "string", "description" => "The whole file."}},
-    "required" => ["content"]
-  }
-
-  @write_file_input_schema %{
-    "type" => "object",
-    "properties" => %{
-      "path" => %{
-        "type" => "string",
-        "description" => "Path relative to the meal-plan folder root."
-      },
-      "content" => %{
-        "type" => "string",
-        "description" => "The whole new contents of the file."
-      },
-      "message" => %{
-        "type" => "string",
-        "description" =>
-          "A commit message describing what this change does. Required — " <>
-            "the change is committed with this message."
-      }
-    },
-    "required" => ["path", "content", "message"]
-  }
-
-  @write_file_output_schema %{
-    "type" => "object",
-    "properties" => %{
-      "path" => %{"type" => "string", "description" => "The path that was written."},
-      "bytes" => %{"type" => "integer", "description" => "How many bytes were written."}
-    },
-    "required" => ["path", "bytes"]
-  }
 
   # --- the five network tools: descriptions verbatim from src/mcp/tools.ts ---
   #
@@ -255,8 +33,8 @@ defmodule Mealplan.Mcp.Tools do
   @find_products_description """
   Find Kroger products for the lines on a shopping list.
 
-  Give it a list written by "mealplan shopping-list --from ... --to ... --out
-  shopping-lists/<from>--<to>.md". It reads the range and the store out of the
+  Give it a list written by shopping_list with "out" set to
+  "shopping-lists/<from>--<to>.md". It reads the range and the store out of the
   document's front matter, searches Kroger once for each line, and writes the
   products it found underneath that line, like this:
 
@@ -267,18 +45,18 @@ defmodule Mealplan.Mcp.Tools do
   AN ITEM NOBODY IS COOKING STILL GETS SEARCHED. Not every line traces back to
   a recipe — toothpaste, a salmon pouch, whatever the household just wants
   bought. Add it yourself: write "- <item>" under any heading in the document
-  with bash or write_file, then run this tool again. It is searched by its own
+  with edit_file or write_file, then run this tool again. It is searched by its own
   words exactly like any other line, and its candidates land under it the same
   way. Do not fake a recipe to get an item onto the list, and do not regenerate
-  the whole document with "mealplan shopping-list --out" to add one line — that
+  the whole document with shopping_list and "out" to add one line — that
   overwrites every candidate already chosen and everything already sent.
 
   IT CHOOSES NOTHING. Searching for "boneless chicken thighs" returns noise as
   well as thighs. Two or more candidates on a line means nobody has
   chosen yet, and kroger_send_to_cart will refuse that line rather than guess.
 
-  To choose, DELETE the candidate lines you do not want, with the bash or
-  write_file tool, until one is left. Showing the household the candidates and
+  To choose, DELETE the candidate lines you do not want, with edit_file or
+  write_file, until one is left. Showing the household the candidates and
   letting them say which is the right move when it is a real judgement — a brand
   they care about, a size that is nearly double the price.
 
@@ -310,7 +88,7 @@ defmodule Mealplan.Mcp.Tools do
   Not found at this store" first.
 
   It needs a chosen store, because Kroger returns no price at all without one.
-  "cat config/kroger.md" says which shop is set, and how to change it.\
+  read_file "config/kroger.md" says which shop is set, and how to change it.\
   """
 
   @send_to_cart_description """
@@ -347,7 +125,7 @@ defmodule Mealplan.Mcp.Tools do
   afterward. An item with no line in that file is not given one — sending a
   product to Kroger is a decision to buy it, not a decision to start tracking it.
 
-  It needs a connected Kroger account. "cat config/kroger.md" says whether there
+  It needs a connected Kroger account. read_file "config/kroger.md" says whether there
   is one.\
   """
 
@@ -376,8 +154,8 @@ defmodule Mealplan.Mcp.Tools do
   @find_walmart_products_description """
   Find Walmart products for the lines on a shopping list.
 
-  Give it a list written by "mealplan shopping-list --from ... --to ... --out
-  shopping-lists/<from>--<to>.md". It searches Walmart once for each line and
+  Give it a list written by shopping_list with "out" set to
+  "shopping-lists/<from>--<to>.md". It searches Walmart once for each line and
   writes the products it found underneath that line, like this:
 
       - 8 oz shredded cheddar — 2026-08-25
@@ -440,14 +218,14 @@ defmodule Mealplan.Mcp.Tools do
   # --- network-tool "name the argument" refusals, verbatim ---------------
 
   @fp_path_required ~s|the "kroger_find_products" tool needs a "path": the shopping list to search from, | <>
-                      ~s|relative to the folder root.|
-  @fp_message_required ~s|the "kroger_find_products" tool needs a "message": a commit message describing | <>
-                         ~s|what this search is for. The candidates written to the list are committed with it.|
+                      ~s|relative to the meal-plan root.|
+  @fp_message_required ~s|the "kroger_find_products" tool needs a "message": a message describing | <>
+                         ~s|what this search is for. The candidates written to the list are recorded with it.|
 
   @stc_path_required ~s|the "kroger_send_to_cart" tool needs a "path": the shopping list to send from, | <>
-                       ~s|relative to the folder root.|
-  @stc_message_required ~s|the "kroger_send_to_cart" tool needs a "message": a commit message describing | <>
-                          ~s|what is being sent. The sent status written to the list is committed with it.|
+                       ~s|relative to the meal-plan root.|
+  @stc_message_required ~s|the "kroger_send_to_cart" tool needs a "message": a message describing | <>
+                          ~s|what is being sent. The sent status written to the list is recorded with it.|
   @stc_upc_required ~s|an entry in "items" for "kroger_send_to_cart" needs a "upc": a UPC already | <>
                       ~s|written on the list.|
 
@@ -455,14 +233,14 @@ defmodule Mealplan.Mcp.Tools do
   @fs_zip_bad ~s|the "walmart_find_stores" tool needs "zip" to be a five-digit US postcode.|
 
   @fwp_path_required ~s|the "walmart_find_products" tool needs a "path": the shopping list to search from, | <>
-                       ~s|relative to the folder root.|
-  @fwp_message_required ~s|the "walmart_find_products" tool needs a "message": a commit message describing | <>
-                          ~s|what this search is for. The candidates written to the list are committed with it.|
+                       ~s|relative to the meal-plan root.|
+  @fwp_message_required ~s|the "walmart_find_products" tool needs a "message": a message describing | <>
+                          ~s|what this search is for. The candidates written to the list are recorded with it.|
 
   @cl_path_required ~s|the "walmart_cart_link" tool needs a "path": the shopping list to build from, | <>
-                      ~s|relative to the folder root.|
-  @cl_message_required ~s|the "walmart_cart_link" tool needs a "message": a commit message describing | <>
-                         ~s|what this link is for. The link recorded on the list is committed with it.|
+                      ~s|relative to the meal-plan root.|
+  @cl_message_required ~s|the "walmart_cart_link" tool needs a "message": a message describing | <>
+                         ~s|what this link is for. The link recorded on the list is recorded with it.|
   @cl_id_required ~s|an entry in "items" for "walmart_cart_link" needs an "id": a "walmart:<item id>" | <>
                     ~s|already written on the list.|
 
@@ -471,7 +249,7 @@ defmodule Mealplan.Mcp.Tools do
   @list_path_property %{
     "type" => "string",
     "description" =>
-      "The shopping list, relative to the folder root, for example " <>
+      "The shopping list, relative to the meal-plan root, for example " <>
         "\"shopping-lists/2026-08-25--2026-08-31.md\"."
   }
 
@@ -482,8 +260,8 @@ defmodule Mealplan.Mcp.Tools do
       "message" => %{
         "type" => "string",
         "description" =>
-          "A commit message describing what this search is for. Required — " <>
-            "candidates written to the list are committed with this message."
+          "What this search is for. Required — " <>
+            "the candidates written to the list are recorded with this message."
       }
     },
     "required" => ["path", "message"]
@@ -512,13 +290,13 @@ defmodule Mealplan.Mcp.Tools do
     "properties" => %{
       "path" => %{
         "type" => "string",
-        "description" => "The shopping list, relative to the folder root."
+        "description" => "The shopping list, relative to the meal-plan root."
       },
       "message" => %{
         "type" => "string",
         "description" =>
-          "A commit message describing what is being sent. Required — " <>
-            "the sent status written to the list is committed with this message."
+          "What is being sent. Required — " <>
+            "the sent status written to the list is recorded with this message."
       },
       "items" => %{
         "type" => "array",
@@ -619,8 +397,8 @@ defmodule Mealplan.Mcp.Tools do
       "message" => %{
         "type" => "string",
         "description" =>
-          "A commit message describing what this search is for. Required — " <>
-            "candidates written to the list are committed with this message."
+          "What this search is for. Required — " <>
+            "the candidates written to the list are recorded with this message."
       }
     },
     "required" => ["path", "message"]
@@ -631,13 +409,13 @@ defmodule Mealplan.Mcp.Tools do
     "properties" => %{
       "path" => %{
         "type" => "string",
-        "description" => "The shopping list, relative to the folder root."
+        "description" => "The shopping list, relative to the meal-plan root."
       },
       "message" => %{
         "type" => "string",
         "description" =>
-          "A commit message describing what this link is for. Required — " <>
-            "the link recorded on the list is committed with this message."
+          "What this link is for. Required — " <>
+            "the link recorded on the list is recorded with this message."
       },
       "items" => %{
         "type" => "array",
@@ -692,83 +470,19 @@ defmodule Mealplan.Mcp.Tools do
     "required" => ["path", "url", "items", "skipped"]
   }
 
-  # The sandbox session's own lifecycle (ADR 0035). Present in every mode, so
-  # the interface does not change shape with the deployment. Neither returns
-  # `structuredContent`, so neither carries an `output_schema`.
-  @session_tools [
-    %{
-      name: "open",
-      title: "Start meal planning — open the meal plan",
-      description: @open_description,
-      input_schema: @open_input_schema,
-      output_schema: nil
-    },
-    %{
-      name: "close",
-      title: "End meal planning — close the session",
-      description: @close_description,
-      input_schema: @close_input_schema,
-      output_schema: nil
-    }
-  ]
-
-  @tools [
-    %{
-      name: "bash",
-      title: "Plan meals — run a shell command on the meal plan",
-      description: @bash_description,
-      input_schema: @bash_input_schema,
-      output_schema: @bash_output_schema
-    },
-    %{
-      name: "read_file",
-      title: "Read a recipe, meal, or file in the meal plan",
-      description: @read_file_description,
-      input_schema: @read_file_input_schema,
-      output_schema: @read_file_output_schema
-    },
-    %{
-      name: "write_file",
-      title: "Write a recipe, meal, or file in the meal plan",
-      description: @write_file_description,
-      input_schema: @write_file_input_schema,
-      output_schema: @write_file_output_schema
-    }
-  ]
-
-  # --- the interactive tool bodies, for the weekly recheck job --------------
-  #
-  # ADR 0018's unattended caller drives the SAME bash / read_file / write_file
-  # behaviour, so `Mealplan.Recheck` builds its LLM tool schemas from these and
-  # renders results with `render_bash_result/1`. The verbatim text has one home.
-  @doc false
-  def bash_description, do: @bash_description
-  @doc false
-  def read_file_description, do: @read_file_description
-  @doc false
-  def write_file_description, do: @write_file_description
-  @doc false
-  def bash_input_schema, do: @bash_input_schema
-  @doc false
-  def read_file_input_schema, do: @read_file_input_schema
-  @doc false
-  def write_file_input_schema, do: @write_file_input_schema
-
   @doc "The wire descriptors for `tools/list`, in the MCP shape."
   @spec list() :: [map()]
   def list do
-    Enum.map(@session_tools ++ @tools ++ network_tools(), fn t ->
-      base = %{
-        "name" => t.name,
-        "title" => t.title,
-        "description" => t.description,
-        "inputSchema" => t.input_schema
-      }
-
-      # `open` and `close` return only a text block, so a declared `outputSchema`
-      # (which asks the client for `structuredContent`) would be a lie.
-      if t.output_schema, do: Map.put(base, "outputSchema", t.output_schema), else: base
-    end)
+    DocumentTools.list() ++
+      Enum.map(network_tools(), fn t ->
+        %{
+          "name" => t.name,
+          "title" => t.title,
+          "description" => t.description,
+          "inputSchema" => t.input_schema,
+          "outputSchema" => t.output_schema
+        }
+      end)
   end
 
   # The network tools. Built here rather than as a module attribute because
@@ -843,8 +557,15 @@ defmodule Mealplan.Mcp.Tools do
 
   @doc "The set of tool names this server serves."
   @spec names() :: [String.t()]
-  def names,
-    do: Enum.map(@session_tools ++ @tools, & &1.name) ++ Enum.map(network_tools(), & &1.name)
+  def names, do: DocumentTools.names() ++ Enum.map(network_tools(), & &1.name)
+
+  # The tools the sandbox served (ADR 0035, ADR 0039 retired them). Named here so
+  # a client holding a stale tool list is told what to use instead, not
+  # "unknown tool".
+  @retired ~w(bash close)
+  @no_shell "there is no shell: the meal plan is documents, and nothing an assistant writes " <>
+              "is run (ADR 0039). Explore with list_files, read_file and grep; change with " <>
+              "write_file, edit_file and delete_file; shopping_list derives the grocery list."
 
   @doc """
   Run one tool. `args` is the decoded `params.arguments` map (string keys).
@@ -861,118 +582,36 @@ defmodule Mealplan.Mcp.Tools do
   @spec call(String.t(), map(), String.t(), DateTime.t()) ::
           {:ok, map()} | {:error, :unknown_tool}
   def call(name, args, tenant, now) do
-    case do_call(name, args, tenant, now) do
+    result =
+      cond do
+        name in DocumentTools.names() ->
+          corpus = Mealplan.Store.Corpus.open(tenant, now: now)
+          {:ok, DocumentTools.call(name, args, corpus, now)}
+
+        name in @retired ->
+          {:ok, error_result(@no_shell)}
+
+        true ->
+          do_call(name, args, tenant, now)
+      end
+
+    case result do
       {:ok, result} -> {:ok, with_onboarding_note(result, tenant)}
       other -> other
     end
   end
 
-  # ADR 0035 stopped the sandbox tools from auto-opening a session, so there may
-  # be none here — after `close`, or before the first `open`. No session means
-  # no folder to read the onboarding state from, and nothing to nudge about yet.
   defp with_onboarding_note(result, tenant) do
-    case live_session(tenant) do
-      pid when is_pid(pid) ->
-        if Mealplan.Onboarding.done?(pid) do
-          result
-        else
-          Map.update!(result, "content", fn blocks ->
-            blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
-          end)
-        end
-
-      nil ->
-        result
+    if Mealplan.Onboarding.done?(Mealplan.Store.Corpus.handle(tenant)) do
+      result
+    else
+      Map.update!(result, "content", fn blocks ->
+        blocks ++ [%{"type" => "text", "text" => Mealplan.Onboarding.note()}]
+      end)
     end
   end
 
   defp do_call(name, args, tenant, now)
-
-  # --- the session lifecycle (ADR 0035) ----------------------------------
-
-  defp do_call("open", _args, tenant, _now) do
-    # Check out the running session or open one — git repository, scaffold,
-    # dated migrations, and under microsandbox the microVM boot.
-    session = Mealplan.Corpus.ensure_open(tenant)
-    :ok = Session.reset_idle_timer(session)
-    {:ok, text_result(open_text(session))}
-  end
-
-  defp do_call("close", _args, tenant, _now) do
-    case live_session(tenant) do
-      pid when is_pid(pid) ->
-        :ok = Session.close(pid)
-        {:ok, text_result("sandbox session closed. Call `open` to start another.")}
-
-      nil ->
-        {:ok, text_result("no sandbox session was open.")}
-    end
-  end
-
-  defp do_call("bash", args, tenant, now) do
-    with {:ok, command} <- required_string(args, "command", @bash_command_required),
-         {:ok, message} <- required_trimmed(args, "message", @bash_message_required),
-         {:ok, session} <- open_session(tenant) do
-      result = Session.run_and_commit(session, command, message, now)
-
-      {:ok,
-       %{
-         "content" => [%{"type" => "text", "text" => render_bash_result(result)}],
-         "structuredContent" => %{
-           "stdout" => result.stdout,
-           "stderr" => result.stderr,
-           "exitCode" => result.exit_code,
-           "timedOut" => result.timed_out,
-           "truncated" => result.truncated
-         },
-         "isError" => result.exit_code != 0
-       }}
-    else
-      {:refuse, text} -> {:ok, error_result(text)}
-    end
-  end
-
-  defp do_call("read_file", args, tenant, _now) do
-    with {:ok, path} <- required_string(args, "path", @read_file_path_required),
-         {:ok, session} <- open_session(tenant) do
-      case Session.read_corpus(session, path) do
-        {:ok, content} ->
-          {:ok,
-           %{
-             "content" => [%{"type" => "text", "text" => content}],
-             "structuredContent" => %{"content" => content},
-             "isError" => false
-           }}
-
-        {:error, message} ->
-          {:ok, error_result(message)}
-      end
-    else
-      {:refuse, text} -> {:ok, error_result(text)}
-    end
-  end
-
-  defp do_call("write_file", args, tenant, now) do
-    with {:ok, path} <- required_string(args, "path", @write_file_path_required),
-         {:ok, content} <- required_present(args, "content", @write_file_content_required),
-         {:ok, message} <- required_trimmed(args, "message", @write_file_message_required),
-         {:ok, session} <- open_session(tenant) do
-      case Session.write_and_commit(session, path, content, message, now) do
-        {:ok, bytes} ->
-          {:ok,
-           %{
-             "content" => [%{"type" => "text", "text" => "wrote #{bytes} bytes to #{path}"}],
-             "structuredContent" => %{"path" => path, "bytes" => bytes},
-             "isError" => false
-           }}
-
-        {:error, message} ->
-          {:ok, error_result(message)}
-      end
-    else
-      {:refuse, text} -> {:ok, error_result(text)}
-    end
-  end
 
   defp do_call("kroger_find_products", args, tenant, now) do
     with {:ok, path} <- required_string(args, "path", @fp_path_required),
@@ -982,7 +621,7 @@ defmodule Mealplan.Mcp.Tools do
 
         result =
           Shopping.find_products(
-            session!(tenant),
+            corpus!(tenant),
             now,
             kroger,
             path,
@@ -1012,7 +651,7 @@ defmodule Mealplan.Mcp.Tools do
 
         result =
           Shopping.send_to_cart(
-            session!(tenant),
+            corpus!(tenant),
             now,
             kroger,
             path,
@@ -1062,7 +701,7 @@ defmodule Mealplan.Mcp.Tools do
            ]) do
       run_network(fn ->
         walmart = Mealplan.Walmart.Api.new()
-        result = Shopping.find_walmart_products(session!(tenant), now, walmart, path, message)
+        result = Shopping.find_walmart_products(corpus!(tenant), now, walmart, path, message)
 
         {:ok,
          ok_result(Shopping.render_walmart_find_products(result), %{
@@ -1086,7 +725,7 @@ defmodule Mealplan.Mcp.Tools do
          {:ok, only} <- parse_cart_items(Map.get(args, "items"), "id", @cl_id_required) do
       run_network(fn ->
         walmart = Mealplan.Walmart.Api.new()
-        result = Shopping.build_cart_link(session!(tenant), now, walmart, path, message, only)
+        result = Shopping.build_cart_link(corpus!(tenant), now, walmart, path, message, only)
 
         {:ok,
          ok_result(Shopping.render_cart_link(result), %{
@@ -1111,7 +750,7 @@ defmodule Mealplan.Mcp.Tools do
 
   # Any exception a network tool raises — a refusal, a Kroger/Walmart API
   # error, a list format error — becomes an ordinary tool result with
-  # `isError: true`, exactly as a thrown Error did in the TypeScript server.
+  # `isError: true`.
   defp run_network(fun) do
     fun.()
   rescue
@@ -1177,80 +816,15 @@ defmodule Mealplan.Mcp.Tools do
     end
   end
 
-  # The network tools still auto-open: they read and write a shopping list
-  # through the session, and ADR 0035 scopes the "call `open` first" gate to
-  # bash / read_file / write_file. Internal callers (recheck, scaffold,
-  # migrations) keep this too.
-  defp session!(tenant), do: Mealplan.Corpus.ensure_open(tenant)
-
-  @no_session ~s(no sandbox session is open — call `open` first; it returns the current folder tree and recent history)
-
-  # bash / read_file / write_file no longer boot a session (ADR 0035). No live
-  # session is a recoverable tool result naming the one verb that fixes it —
-  # the same shape as the restart refusal in `features/sandbox.feature`.
-  defp open_session(tenant) do
-    case live_session(tenant) do
-      pid when is_pid(pid) -> {:ok, pid}
-      nil -> {:refuse, @no_session}
-    end
-  end
-
-  # `Mealplan.Sandbox.whereis/1` can hand back a pid whose process has already
-  # stopped — the `Registry` releases the name on the DOWN message, a moment
-  # after `close` returns. Treat a dead pid as no session.
-  defp live_session(tenant) do
-    case Mealplan.Sandbox.whereis(tenant) do
-      pid when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
-      _ -> nil
-    end
-  end
-
-  defp text_result(text) do
-    %{"content" => [%{"type" => "text", "text" => text}], "isError" => false}
-  end
-
-  # What `open` returns: the folder tree, the recent history, a short
-  # orientation, and the line that names the idle window and the way back.
-  defp open_text(session) do
-    minutes = max(div(Mealplan.Sandbox.session_idle_timeout_ms(), 60_000), 1)
-
-    [
-      Mealplan.Corpus.Tree.render(session),
-      Mealplan.Git.Repository.recent_history(session),
-      "README.md is the schema — read it first. preferences/household.md is prose " <>
-        "with no schema; read it before you choose anything on the household's behalf. " <>
-        "config/kroger.md is which Kroger shop the shopping is matched against, and " <>
-        "config/walmart.md is which Walmart store cart links are built for.",
-      "This session closes after #{minutes} minutes with no command. Call `open` again " <>
-        "to resume it and to see the folder as it is now."
-    ]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join("\n\n")
-  end
-
-  # stdout and stderr, rendered for a reader rather than for a parser.
-  @doc false
-  def render_bash_result(result) do
-    parts =
-      []
-      |> maybe_append(result.stdout != "", String.replace_suffix(result.stdout, "\n", ""))
-      |> maybe_append(result.stderr != "", String.replace_suffix(result.stderr, "\n", ""))
-      |> maybe_append(result.exit_code != 0, "[exit status #{result.exit_code}]")
-
-    case Enum.join(parts, "\n") do
-      "" -> "[no output]"
-      text -> text
-    end
-  end
-
-  defp maybe_append(list, true, value), do: list ++ [value]
-  defp maybe_append(list, false, _value), do: list
+  # The network tools read and write a shopping list through the household's
+  # documents, opened (and scaffolded if need be) on the way in.
+  defp corpus!(tenant), do: Mealplan.Store.for_tenant(tenant)
 
   # Check several required arguments at once and report EVERY one that is
   # missing or blank, joined, the way the TypeScript server's Zod `inputSchema`
   # did — it collected all issues rather than stopping at the first. It matters
   # for the tools a caller can reach with `{}` (the Walmart tools, which the
-  # step file has no VALID_ARGS entry for): `sandbox.feature` asserts the
+  # step file has no VALID_ARGS entry for): `tools.feature` asserts the
   # refusal names each argument, so one refusal has to name them all.
   #
   # `specs` is a list of `{key, :string | :trimmed, message}`. Returns
@@ -1280,14 +854,6 @@ defmodule Mealplan.Mcp.Tools do
   defp required_string(args, key, message) do
     case Map.get(args, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:refuse, message}
-    end
-  end
-
-  # A required argument that must be present as a string (may be "").
-  defp required_present(args, key, message) do
-    case Map.get(args, key) do
-      value when is_binary(value) -> {:ok, value}
       _ -> {:refuse, message}
     end
   end

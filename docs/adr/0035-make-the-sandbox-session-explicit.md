@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2026-09-07
 decision-makers: gburgett
 consulted: ADR 0008, ADR 0010, ADR 0021, ADR 0026, ADR 0027, ADR 0033, docs/multi-tenant-isolation-trade-study.md

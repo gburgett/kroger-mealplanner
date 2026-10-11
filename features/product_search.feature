@@ -76,8 +76,8 @@ Feature: Reducing a shopping-list line to a search term
     And the search term for "baby greens salad mix" is "salad mix"
 
   Scenario: An item with no tracked recipe is searched by its own words
-    A hand-typed line has no entry in what `mealplan shopping-list --json`
-    derives, because nothing in the folder links it to a recipe — nobody is
+    A hand-typed line has no entry in what the parser derives, because
+    nothing in the meal plan links it to a recipe — nobody is
     cooking it, it just needs to be bought. It used to be skipped in total
     silence: no search, no candidates, no word about it anywhere. Writing an
     item nobody cooked is an ordinary edit now, not a dead end: it is searched

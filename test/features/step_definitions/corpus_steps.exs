@@ -1,24 +1,16 @@
 defmodule Mealplan.Features.CorpusSteps do
   @moduledoc """
-  What the Gherkin steps mean, in Elixir. A port of `features/steps/*.ts`.
+  What the Gherkin steps mean, in Elixir.
 
-  Two rules carry over from `features/README.md` unchanged, and they are why
-  this reads the way it does:
+  Two rules from `features/README.md`, and they are why this reads the way it
+  does:
 
-    * **A `Given` step may write files directly** — that is setup.
+    * **A `Given` step may write directly** — that is setup
+      (`Mealplan.FeatureCorpus.plant/3`).
     * **A `When` step goes through the real interface.** Here that is
       `Mealplan.Mcp.Tools.call/4`, the same function the MCP server calls when a
-      client asks for a tool. Nothing is stubbed under it: a real sandbox
-      session, real shell commands, a real git repository.
-
-  What changed from the TypeScript harness is only what sits *above* the tool:
-  no OS process, no socket, no OAuth handshake per scenario. The transport and
-  the authorisation server get their own tests instead of being re-exercised by
-  all 226 scenarios. See ADR 0022.
-
-  The patterns match the TypeScript ones deliberately: a `{string}` there is a
-  `{string}` here, and where the TypeScript used a regular expression for an
-  optional "have"/"ed", so does this.
+      client asks for a tool. Nothing is stubbed under it: the real document
+      store and the real `mealplan` parser (ADR 0038, ADR 0039).
   """
 
   use Cucumber.StepDefinition
@@ -26,21 +18,21 @@ defmodule Mealplan.Features.CorpusSteps do
   import ExUnit.Assertions
 
   alias Mealplan.Documents
+  alias Mealplan.FeatureCorpus
   alias Mealplan.Mcp.Tools
-  alias Mealplan.Sandbox.Session
 
   @default_servings 4
 
-  # --- opening the folder ---------------------------------------------------
+  # --- the meal plan ---------------------------------------------------------
 
-  # The folder is already mounted and scaffolded by the before_scenario hook,
-  # which uses the same Boot.open_corpus/3 the server runs. The step is here so
-  # the Background reads as the housewife's situation rather than as ours.
-  step "a meal-plan folder mounted at {string}", context do
+  # The meal plan is scaffolded by the before_scenario hook, with the same
+  # `Mealplan.Store.Corpus.open/2` a household's first request runs. The steps
+  # are here so a Background reads as the housewife's situation.
+  step "a meal plan", context do
     {:ok, context}
   end
 
-  step "the meal-plan folder is brand new", context do
+  step "the meal plan is brand new", context do
     {:ok, context}
   end
 
@@ -52,41 +44,199 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  # --- running commands -----------------------------------------------------
+  # --- asking the meal plan ---------------------------------------------------
 
-  step ~r/^I (?:have )?run "(.*)" with the message "(.*)"$/,
-       %{args: [command, message]} = context do
-    {:ok, run_bash(context, unescape(command), message)}
+  step "I list the meal plan", context do
+    {:ok, FeatureCorpus.call(context, "list_files", %{})}
   end
 
-  # The negative lookahead is the TypeScript's, verbatim, and it is load-bearing:
-  # without it `(.*)` swallows `" with the message "…"` and both definitions
-  # match. cucumber-js took the first; this runner calls it ambiguous, which is
-  # the better behaviour and how the defect was found.
-  step ~r/^I (?:have )?run (?!.*" with the message ")"(.*)"$/, %{args: [command]} = context do
-    {:ok, run_bash(context, unescape(command), "bash #{command}")}
+  step "I list {string}", %{args: [path]} = context do
+    {:ok, FeatureCorpus.call(context, "list_files", %{"path" => path})}
   end
 
-  step ~r/^I (?:have )?run:$/, context do
-    {:ok, run_bash(context, context.docstring, "bash")}
+  step "I read {string}", %{args: [path]} = context do
+    {:ok, FeatureCorpus.call(context, "read_file", %{"path" => path})}
   end
 
-  # In process, a restart is what a restart actually is: the session's memory
-  # goes, the folder and the database stay. The scenarios that assert this are
-  # about exactly what survives.
+  step "I search {string} for {string}", %{args: [path, pattern]} = context do
+    {:ok, FeatureCorpus.call(context, "grep", %{"pattern" => pattern, "path" => path})}
+  end
+
+  step "I find the documents in {string} that mention {string}",
+       %{args: [path, pattern]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "grep", %{
+       "pattern" => pattern,
+       "path" => path,
+       "files_only" => true
+     })}
+  end
+
+  step "I find the documents in {string} that mention {string} ignoring case",
+       %{args: [path, pattern]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "grep", %{
+       "pattern" => pattern,
+       "path" => path,
+       "files_only" => true,
+       "ignore_case" => true
+     })}
+  end
+
+  step "I validate the meal plan", context do
+    {:ok, FeatureCorpus.call(context, "validate", %{})}
+  end
+
+  step "I validate {string}", %{args: [path]} = context do
+    {:ok, FeatureCorpus.call(context, "validate", %{"path" => path})}
+  end
+
+  step "I ask for the shopping list from {string} to {string}", %{args: [from, to]} = context do
+    {:ok, FeatureCorpus.call(context, "shopping_list", %{"from" => from, "to" => to})}
+  end
+
+  step "I ask for the shopping list from {string} to {string} including the staples",
+       %{args: [from, to]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "shopping_list", %{
+       "from" => from,
+       "to" => to,
+       "include_staples" => true
+     })}
+  end
+
+  step "I ask for the shopping list from {string} to {string} including the consumables",
+       %{args: [from, to]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "shopping_list", %{
+       "from" => from,
+       "to" => to,
+       "include_consumables" => true
+     })}
+  end
+
+  step "I write the shopping list from {string} to {string} to {string}",
+       %{args: [from, to, out]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "shopping_list", %{"from" => from, "to" => to, "out" => out})}
+  end
+
+  step "I edit {string} replacing {string} with {string} with the message {string}",
+       %{args: [path, old, new, message]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "edit_file", %{
+       "path" => path,
+       "old_string" => old,
+       "new_string" => new,
+       "message" => message
+     })}
+  end
+
+  step "I have deleted the document {string}", %{args: [path]} = context do
+    context =
+      FeatureCorpus.call(context, "delete_file", %{"path" => path, "message" => "delete #{path}"})
+
+    assert context.last.exit_code == 0, "deleting #{path} failed:\n#{context.last.stdout}"
+    {:ok, context}
+  end
+
+  step "I have deleted the document {string} with the message {string}",
+       %{args: [path, message]} = context do
+    context = FeatureCorpus.call(context, "delete_file", %{"path" => path, "message" => message})
+    assert context.last.exit_code == 0, "deleting #{path} failed:\n#{context.last.stdout}"
+    {:ok, context}
+  end
+
+  step "I edit {string} replacing {string} with:", %{args: [path, old]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "edit_file", %{
+       "path" => path,
+       "old_string" => old,
+       "new_string" => context.docstring,
+       "message" => "edit #{path}"
+     })}
+  end
+
+  # What an agent does to drop one line: an exact edit of that line and its end.
+  step "I edit {string} removing the line {string}", %{args: [path, line]} = context do
+    {:ok,
+     FeatureCorpus.call(context, "edit_file", %{
+       "path" => path,
+       "old_string" => line <> "\n",
+       "new_string" => "",
+       "message" => "edit #{path}"
+     })}
+  end
+
+  # The change just before the path's first one: the meal plan as it was before
+  # the document was ever written.
+  step "I restore {string} as it was before it was written", %{args: [path]} = context do
+    tenant_id = FeatureCorpus.tenant_id(context)
+    first = tenant_id |> Mealplan.Store.Documents.history(path, 1_000) |> List.last()
+
+    before =
+      tenant_id
+      |> Mealplan.Store.Documents.history(nil, 1_000)
+      |> Enum.find(&(&1.id < first.id))
+
+    {:ok,
+     FeatureCorpus.call(context, "restore_file", %{
+       "path" => path,
+       "change" => before.id,
+       "message" => "undo #{path}"
+     })}
+  end
+
+  step "I have written the file {string}:", %{args: [path]} = context do
+    context =
+      FeatureCorpus.call(context, "write_file", %{
+        "path" => path,
+        "content" => context.docstring <> "\n",
+        "message" => "write_file #{path}"
+      })
+
+    assert context.last.exit_code == 0, "writing #{path} failed:\n#{context.last.stdout}"
+    {:ok, context}
+  end
+
+  step "the changes listed are dated, newest first:", context do
+    wanted = Enum.map(context.datatable.raw, fn [date | _] -> String.trim(date) end)
+
+    got =
+      (last(context).structured["changes"] || [])
+      |> Enum.map(&String.slice(&1["at"], 0, 10))
+
+    assert got == wanted, "the changes are dated #{inspect(got)}"
+    {:ok, context}
+  end
+
+  step "I look at the history", context do
+    {:ok, FeatureCorpus.call(context, "history", %{})}
+  end
+
+  step "I look at the history of {string}", %{args: [path]} = context do
+    {:ok, FeatureCorpus.call(context, "history", %{"path" => path})}
+  end
+
+  # The change that deleted the path is its newest; the one before it holds
+  # the body to put back.
+  step "I restore {string} as it was before it was deleted", %{args: [path]} = context do
+    [_deleted, previous | _] =
+      Mealplan.Store.Documents.history(FeatureCorpus.tenant_id(context), path, 2)
+
+    {:ok,
+     FeatureCorpus.call(context, "restore_file", %{
+       "path" => path,
+       "change" => previous.id,
+       "message" => "restore #{path}"
+     })}
+  end
+
+  # In process, a restart is what a restart actually is: the BEAM's memory
+  # goes, the database stays. The meal plan is rows, so nothing is re-opened.
   step "the server restarts", context do
-    Mealplan.Features.CorpusHooks.close_session(context.tenant)
-
-    {:ok, session, _} =
-      Mealplan.Boot.open_corpus(context.tenant, context.folder,
-        now: context.now,
-        base_url: Mealplan.Config.public_url()
-      )
-
-    # A real restart forgets every MCP session this process was holding, not
-    # only the sandbox session above. Only "I remember the current MCP
-    # session" (features/sandbox.feature) ever populates this key, so every
-    # other scenario that restarts the server pays nothing extra here.
+    # A real restart forgets every MCP session this process was holding. Only
+    # "I remember the current MCP session" ever populates this key.
     if client = context[:remembered_mcp_session] do
       Anubis.Server.Supervisor.stop_session(
         Mealplan.Mcp.Server,
@@ -95,7 +245,15 @@ defmodule Mealplan.Features.CorpusSteps do
       )
     end
 
-    {:ok, Map.put(context, :session, session)}
+    {:ok,
+     Map.put(
+       context,
+       :corpus,
+       Mealplan.Store.Corpus.open(context.tenant,
+         now: context.now,
+         base_url: Mealplan.Config.public_url()
+       )
+     )}
   end
 
   # --- recording recipes ----------------------------------------------------
@@ -205,25 +363,33 @@ defmodule Mealplan.Features.CorpusSteps do
 
   # --- writing documents directly -------------------------------------------
 
+  # The real write_file tool, and its answer kept: a write the parser refuses
+  # is something a scenario asserts on, not a broken step.
   step "I write the file {string}:", %{args: [path]} = context do
     content = context.docstring <> "\n"
 
     {:ok,
      context
-     |> write_file(path, content)
+     |> FeatureCorpus.call("write_file", %{
+       "path" => path,
+       "content" => content,
+       "message" => "write_file #{path}"
+     })
      |> Map.put(:last_written, %{path: path, content: content})}
   end
 
+  # Setup, so not checked by the parser: a scenario about the validator has to
+  # be able to plant the broken document it is about.
   step "the file {string} contains:", %{args: [path]} = context do
-    {:ok, write_file(context, path, context.docstring <> "\n")}
+    {:ok, FeatureCorpus.plant(context, path, context.docstring <> "\n")}
   end
 
   step "the file {string} contains {string}", %{args: [path, content]} = context do
-    {:ok, write_file(context, path, content <> "\n")}
+    {:ok, FeatureCorpus.plant(context, path, content <> "\n")}
   end
 
   step "the file {string} does not exist", %{args: [path]} = context do
-    Session.run(context.session, "rm -f #{shell_quote(path)}")
+    if FeatureCorpus.read(context, path), do: FeatureCorpus.remove(context, path)
     {:ok, context}
   end
 
@@ -231,7 +397,8 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, write_file(context, "preferences/household.md", context.docstring <> "\n")}
   end
 
-  step "the household cooks for {int} adults and {int} children", %{args: [adults, children]} = context do
+  step "the household cooks for {int} adults and {int} children",
+       %{args: [adults, children]} = context do
     document =
       """
       ---
@@ -245,15 +412,15 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, write_file(context, "config/household.md", document)}
   end
 
-  # --- reading the folder back ----------------------------------------------
+  # --- reading the meal plan back ----------------------------------------------
 
-  step "the file {string} exists in the meal-plan folder", %{args: [path]} = context do
-    assert File.exists?(host_path(context, path)), "#{path} is not in the meal-plan folder"
+  step "the file {string} exists in the meal plan", %{args: [path]} = context do
+    assert FeatureCorpus.read(context, path), "#{path} is not in the meal plan"
     {:ok, context}
   end
 
-  step "the file {string} does not exist in the meal-plan folder", %{args: [path]} = context do
-    refute File.exists?(host_path(context, path)), "#{path} is still there"
+  step "the file {string} does not exist in the meal plan", %{args: [path]} = context do
+    refute FeatureCorpus.read(context, path), "#{path} is still there"
     {:ok, context}
   end
 
@@ -336,13 +503,8 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  step ~r/^the meal-plan folder has (\d+) day documents?$/, %{args: [count]} = context do
-    days =
-      case File.ls(host_path(context, "meals")) do
-        {:ok, entries} -> Enum.reject(entries, &String.starts_with?(&1, "."))
-        _ -> []
-      end
-
+  step ~r/^the meal plan has (\d+) day documents?$/, %{args: [count]} = context do
+    days = Enum.filter(FeatureCorpus.paths(context), &String.starts_with?(&1, "meals/"))
     assert length(days) == String.to_integer(count), "meals/ holds #{inspect(days)}"
     {:ok, context}
   end
@@ -394,6 +556,18 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
+  step "the meal plan validates", context do
+    context = FeatureCorpus.call(context, "validate", %{})
+    assert context.last.exit_code == 0, "the meal plan has problems:\n#{context.last.stdout}"
+    {:ok, context}
+  end
+
+  step "the last line of the output is {string}", %{args: [text]} = context do
+    lines = last(context).stdout |> String.split("\n", trim: true)
+    assert List.last(lines) == text, "the output was:\n#{last(context).stdout}"
+    {:ok, context}
+  end
+
   step "the output is empty", context do
     assert String.trim(last(context).stdout) == ""
     {:ok, context}
@@ -410,7 +584,7 @@ defmodule Mealplan.Features.CorpusSteps do
   end
 
   # Both sides sorted, as the TypeScript did: the step is about WHAT the command
-  # listed, not the order it came out in. `git log` prints newest first and a
+  # listed, not the order it came out in. history prints newest first and a
   # table reads oldest first, and neither is what the scenario is asserting.
   step "the output lists:", context do
     wanted =
@@ -531,12 +705,6 @@ defmodule Mealplan.Features.CorpusSteps do
     refute stderr =~ ~r/command not found|no such file or directory/i,
            "this passed for the wrong reason — the program is simply missing:\n#{stderr}"
 
-    {:ok, context}
-  end
-
-  step "{string} reports no problems", %{args: [command]} = context do
-    context = run_bash(context, command, "bash #{command}")
-    assert last(context).exit_code == 0, "#{command} reported problems:\n#{output(context)}"
     {:ok, context}
   end
 
@@ -745,38 +913,29 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  # --- the git history ------------------------------------------------------
+  # --- the history ------------------------------------------------------------
 
-  step ~r/^the history has (\d+) commits?$/, %{args: [count]} = context do
-    assert commit_count(context) == String.to_integer(count)
+  step ~r/^the history has (\d+) changes?$/, %{args: [count]} = context do
+    assert FeatureCorpus.change_count(context) == String.to_integer(count)
     {:ok, context}
   end
 
-  step "the last commit touched the file {string}", %{args: [path]} = context do
-    result = Session.run(context.session, "git show --name-only --pretty=format: HEAD")
-    touched = result.stdout |> String.split("\n") |> Enum.map(&String.trim/1)
-
-    assert path in touched,
-           "the last commit touched #{inspect(Enum.reject(touched, &(&1 == "")))}"
-
+  step "the last change touched {string}", %{args: [path]} = context do
+    change = FeatureCorpus.last_change(context) || flunk("there are no changes")
+    touched = Enum.map(change.paths, &elem(&1, 0))
+    assert path in touched, "the last change touched #{inspect(touched)}"
     {:ok, context}
   end
 
-  step "the file {string} is committed", %{args: [path]} = context do
-    result = Session.run(context.session, "git log --oneline -- #{shell_quote(path)}")
-    refute String.trim(result.stdout) == "", "#{path} has no commits"
+  step "the last change is named {string}", %{args: [message]} = context do
+    change = FeatureCorpus.last_change(context) || flunk("there are no changes")
+    assert change.message == message, "the last change is named #{inspect(change.message)}"
     {:ok, context}
   end
 
-  # The scenario's point is that the server commits on the agent's behalf.
-  # Nothing to do: no step above ever ran one.
-  step "I never ran a git command", context do
-    {:ok, context}
-  end
-
-  step "the history has 1 more commit than before", context do
-    before = Map.get(context, :commits_before) || flunk("no earlier commit count was remembered")
-    assert commit_count(context) == before + 1
+  step "the history has 1 more change than before", context do
+    before = Map.get(context, :changes_before) || flunk("no earlier change count was remembered")
+    assert FeatureCorpus.change_count(context) == before + 1
     {:ok, context}
   end
 
@@ -811,27 +970,7 @@ defmodule Mealplan.Features.CorpusSteps do
 
   # --- helpers --------------------------------------------------------------
 
-  defp run_bash(context, command, message) do
-    {:ok, response} =
-      Tools.call(
-        "bash",
-        %{"command" => command, "message" => message},
-        context.tenant,
-        context.now
-      )
-
-    structured = response["structuredContent"] || %{}
-
-    Map.put(context, :last, %{
-      stdout: Map.get(structured, "stdout", ""),
-      stderr: Map.get(structured, "stderr", ""),
-      exit_code: Map.get(structured, "exitCode", 0),
-      timed_out: Map.get(structured, "timedOut", false),
-      truncated: Map.get(structured, "truncated", false),
-      text: text_of(response)
-    })
-  end
-
+  # Through the real write_file tool, so the parser checks it on the way in.
   defp write_file(context, path, content) do
     {:ok, response} =
       Tools.call(
@@ -888,8 +1027,8 @@ defmodule Mealplan.Features.CorpusSteps do
 
   # What a recipe serves, read from the folder. Unrecorded recipes feed four.
   defp servings_of(context, name) do
-    case File.read(host_path(context, Documents.recipe_path(name))) do
-      {:ok, document} ->
+    case FeatureCorpus.read(context, Documents.recipe_path(name)) do
+      document when is_binary(document) ->
         case Documents.front_matter(document)["servings"] do
           nil -> @default_servings
           value -> to_integer(value, @default_servings)
@@ -996,15 +1135,15 @@ defmodule Mealplan.Features.CorpusSteps do
     end
   end
 
+  # `validate --json` is not a tool — an agent has no use for the parser's
+  # reading of a line — so the assertion asks the parser directly.
   defp ingredient_as(context, item, recipe) do
-    context =
-      run_bash(
-        context,
-        "mealplan validate --json #{shell_quote(Documents.recipe_path(recipe))}",
-        "bash mealplan validate"
-      )
-
-    result = last(context)
+    {:ok, result} =
+      Mealplan.Store.Corpus.run_cli(context.corpus, [
+        "validate",
+        "--json",
+        Documents.recipe_path(recipe)
+      ])
 
     assert result.exit_code == 0,
            "mealplan could not read #{recipe}:\n#{result.stdout}#{result.stderr}"
@@ -1030,14 +1169,7 @@ defmodule Mealplan.Features.CorpusSteps do
 
   defp at_noon(date), do: DateTime.new!(Date.from_iso8601!(date), ~T[12:00:00], "Etc/UTC")
 
-  defp read!(context, path), do: File.read!(host_path(context, path))
-  defp host_path(context, path), do: Path.join(context.folder, path)
-
-  defp commit_count(context) do
-    Session.run(context.session, "git rev-list --count HEAD").stdout
-    |> String.trim()
-    |> to_integer(0)
-  end
+  defp read!(context, path), do: FeatureCorpus.read!(context, path)
 
   defp text_of(%{"content" => blocks}) when is_list(blocks) do
     blocks |> Enum.map(&Map.get(&1, "text", "")) |> Enum.join("\n")
@@ -1058,12 +1190,4 @@ defmodule Mealplan.Features.CorpusSteps do
       other -> other
     end
   end
-
-  defp shell_quote(word), do: "'" <> String.replace(word, "'", "'\\''") <> "'"
-
-  # Gherkin's own quoting has no way to put a literal double quote inside a
-  # quoted step argument except escaping it, and bash must never see the
-  # backslash: "awk 'BEGIN { print \"x\" }'" has to reach the shell as
-  # "awk 'BEGIN { print "x" }'". Mirrors features/steps/mcp.steps.ts#unescape.
-  defp unescape(command), do: String.replace(command, ~S(\"), ~S("))
 end

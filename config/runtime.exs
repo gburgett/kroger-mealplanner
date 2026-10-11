@@ -42,12 +42,8 @@ walmart_private_key =
 config :mealplan,
   # ADR 0033: no configured owner and no bootstrap household. Every household is
   # invited from the command line (`mix mealplan.invite`), and the first code
-  # provisions its tenant and a fresh folder under MEALPLAN_CORPUS_ROOT.
-  corpus_root: get.("MEALPLAN_CORPUS_ROOT", Path.expand("~/meal-plans")),
-  # The old single-household folder. Kept defined only as a pointer for a
-  # follow-up record that moves its contents into the re-onboarded tenant;
-  # nothing reads it at runtime.
-  folder: System.get_env("MEALPLAN_FOLDER"),
+  # provisions its tenant; its meal plan is rows in the state database
+  # (ADR 0038, ADR 0039).
   port: mealplan_port,
   # The OAuth issuer and the address clients reach this server at. Never
   # derived from a Host header. Synthesised from the bind when unset, so local
@@ -92,62 +88,9 @@ config :mealplan,
   telnyx_messaging_profile_id: System.get_env("TELNYX_MESSAGING_PROFILE_ID"),
   telnyx_api_base: System.get_env("TELNYX_API_BASE")
 
-# MEALPLAN_SANDBOX picks the confinement. "bubblewrap" is the product and the
-# default, test included; "host" runs commands unconfined and is for testing
-# application logic where no sandbox image can be built, such as a CI runner —
-# it reaps each command's process group itself, so it does not accumulate stray
-# process trees (ADR 0034); "microsandbox" gives each tenant its own libkrun
-# microVM (ADR 0027), for more than one household on one machine, and needs
-# read/write on /dev/kvm. Anything else is a typo, and a typo that silently
-# disabled the security boundary would be the worst possible failure, so it
-# raises. See ADR 0022, ADR 0027, ADR 0034 and Mealplan.Sandbox.mode/0.
-sandbox_mode =
-  case System.get_env("MEALPLAN_SANDBOX") do
-    nil -> :bubblewrap
-    "" -> :bubblewrap
-    "bubblewrap" -> :bubblewrap
-    "host" -> :host
-    "microsandbox" -> :microsandbox
-    other ->
-      raise "MEALPLAN_SANDBOX must be \"bubblewrap\", \"host\" or \"microsandbox\", got #{inspect(other)}"
-  end
-
-max_live_sessions =
-  case System.get_env("MEALPLAN_MAX_LIVE_SESSIONS") do
-    nil -> nil
-    "" -> nil
-    n -> String.to_integer(n)
-  end
-
-# MEALPLAN_SESSION_IDLE_TIMEOUT is the seconds a sandbox session may sit with no
-# command before it closes itself (ADR 0035). The Elixir session layer owns this
-# lifecycle: under microsandbox the close is `msb remove` and the microVM's RAM
-# goes back in the pool; under bubblewrap and host it is a GenServer stopping,
-# and the agent re-`open`s the same way. `nil` here means the backend default,
-# ten minutes. `msb`'s own `--idle-timeout` is set a few minutes longer as a
-# backstop only.
-session_idle_timeout_ms =
-  case System.get_env("MEALPLAN_SESSION_IDLE_TIMEOUT") do
-    nil -> nil
-    "" -> nil
-    s -> String.to_integer(s) * 1000
-  end
-
-config :mealplan, Mealplan.Sandbox,
-  mode: sandbox_mode,
-  session_idle_timeout_ms: session_idle_timeout_ms,
-  image_root: System.get_env("MEALPLAN_IMAGE_ROOT"),
-  seccomp_filter: System.get_env("MEALPLAN_SECCOMP_FILTER"),
-  # A .tar the microsandbox backend loads into `msb`, or a bare `msb` image
-  # reference. Defaults to sandbox-image/oci.tar.
-  microsandbox_image: System.get_env("MEALPLAN_MICROSANDBOX_IMAGE"),
-  # nil here means "use the backend's own default" — 16 for microsandbox,
-  # unbounded for bubblewrap/host. See Mealplan.Sandbox.max_live_sessions/0.
-  max_live_sessions: max_live_sessions
-
-# Where the sandbox puts a command's stream files and its TMPDIR, and where the
-# scenarios put their corpora. `Mealplan.Sandbox.Scratch` explains the layout;
-# this only picks the ground it sits on.
+# Where the `mealplan` parser's temporary copy of a household's documents goes.
+# `Mealplan.Store.Scratch` explains the layout; this only picks the ground it
+# sits on.
 #
 # MEALPLAN_TMPDIR wins wherever it is set. It is read here rather than in the
 # module because the sweep of stale roots runs at application start, and a base
@@ -156,20 +99,9 @@ if dir = System.get_env("MEALPLAN_TMPDIR") do
   config :mealplan, :tmp_base, dir
 end
 
-# Both test runners — `mix test` and the TypeScript harness that still runs
-# features/sandbox.feature — get a tmpfs when the machine has one. Not only the
-# ExUnit one: the 11 GB of `sort` spill was left by the TypeScript harness in
-# host mode, which is the combination with no bounded /tmp of its own.
+# A test run gets a tmpfs when the machine has one: it is fast, and it is
+# bounded, so a runaway fills RAM rather than the disk the database is on.
 if config_env() == :test do
-  # A test run is much happier on a tmpfs, and it is measurably faster: the
-  # suite copies a git repository per scenario and 200 scenarios of that came
-  # down from 56.4 s to 50.1 s on this VM, about 11%.
-  #
-  # It is also the safer ground. A tmpfs is bounded, so a command that runs
-  # away — `yes | sort`, the memory-limit scenario — hits ENOSPC in RAM instead
-  # of filling the disk the database and the corpora are on. That is not
-  # hypothetical: it happened here, 11 GB of `sort` spill, the disk at 94%.
-  #
   # Only when the machine actually has one with room to spare. Docker gives a
   # container 64 MB of /dev/shm by default and other processes share it, so the
   # check is for free space rather than for the mount, and anything short falls
@@ -204,13 +136,8 @@ if clock = System.get_env("MEALPLAN_CLOCK") do
 end
 
 # Where the server state lives: one SQLite file (ADR 0024, restored by
-# ADR 0030). MEALPLAN_STATE is the same variable the TypeScript server read for
-# `auth.json`, and it keeps the same rule — the file must be OUTSIDE the
-# meal-plan folder, because the sandbox mounts that folder and the agent reads
-# every byte of it. Under PostgreSQL (ADR 0028) that was true by construction;
-# with a file it is a check again, and `Mealplan.Boot` makes it, refusing to
-# start rather than serving with the household's Kroger credential inside the
-# agent's reach.
+# ADR 0030). It holds every household's meal plan too (ADR 0038), so backing
+# up this one file backs up everything.
 #
 # Not in test. A developer who exports MEALPLAN_STATE for the dev server would
 # otherwise have `mix test` open it, and the Ecto sandbox would roll the

@@ -11,11 +11,10 @@ defmodule Mealplan.Repo do
   moved the core to the managed service, which brings its own database, so the
   reason was spent and the state came back to a file.
 
-  The file must live OUTSIDE the meal-plan folder; `Mealplan.Boot` refuses to
-  start when it does not, because the sandbox mounts that folder and an agent
-  can read every byte of it — including the household's Kroger refresh token,
-  which is stored in the clear because a hash cannot go in an Authorization
-  header.
+  Since ADR 0038 it also holds every household's meal plan. An agent reaches
+  only its own household's documents through the tools; nothing reaches the
+  other tables, including the household's Kroger refresh token, which is
+  stored in the clear because a hash cannot go in an Authorization header.
   """
 
   use Ecto.Repo,

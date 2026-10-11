@@ -30,14 +30,14 @@ defmodule Mealplan.Kroger.Help do
     3. Type a postcode and press "Find stores".
     4. Pick a shop, choose pickup or delivery, and press "Shop here".
 
-    The choice is written to config/kroger.md and committed, so
-    "cat config/kroger.md" confirms which shop is set afterwards, and "git log"
-    shows when it changed.
+    The choice is written to config/kroger.md and recorded, so
+    read_file "config/kroger.md" confirms which shop is set afterwards, and
+    history shows when it changed.
 
     A KROGER PRICE IS A PRICE AT ONE SHOP. A shopping list that has already been
     matched carries the shop it was matched against in its own front matter, and its
     products and prices belong to that shop. After changing shops, write the list
-    again with "mealplan shopping-list --out ..." and run kroger_find_products
+    again with shopping_list and "out", and run kroger_find_products
     again. The old candidates do not carry over, and they are not worth trusting.\
     """
   end
