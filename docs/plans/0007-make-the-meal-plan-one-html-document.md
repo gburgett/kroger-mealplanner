@@ -1,15 +1,21 @@
 # Plan 0007 — Make the meal plan one HTML document
 
 **Status:** in progress, 2026-09-22.
-**Implements:** ADR 0037 (the document is the store) and ADR 0038 (the two
+**Implements:** ADR 0040 (the document is the store) and ADR 0041 (the two
 tools). Neither decision is argued here; where this plan looks like it is
 arguing one, the argument belongs in the record.
 **Definition of done:** `plans/*.html` is the only place a planned day lives;
 `meals/` and `shopping-lists/` are gone from the scaffold, the README and every
 feature file; `lib/mealplan/shopping/list.ex` is deleted and no Elixir module
-parses a corpus document; `tools/list` reports twelve; `mix test` is green
-under `MEALPLAN_SANDBOX=host`, and under `MEALPLAN_SANDBOX=bubblewrap` on the
-deployment VM, which is the release gate.
+parses a corpus document; `tools/list` reports `start_meal_plan` and
+`save_meal_plan` beside the file verbs; `./cli/build.sh && mix test` is green.
+
+**Rebased onto ADR 0039, 2026-10-11.** This plan was written while the meal
+plan was a sandboxed git folder. ADR 0038 and ADR 0039 put the documents in
+the server's database and removed the shell before it merged, and the branch
+was rebased onto them. Where the phases below once said "sandbox session",
+"`bash`" or "commit", read `Mealplan.Store.Cli`, the file verbs, and a change
+in `document_changes`. The text below is already corrected.
 
 ## Why this is four phases and not one
 
@@ -24,13 +30,13 @@ right reason, then build.
 
 ## Phase 0 — records and scenarios
 
-- ADR 0037 and ADR 0038, and both `README.md` index tables.
+- ADR 0040 and ADR 0041, and both `README.md` index tables.
 - `features/meal_plan.feature` replaces `features/meals.feature`.
 - `features/shopping_list.feature` rewritten to assert the same arithmetic
   inside the document.
-- The bare `ls` assertion drops from seven names to six, in all three places
-  `CLAUDE.md` names: `Scaffold.@corpus_directories`, `features/corpus.feature`
-  and `features/auth.feature`. The last one is the one that gets forgotten.
+- The bare `list_files` assertion changes in every place `CLAUDE.md` names —
+  five since `plans/` was added. The ones it did not name are the ones that
+  get forgotten.
 
 ## Phase 1 — the CLI owns the document
 
@@ -61,7 +67,7 @@ the agent reads:
     mealplan plan shopping-list --path PATH --json
     mealplan plan candidates --path PATH (--list|--attach|--sent|--cart-link) --json
 
-`save` with nothing on standard input works on what is already on disk. That
+`save` with nothing on standard input works on what is already saved. That
 is what makes a regenerate one small call instead of a whole-document repost.
 
 `mealplan validate` with no path learns `plans/`. `corpus::documents` filters
@@ -69,67 +75,51 @@ is what makes a regenerate one small call instead of a whole-document repost.
 
 ## Phase 2 — the two tools
 
-`lib/mealplan/mcp/tools.ex` gains a third group beside `@session_tools` and
-`@tools`, and two `do_call/4` clauses. Both go through `open_session/1`, the
-gated path.
+`lib/mealplan/mcp/document_tools.ex` gains two tools beside `validate` and
+`shopping_list`, and two `run/4` clauses. `Mealplan.Plan` runs the CLI the way
+those two do — `Mealplan.Store.Corpus.run_cli/3` over a temporary copy of the
+household's documents, an argument vector the server builds, the exit status
+kept — and stores the document the CLI wrote as one change. The posted
+document travels on standard input (`Mealplan.Store.Cli`'s `input:`).
 
-The CLI is invoked the way `Mealplan.Shopping.Tools.structure_by_line/3`
-already does it: redirect to `${TMPDIR:-/tmp}/…-$$`, keep the exit status, and
-never interpolate. The document travels on standard input, as `write_file`'s
-content does.
-
-Also in this phase: `Scaffold.@corpus_directories` gains `plans`, and the
-`bash` and `open` description strings learn the new folder.
+Also in this phase: `Scaffold.@corpus_directories` gains `plans`, and a plan
+written with `write_file` is checked by `mealplan validate` like a markdown
+document (`Mealplan.Store.Corpus.check/2`).
 
 ## Phase 3 — the retailer pipeline onto the document
 
 `lib/mealplan/shopping/list.ex` is deleted. `Mealplan.Shopping.Plan` replaces
-it and does nothing but run `mealplan plan candidates` and
-`mealplan plan shopping-list` and decode the JSON.
+it and does nothing but run `mealplan plan candidates` and decode the JSON.
 
 The five tool bodies in `lib/mealplan/shopping/tools.ex` keep every rule they
 have — the `(check)` refusal, one candidate per line, the at-most-once send
 from ADR 0012, the consumables write-back — and change only how they read and
-write. `Session.transaction/2` still gives `kroger_send_to_cart` its atomic
-multi-file write.
+write. `Mealplan.Store.transaction/2` still gives `kroger_send_to_cart` its
+atomic multi-document write.
 
 `features/kroger_cart.feature`, `kroger_link.feature`, `product_search.feature`
 and `walmart.feature` move from a shopping-list path to a plan path.
 
 ## Phase 4 — remove the old shapes
 
-- `migrations/2026-09-22-days-and-lists-to-plans.sh`. Idempotent, coreutils
-  only, runs inside the sandbox at `/workspace`. It groups `meals/*.md` into
-  contiguous weeks, calls `mealplan plan import-legacy-days` for each, then
-  removes both old directories. That subcommand exists for this migration
-  alone and its `USAGE` line says so.
+- No migration script and no `import-legacy-days` subcommand: both were
+  planned and both are cancelled. See `0007-progress.md`, phase 4.
 - `priv/corpus/README.md`: `## meals/` and `## shopping-lists/` become
   `## plans/`, and "The two commands" becomes three.
 - `features/README.md`: the folder diagram and the layer table.
-- `CLAUDE.md` and `AGENTS.md`: the seven-names note, the two-commands note,
-  the tool count, and the line in `AGENTS.md` claiming ADR 0017's exception is
-  the only one.
+- `CLAUDE.md` and `AGENTS.md`: the names a bare `list_files` prints, the
+  layout notes that still say `meals/`, and "Everything is markdown".
 - The rest of the `meals/` references: `family_size.feature`,
   `consumable_recheck.feature`, `pantry.feature`, `history.feature`,
   `test/support/documents.ex`, and the weekly recheck job's tree.
 
 ## Running it
 
-This container has no Erlang or Elixir by default, and `apt` offers 1.14
-against a `~> 1.17` requirement. OTP 27.3.4.9 and Elixir 1.18.5 are installed
-under `/opt`:
+One mode, nothing else running (ADR 0039):
 
 ```bash
-export PATH="/opt/otp/bin:/opt/elixir/bin:$PATH"
-MEALPLAN_SANDBOX=host \
-  MEALPLAN_CLI_PATH=cli/target/x86_64-unknown-linux-musl/release \
-  mix test
+./cli/build.sh && mix test
 ```
 
-`bwrap`, `msb` and `/dev/kvm` are all absent here, so `@security` and
-`@microsandbox` do not run. The bubblewrap run is the release gate and it
-happens on the deployment VM:
-
-```bash
-./sandbox-image/build.sh && ./cli/build.sh && MEALPLAN_SANDBOX=bubblewrap mix test
-```
+The project wants OTP 28. Elixir 1.18.4 on OTP 28 failed to compile it when
+this was rebased (an `elixir_quote` escape error); Elixir 1.19 compiles it.

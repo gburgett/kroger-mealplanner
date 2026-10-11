@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-09-22
 decision-makers: gburgett
-consulted: ADR 0010, ADR 0017, ADR 0026, ADR 0035, ADR 0037
+consulted: ADR 0010, ADR 0017, ADR 0026, ADR 0038, ADR 0039, ADR 0040
 informed: all contributors
 ---
 
@@ -10,78 +10,67 @@ informed: all contributors
 
 ## Context and Problem Statement
 
-ADR 0037 makes the meal plan one HTML document. The CLI holds every operation
+ADR 0040 makes the meal plan one HTML document. The CLI holds every operation
 on it: `mealplan plan start` renders a new one, and `mealplan plan save` reads
-one from standard input, validates it and writes it back.
+one, validates it, does the arithmetic and writes it back.
 
-Both are shell commands. The agent can run them with `bash`. By the test ADR
-0010 wrote down, that settles it and no tool is justified:
+The agent has no shell (ADR 0039). It cannot run either command. It has the
+file verbs, and `write_file` can store a plan document, but `write_file` only
+checks a document. It does not fill a meal from its recipes, it does not
+rescale a meal whose servings changed, and it does not rebuild the shopping
+list.
 
-> ### A tool exists only when the sandbox cannot do the job by construction
-> This is the test, and it is narrow on purpose.
+`AGENTS.md` states the rule for a tool beyond the file verbs: "Prefer the file
+verbs over new tools. Before adding a tool, ask whether `grep` already answers
+it. Only two things justify a job of their own: unit-aware arithmetic
+(`shopping_list`) and schema validation (`validate`)."
 
-`AGENTS.md` states the exception list in the same breath, and says it is
-closed: the Walmart cart link "is the choke point where 'nothing unchosen
-reaches the household's cart' is enforced, and bash cannot be trusted to keep
-that property from memory. That exception is recorded in ADR 0017, and it is
-the only one."
-
-ADR 0035 then opened it again for `open` and `close`, "for the reason it
-admits the cart choke point: the seam cannot be a shell command."
-
-So the list is not closed, and this record must say plainly whether the meal
-plan belongs on it.
+So this record must say whether starting and saving a plan is a job of its
+own, and if it is, in what shape.
 
 ## Decision Drivers
 
-* ADR 0037 exists to give the agent a shape to fill. A capability the agent
+* ADR 0040 exists to give the agent a shape to fill. A capability the agent
   never finds gives no guidance at all.
-* `mealplan --help` is documentation, and ADR 0010 says so. It is also
-  documentation the agent reads only after it decides to look.
-* The failure this must prevent is silent. An agent that does not know
-  `--regenerate` exists will retype an ingredient line and scale it from
-  memory. Nothing refuses that. The household finds out at the shop.
-* The tool count is a cost. Ten tools is already a lot for one household's
+* The failure this must prevent is silent. An agent that does not know a
+  section can be asked for back will retype an ingredient line and scale it
+  from memory. Nothing refuses that. The household finds out at the shop.
+* The tool count is a cost. Every tool is one more thing for the household's
   assistant to hold.
-* A save carries a whole document. It cannot be interpolated into a command
-  string, and an agent composing that `bash` line itself will sometimes get
-  the quoting wrong.
+* The CLI must stay the only reader and writer of a plan (ADR 0007,
+  ADR 0040).
 
 ## Considered Options
 
-* No tools. The agent runs `mealplan plan start` and `mealplan plan save`
-  through `bash`.
+* No tools. The agent writes the plan with `write_file`, which checks it.
 * One tool to start, and the ordinary `write_file` to save.
 * Two tools: `start_meal_plan` and `save_meal_plan`.
 
 ## Decision Outcome
 
 Chosen option: **two tools, `start_meal_plan` and `save_meal_plan`.**
-`tools/list` reports twelve.
 
-Both are thin. Neither holds logic. Each runs the matching CLI subcommand in
-the sandbox, with the document on standard input, and returns what the CLI
-printed. The CLI stays the only thing that reads or writes a plan, so ADR 0037
-and ADR 0007 are not weakened.
+Both are thin. Neither holds logic. Each runs the matching CLI subcommand over
+the household's documents, the way `validate` and `shopping_list` do
+(`Mealplan.Store.Cli`), with the posted document on standard input. The
+server stores the document the CLI wrote as one change, named with the
+message the agent gave, and returns what the CLI printed. The CLI stays the
+only thing that reads or writes a plan, so ADR 0040 and ADR 0007 are not
+weakened.
 
-### Why the test admits them
+### Why the rule admits them
 
-The test asks whether bash can do the job. For the bytes, it can. For the
-property, it cannot, and the property is the same shape as the cart choke
-point ADR 0017 admitted.
+The rule admits a tool for unit-aware arithmetic and for schema validation. A
+save is both: it checks the plan, fills each meal from its recipes scaled to
+that meal's servings, rescales a meal whose servings changed, and rebuilds the
+shopping list. A start is the same arithmetic over an empty plan. No file verb
+does that job, and `write_file` must not grow it, because a write that
+rewrites what the agent sent is a different verb with the same name.
 
-ADR 0017 admits `walmart_cart_link` because bash cannot be trusted to remember
-that nothing unchosen may reach the cart. This record admits these two because
-bash cannot be trusted to remember that the plan has a shape, that edits are
-kept by default, and that a section is asked for back rather than retyped.
-
-The difference from a store status tool — which ADR 0010 refuses, and this
-record does not reopen — is that `cat config/kroger.md` gives the agent the
-whole answer the moment it looks. There is no answer here to look at. The
-guidance has to arrive before the agent acts, and the tool description is the
-one channel that does that. ADR 0026 already established this: the tool result
-is "the one channel every MCP client must show the model, unlike the handshake
-`instructions` field some clients ignore".
+The second reason is the description. ADR 0026 established that the tool
+result and the tool description are the channels every MCP client shows the
+model. The guidance has to arrive before the agent acts, and the description
+is where it arrives.
 
 ### What the descriptions must carry
 
@@ -91,53 +80,46 @@ The description is the deliverable, not the schema. Each must say:
 * `regenerate` is how a section comes back from `recipes/`. Never retype it.
 * `return: "changed"` sends back only what moved.
 
-### What stays a command
+### What stays a file verb
 
-Everything else. `mealplan plan show`, `mealplan plan validate` and
-`mealplan plan shopping-list` are read-only and are reached with `bash`. The
-same test that admits two tools refuses a third.
-
-### The gate
-
-Both tools refuse until `open` has run, the same as `bash`, `read_file` and
-`write_file`. ADR 0035 scoped that gate to the sandbox tools, and these are
-sandbox tools. `open` is also what tells the agent which recipes exist, so
-requiring it first is guidance and not friction.
+Everything else. A plan is read with `read_file`, found with `list_files` and
+`grep`, and undone with `history` and `restore_file`. A plan written with
+`write_file` is checked by `mealplan validate` before it is stored, like any
+other document the agent writes (ADR 0038), so a plan the parser refuses
+cannot reach the store by that route either.
 
 ### Consequences
 
 * Good: the agent is told how the document behaves before it edits one.
-* Good: the document travels as an argument, so no quoting can corrupt it.
-* Bad: twelve tools. Every addition makes the next one easier to argue for,
-  and this record is the second admission in two months.
-* Bad: `AGENTS.md` said the exception list was closed. It was not, and saying
-  so twice has cost more than writing the rule correctly once would have.
+* Good: the document travels as an argument and reaches the parser on
+  standard input, so no quoting can corrupt it.
+* Bad: two more tools. Every addition makes the next one easier to argue for.
+* Neutral: `write_file` still accepts a plan, checked. Its arithmetic is
+  then the agent's own, which the description of `start_meal_plan` warns
+  against.
 
 ### Confirmation
 
-* `features/meal_plan.feature` — "The plan tools refuse before `open`" and
-  the scenarios that drive both tools end to end.
-* `features/corpus.feature` — `tools/list` reports twelve tools.
-* `features/auth.feature` — a real client calls `start_meal_plan` over the
-  transport with a bearer token.
+* `features/meal_plan.feature` — the scenarios that drive both tools end to
+  end, "A plan written by hand is checked like any other document", and
+  "Saving a plan records it with the message the assistant gave".
+* `features/tools.feature` — the server reports both tools.
 
 ## Pros and Cons of the Options
 
 ### No tools
 
-* Good: keeps ADR 0010's test exactly as written.
-* Good: nothing new to hold.
-* Bad: the agent finds the commands only if it reads `mealplan --help` first,
-  and nothing makes it.
-* Bad: the document has to be quoted into a command line by the agent.
+* Good: keeps the tool list as it is.
+* Bad: nothing does the arithmetic. The agent fills and scales every meal from
+  memory, which is the failure `mealplan` exists to prevent.
+* Bad: nothing tells the agent that a section can be asked for back.
 
 ### One tool to start, `write_file` to save
 
-* Good: eleven tools, not twelve.
-* Bad: nothing tells the agent the document was validated, or that a section
-  can be asked for back.
-* Bad: `write_file` gains behaviour that applies to one path prefix, which is
-  a worse rule than one more tool.
+* Good: one tool, not two.
+* Bad: the first save after the start is arithmetic from memory again.
+* Bad: `write_file` would need behaviour for one path prefix, which is a worse
+  rule than one more tool.
 
 ### Two tools
 
@@ -147,6 +129,10 @@ requiring it first is guidance and not friction.
 
 ## More Information
 
-ADR 0010 holds the test. ADR 0017 and ADR 0035 hold the two earlier
-admissions. ADR 0037 holds the document these tools drive. Plan 0007 builds
-all of it.
+ADR 0010 and ADR 0017 hold the rule for a tool beyond the file verbs.
+ADR 0038 and ADR 0039 hold the file verbs and the store these tools write to.
+ADR 0040 holds the document these tools drive. Plan 0007 builds all of it.
+
+This record was first written while the meal plan was a sandboxed folder, and
+argued for the two tools against `bash`. ADR 0039 removed the shell before
+this record merged, so the argument above is the one that holds now.

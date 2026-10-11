@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-09-22
 decision-makers: gburgett
-consulted: ADR 0007, ADR 0010, ADR 0012, ADR 0013, ADR 0021, ADR 0035, ADR 0036, docs/designs/meal-plan-artifact/
+consulted: ADR 0007, ADR 0010, ADR 0012, ADR 0013, ADR 0021, ADR 0035, ADR 0036, ADR 0038, ADR 0039, docs/designs/meal-plan-artifact/
 informed: all contributors
 ---
 
@@ -19,11 +19,15 @@ measured this and made the session explicit to lower it. The session is warm
 now, but the count of calls did not change. One request from the household is
 still a minute or more of round trips.
 
+ADR 0039 has since removed the sandbox, so a call no longer costs seconds on
+the server. The count of calls is the same, and each call is still one model
+turn. The latency is lower; the problem is not gone.
+
 The agent has a second option, and it takes it. It drafts the week as a local
 artifact and shows that to the household. This is immediate, and it is
 unstructured. No command validates it. No command derives its shopping list.
-Nothing lands in the folder. The household sees a plan the folder does not
-hold.
+Nothing lands in the meal plan. The household sees a plan the meal plan does
+not hold.
 
 Neither option is good. One is correct and slow. The other is quick and
 disconnected.
@@ -42,7 +46,7 @@ documents written first.
 ## Decision Drivers
 
 * One request from the household must cost one write, not eight.
-* The document the household sees and the document the folder holds must be
+* The document the household sees and the document the meal plan holds must be
   the same document. A projection creates two, and they drift.
 * Two plans may cover the same dates and stay separate. The household asks
   "what if we did it this way instead", and both answers must survive.
@@ -76,8 +80,9 @@ one range holds more than one plan:
     plans/2026-09-21--2026-09-27-birthday-week.html
 
 Line 1 of every document is a summary comment. The CLI writes it on every
-save, so it cannot drift from the document below it. `head -1 plans/*.html` is
-therefore the index, and no command and no index file is necessary.
+save, so it cannot drift from the document below it. A `grep` in `plans/` for
+that comment is therefore the index, and no tool and no index document is
+necessary.
 
 ### The plan is authored, not derived
 
@@ -131,16 +136,17 @@ exception.
 
 ### Consequences
 
-* Good: one save per change. The artifact the household reads is the file the
-  folder holds.
+* Good: one save per change. The artifact the household reads is the document the
+  meal plan holds.
 * Good: the agent cannot save a broken plan. The CLI renders what it parsed.
 * Good: the structure is in the document, so the agent has a shape to fill
   rather than a README to infer one from.
-* Bad: `ls meals/` was the calendar. It is now `ls plans/` and one `head`, and
-  a date in two plans has two answers. This is intended, and it is a loss.
+* Bad: `list_files "meals/"` was the calendar. It is now
+  `list_files "plans/"` and one `grep`, and a date in two plans has two
+  answers. This is intended, and it is a loss.
 * Bad: the design is a Rust template now. A visual change needs a CLI build.
 * Bad: about eight kilobytes cross the wire on a whole-document save.
-  `--return changed` answers this, and it makes the agent hold state the folder
+  `--return changed` answers this, and it makes the agent hold state the meal plan
   also holds.
 
 ### Confirmation
@@ -155,8 +161,8 @@ decision itself:
 * "Toilet paper is not a recipe" — the ad-hoc line.
 * "Two plans cover the same week" — overlap.
 * "A mangled document comes back whole" — canonical render.
-* "Saving twice changes nothing" — idempotence, which is what stops a commit
-  on every no-op save.
+* "Saving an unchanged plan changes nothing" — idempotence, which is what
+  stops a recorded change on every no-op save.
 
 `features/shopping_list.feature` keeps the arithmetic scenarios and asserts
 them inside the document.
@@ -166,7 +172,8 @@ them inside the document.
 ### Keep markdown days, render HTML as a projection
 
 * Good: no change to the corpus, the parser, or the retailer tools.
-* Good: `ls meals/` stays the calendar, and `grep` still answers everything.
+* Good: `list_files "meals/"` stays the calendar, and `grep` still answers
+  everything.
 * Bad: does not fix the round trips. Seven day documents are still written
   one at a time.
 * Bad: two plans over one week cannot both exist, because one date is one
@@ -181,7 +188,7 @@ them inside the document.
 
 ### The HTML document is the store, rendered canonically by the CLI
 
-* Good: malformed structure cannot reach the folder.
+* Good: malformed structure cannot reach the meal plan.
 * Good: the arithmetic is the CLI's, every time.
 * Bad: the CLI now holds presentation, which is not what a CLI usually holds.
 
@@ -191,5 +198,7 @@ them inside the document.
 Its attribute contract is kept. Its "projection" framing is not — see the
 Context above for why.
 
-ADR 0038 records the two MCP tools that drive this document. Plan 0007 is how
-both get built.
+ADR 0041 records the two MCP tools that drive this document. Plan 0007 is how
+both get built. ADR 0038 and ADR 0039, accepted while this record was in
+review, put the documents in the server's database and removed the shell; the
+plan is one more document there, checked by the same parser.

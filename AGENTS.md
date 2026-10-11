@@ -70,6 +70,8 @@ Consequences worth internalising before changing anything:
 - **Prefer the file verbs over new tools.** Before adding a tool, ask whether
   `grep` already answers it. Only two things justify a job of their own:
   unit-aware arithmetic (`shopping_list`) and schema validation (`validate`).
+  `start_meal_plan` and `save_meal_plan` are both at once, over the meal-plan
+  document in `plans/` (ADR 0040, ADR 0041).
 - **A tool beyond those exists only when the documents cannot do the job by
   construction.** There is exactly one such job — the network — so four of the
   five retailer tools are network calls: `kroger_find_products`,

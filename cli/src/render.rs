@@ -1,7 +1,7 @@
 //! The canonical meal-plan document.
 //!
 //! Everything that lands in `plans/` is written here, from the model
-//! `plan.rs` parsed. That is what ADR 0037 buys: the assistant cannot save a
+//! `plan.rs` parsed. That is what ADR 0040 buys: the assistant cannot save a
 //! document with a dropped tag, a day out of order, or a shopping list that
 //! does not match the meals above it, because none of those survive a
 //! round trip through the model.

@@ -1,6 +1,6 @@
 //! A tolerant HTML scanner, and just enough of one.
 //!
-//! ADR 0037 makes the meal plan an HTML document that the assistant edits and
+//! ADR 0040 makes the meal plan an HTML document that the assistant edits and
 //! posts back. Something has to read that document, and it is this, in the CLI,
 //! because ADR 0007 says the corpus parser lives in exactly one place.
 //!

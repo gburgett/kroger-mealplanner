@@ -1,6 +1,6 @@
 //! The meal-plan document: what it holds, and what a save does to it.
 //!
-//! ADR 0037. One document covers a range of dates and carries the shopping
+//! ADR 0040. One document covers a range of dates and carries the shopping
 //! list for that range inside it. `plans/2026-08-24--2026-08-30.html`, and
 //! beside it `plans/2026-08-24--2026-08-30-birthday-week.html` when the same
 //! week holds a second plan.
@@ -1330,7 +1330,7 @@ pub enum CandidateJob {
 
 /// The retailer tools' way into the document.
 ///
-/// ADR 0037 put every read and write of a plan in the CLI, and this is the
+/// ADR 0040 put every read and write of a plan in the CLI, and this is the
 /// half the retailer tools need: `Mealplan.Shopping.Plan` builds a payload and
 /// runs this, exactly as `Mealplan.Plan` runs `plan save`. The payload travels
 /// on standard input, like a posted document, so nothing an assistant supplied

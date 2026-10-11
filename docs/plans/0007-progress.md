@@ -6,123 +6,103 @@ which holds the plan itself; this file holds only what is done, what is next,
 and the traps already paid for.
 
 **Branch:** `claude/meal-plan-artifact-impl-pwicht`
-**As of:** 2026-09-22, after phase 2, with the full suite green.
+**As of:** 2026-10-11, rebased onto ADR 0039, with the full suite green.
 
 ## State
 
 | Phase | What | Status |
 | --- | --- | --- |
-| 0 | ADR 0037, ADR 0038, plan 0007, `features/meal_plan.feature` | done |
+| 0 | ADR 0040, ADR 0041, plan 0007, `features/meal_plan.feature` | done |
 | 1 | `cli/src/{html,plan,render}.rs`, `mealplan plan …` | done |
 | 2 | `start_meal_plan` / `save_meal_plan`, `plans/` in the scaffold, step definitions | done |
-| 3 | the Kroger and Walmart pipeline onto the plan document | **in progress** |
-| 4 | remove `meals/` and `shopping-lists/`; the migration | **not started** |
+| 3 | the Kroger and Walmart pipeline onto the plan document | **in progress** — the CLI side and the Elixir seam are done; the five tool bodies are not |
+| 4 | remove `meals/` and `shopping-lists/` | **not started** |
 
 `plans/` lives BESIDE `meals/` and `shopping-lists/` right now. That is the
 phase order working as intended — nothing old has been taken away yet, so a
-household's existing folder still behaves exactly as it did.
+household's existing documents still behave exactly as they did.
+
+## Rebased onto ADR 0038 and ADR 0039
+
+Phases 0 to 2 and chunks 1 to 2a of phase 3 were built while the meal plan was
+a sandboxed git folder. While they were in review, ADR 0038 put the documents
+in the server's database and ADR 0039 removed the sandbox, the shell and git.
+The branch was rebased onto both on 2026-10-11. What that changed:
+
+* **The records are ADR 0040 and ADR 0041.** They were written as 0037 and
+  0038, and main took both numbers. ADR 0041's argument is rewritten: the old
+  one was "bash can run the command but cannot be trusted to remember the
+  property"; with no shell, the tools are admitted under the rule that admits
+  `validate` and `shopping_list` — unit-aware arithmetic and schema validation.
+* **The tools live in `Mealplan.Mcp.DocumentTools`**, beside `validate` and
+  `shopping_list`, not in `Mealplan.Mcp.Tools`. There is no session and no
+  `open` gate, so "The plan tools refuse before the session is open" is gone.
+* **`Mealplan.Plan` and `Mealplan.Shopping.Plan` run the CLI through
+  `Mealplan.Store.Corpus.run_cli/3`** — a temporary copy of the household's
+  documents, an argument vector the server builds, `env -i` — and store the
+  plan the CLI wrote with `Mealplan.Store.Corpus.commit/4`, as one change named
+  with the caller's message. An unchanged plan records no change.
+* **`Mealplan.Store.Cli.run/3` takes `input:`.** The posted document and the
+  candidates payload reach the CLI on standard input, from a file beside the
+  temporary directory. Without `input:` standard input is `/dev/null`: a port's
+  standard input never reaches end of file, and `mealplan plan save` reads it.
+* **A plan written with `write_file` is checked.** `Corpus.check/2` runs
+  `mealplan validate` on a `plans/*.html` document as it does on markdown, so
+  a plan the parser refuses cannot be stored by that route either (ADR 0038).
+  `save_meal_plan` still stores a plan that has problems and reports them, as
+  ADR 0040 decided; only `write_file` refuses.
+* **The bare listing is asserted in five places now**, not three:
+  `features/documents.feature` and `features/invitations.feature` were the two
+  the note did not name. And the tool list is asserted in
+  `features/tools.feature` and `features/walmart.feature`.
+* **Scenarios** that ran shell commands use the file verbs: `ls plans/` is
+  `list_files`, `head -1` is a `grep` for the summary line, `rm` is
+  `delete_file`, and `git log` is `history`. "A plan written by hand is
+  checked like any other document" and "A plan the household never started
+  cannot be regenerated" are new.
+* **Commits that changed shape**: the `@memory-limit` tag is dropped (its
+  scenario went with `features/sandbox.feature`); the heredoc fix to
+  `Mealplan.Mcp.Tools` and the `invitations.feature` listing fix are reduced
+  to their progress notes, because what they fixed moved into the commit that
+  adds the plan tools.
 
 ### Verified
 
-* `cargo test` in `cli/` — 16 pass (10 of them the HTML scanner's).
-* `mix test --only mealplan` — 31 scenarios, 0 failures.
-* The five save rules, driven by hand against a real folder: a struck
-  ingredient stays struck across saves while `recipes/` keeps it; 4 → 10
-  servings rescales to 2.5 lb spaghetti, 10 oz olives, 60 oz marinara and
-  moves the stamp; `--regenerate meal:…` puts the line back scaled to the
-  MEAL's servings; an ad-hoc line survives a staple of the same name; a save
-  of an unchanged plan is byte-identical, so no commit is made.
-* `--return changed` on a one-night edit: 1159 bytes against 5670 for the
-  whole document, and it names both the meal and the shopping list.
-* `Mealplan.Mcp.Tools.list/0` returns twelve.
-* **The full suite: 418 tests, 0 failures, 80 excluded.** Host mode, in a
-  Linux container — see Environment. `--exclude fork-limit` is part of that
-  command and trap 5 says why.
-
-### What that run found
-
-The 11 failures the previous run reported were the heredoc, as expected — all
-but one. The one that was real is the trap AGENTS.md warns about, in a FOURTH
-place the note did not name:
-
-    expected [... "meals", "pantry", "preferences" ...]
-    got      [... "meals", "pantry", "plans", "preferences" ...]
-       features/invitations.feature:50
-
-Phase 2 put `plans` in `scaffold.ex`, `features/corpus.feature` and
-`features/auth.feature`. `features/invitations.feature` asserts the same bare
-`ls` and was missed. It is fixed, and the note in `AGENTS.md` now says four
-places and names them. `CLAUDE.md` is a symlink to `AGENTS.md`, so one edit
-covers both.
-
-**The bubblewrap run is still the release gate and has not happened.** A
-container has no `bwrap`, no `msb` and no `/dev/kvm`, so `@security` and
-`@microsandbox` have never executed on this branch.
+* `cargo test` in `cli/` — 36 pass.
+* `mix test --only mealplan` — 32 scenarios, 0 failures.
+* `test/mealplan/shopping/plan_test.exs` — the seam, through the real binary:
+  read, attach with an unknown anchor skipped, the send stamp and the cart
+  link, each read back from the store.
+* **The full suite: 390 tests, 0 failures, 1 excluded** (`@future`), every
+  `@security` scenario included. `./cli/build.sh && mix test`, OTP 28 and
+  Elixir 1.19.
 
 ## Environment
 
-Two have been used. Neither is the deployment VM, and neither runs `@security`.
+One mode, nothing else running (ADR 0039): `./cli/build.sh && mix test`.
+No `bwrap`, no `msb`, no `/dev/kvm`, no process limit.
 
-### A Linux container on a macOS laptop (this one, and it works)
-
-**macOS cannot run the suite at all.** `Mealplan.Sandbox.Limits.wrap/3` puts
-`prlimit` in front of every command and `nproc_budget/2` walks `/proc`, so a
-host-mode run on darwin is 303 failures, every one of them
-`prlimit: not found`. That is the runner being Linux-shaped on purpose, not a
-fault to fix.
-
-The container is `hexpm/elixir:1.18.4-erlang-27.2-ubuntu-noble-*` plus
-`build-essential git util-linux sqlite3` and rustup 1.89. Three things to know:
-
-* **`_build` and `cli/target` must not be shared with the host.** They are
-  arch-specific. `MIX_BUILD_ROOT=/work/_build` and
-  `CARGO_TARGET_DIR=/work/cargo-target` in a named volume keep the macOS ones
-  intact and stop every run recompiling Phoenix.
-* **`deps/` IS shared**, because it is source and arch-independent.
-* **hex.pm may be unreachable.** The network here intercepts TLS with a CA
-  certificate OTP 27 rejects — `key_usage_mismatch` — so `mix local.hex` and
-  `mix deps.get` fail inside the container. Copying the host's `~/.mix` into
-  the image and sharing the already-fetched `deps/` is the way around it.
-
-The command, and the `--exclude` is not optional — trap 5:
+The project wants OTP 28. Elixir 1.18.4 on OTP 28 failed to compile it when
+this was rebased (an `elixir_quote` escape error); Elixir 1.19 compiles it.
+In a container with neither, from builds.hex.pm:
 
 ```bash
-MEALPLAN_SANDBOX=host MEALPLAN_CLI_PATH=/work/cargo-target/release \
-  mix test --exclude fork-limit
-```
-
-`cargo build --release` with no `--target` gives the native binary host mode
-wants; `./cli/build.sh` builds the musl one for the image and is not what this
-needs.
-
-### The container that ran phases 0 to 2
-
-It had no Erlang or Elixir, and `apt` only offers 1.14 against a `~> 1.17`
-requirement. Installed by hand, outside the repo:
-
-```bash
-curl -fsSL -o otp.tar.gz https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-27.3.4.9.tar.gz
+curl -fsSL -o otp.tar.gz https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-28.1.tar.gz
 mkdir -p /opt/otp && tar -xzf otp.tar.gz -C /opt/otp --strip-components=1
 cd /opt/otp && ./Install -minimal /opt/otp
 
-curl -fsSL -o elixir.zip https://builds.hex.pm/builds/elixir/v1.18.5-otp-27.zip
+curl -fsSL -o elixir.zip https://builds.hex.pm/builds/elixir/v1.19.1-otp-28.zip
 mkdir -p /opt/elixir && cd /opt/elixir && unzip -q elixir.zip
 
-export PATH="/opt/otp/bin:/opt/elixir/bin:$PATH"
+export PATH="/opt/otp/bin:/opt/elixir/bin:$PATH" LANG=C.UTF-8
 mix local.hex --force && mix local.rebar --force && mix deps.get
 
 rustup target add x86_64-unknown-linux-musl && ./cli/build.sh
 ```
 
-OTP 27, not the OTP 28 `AGENTS.md` names — `mix.exs` only pins Elixir, and the
-project compiles clean on 27. A green run in either container is still not a
-green run on the deployment VM.
-
 ## Traps already paid for
 
-Five, and four of them cost real time:
-
-1. **A heredoc terminator must be on a line of its own.** Writing tools.ex
+1. **A heredoc terminator must be on a line of its own.** Writing the tools
    through a Python heredoc collapsed `…for you.\` + newline + `"""` onto one
    line. Elixir then read `"""` as three quote characters inside the string,
    the heredoc ran on to the next `"""`, and everything after it — `list/0`,
@@ -139,36 +119,6 @@ Five, and four of them cost real time:
 4. **An entity decoder that looks ahead by bytes will split an em dash.** The
    em dash separates an item from its nights on every shopping-list line, so
    this was on the path that matters. Count in chars.
-5. **Two sandbox scenarios need a cgroup manager, and kill the run without
-   one.** This is what exhausted the previous container, and it is not
-   plan 0007's doing. `features/sandbox.feature:425` ("A command that eats all
-   the memory") runs `yes | sort > /dev/null`, and
-   `features/sandbox.feature:436` (`@fork-limit`) runs a fork bomb. What stops
-   either is the cgroup from
-   `systemd-run --user --scope --property=MemoryMax=512M --property=TasksMax=64`
-   in `Mealplan.Sandbox.Limits.wrap/3`. `user_scope_available?/0` probes for
-   `/run/user/<uid>/bus` and returns false in any plain container, and then
-   NOTHING caps memory — `prlimit` sets `--nproc` and `--fsize` and no address
-   space at all. Measured in the container:
-
-       systemd-run: ABSENT
-       prlimit --nproc=300 --fsize=67108864 -- bash -c "yes | sort > /dev/null"
-       → exit=124, killed by an external `timeout 30`
-
-   The runaway then stops only when the machine's OOM killer picks a process.
-   Sometimes it picks `sort` and the scenario passes; sometimes it picks
-   `beam.smp` and the whole run dies with exit 137 and no summary — which is
-   exactly the symptom reported as "ran out of memory running tests". Three
-   runs here died that way at one or the other of these two scenarios.
-
-   `--exclude fork-limit` covers the fork bomb. The memory one has NO TAG, so
-   it cannot be excluded and is a coin flip on every containerised run; it
-   happened to pass in the runs above. Tagging it, and making
-   `Limits.wrap/3` fall back to `prlimit --as` when there is no user scope,
-   are both worth doing — AGENTS.md already claims the rlimits are "the only
-   line left when the user's systemd is not reachable", and today there is no
-   memory rlimit, so that claim is not true. Both change the security
-   boundary, so ADR first.
 
 ## Phase 3 — the retailer pipeline
 
@@ -217,14 +167,15 @@ Rules the command keeps, each with a test:
 ### Chunk 2 — `Mealplan.Shopping.Plan`, the Elixir seam. DONE, and NOT YET CALLED.
 
 `lib/mealplan/shopping/plan.ex` is the same shape as `lib/mealplan/plan.ex`:
-build a command, run it in the sandbox, decode the JSON. It holds `read/2`,
+run the subcommand over the household's documents, decode the JSON, store the
+plan it wrote. It holds `read/2`,
 `attach/7`, `append_sent/5`, `set_cart_link/5`, `unmatched/1`,
 `product_ids_in/1` and the three product-id predicates, which are the whole of
 what the five tool bodies ask of `Mealplan.Shopping.List` today.
 
 It is committed with no caller ON PURPOSE, so the seam can be read on its own
-before five tool bodies move onto it. The suite is unchanged: 418 tests, 0
-failures.
+before five tool bodies move onto it. `test/mealplan/shopping/plan_test.exs`
+drives it through the real binary until they do.
 
 One simplification falls out of the document model and is worth knowing
 before reading chunk 3. On markdown, a tool did TWO reads — `List.parse` for
@@ -299,8 +250,11 @@ is the command that WRITES candidates into a plan, and the Elixir that calls it.
 The five tool bodies in `lib/mealplan/shopping/tools.ex` keep every rule they
 have — the `(check)` refusal, one candidate per line, the at-most-once send
 (ADR 0012), the consumables write-back — and change only how they read and
-write. `Session.transaction/2` still gives `kroger_send_to_cart` its atomic
-multi-file write.
+write. `Mealplan.Store.transaction/2` still gives `kroger_send_to_cart` its
+atomic multi-document write. The seam's writes go straight to
+`Corpus.commit/4`, so a send that must land with the pantry write-back needs
+the seam to accept the transaction's context, or to hand back the body for
+the transaction to stage. Decide that before moving `kroger_send_to_cart`.
 
 Then `features/kroger_cart.feature`, `kroger_link.feature`,
 `product_search.feature` and `walmart.feature` move from a shopping-list path
@@ -317,26 +271,23 @@ renderers happen to agree and no longer have to.
 ## Phase 4 — remove the old shapes
 
 **There is no migration script, and no `import-legacy-days` subcommand.** Both
-were planned and both are cancelled. The deployed server has an agent on it
-with a shell over the folder, so moving one household's `meals/` into `plans/`
-is something the agent does with `bash` and `mealplan plan save`, once,
-watching what it is doing. Writing a dated script and a subcommand that exists
-for it alone would be tooling built to run a single time — and the whole
-argument of this product is that an agent with a shell does not need that
-tooling. `migrations/` stays for changes that must run unattended on every
-corpus; this is not one.
+were planned and both are cancelled. Moving one household's `meals/` into
+`plans/` is something the agent does once, watching what it is doing: read
+the days with `read_file`, `start_meal_plan` over their range, plan each
+night into the document, and `save_meal_plan`. Writing a script and a
+subcommand that exist for it alone would be tooling built to run a single
+time. ADR 0039 removed `migrations/`; a change every household must follow
+unattended is an Elixir function over the bodies, in its own ADR, and this is
+not one.
 - `priv/corpus/README.md` — the schema document. `## meals/` and
   `## shopping-lists/` become `## plans/`; "The two commands" becomes three.
 - `features/README.md` — the folder diagram and the layer table.
-- `CLAUDE.md` / `AGENTS.md` — the names a bare `ls` prints (eight now, six
-  after phase 4), the two-commands note, the tool count, and the line in
-  `AGENTS.md` claiming ADR 0017's exception is the only one. ADR 0038 already
-  says it is not.
+- `CLAUDE.md` / `AGENTS.md` — the names a bare `list_files` prints (eight
+  now, six after phase 4), the layout notes that still say `meals/`, and
+  "Everything is markdown".
 - The rest of the `meals/` references: `family_size.feature`,
   `consumable_recheck.feature`, `pantry.feature`, `history.feature`,
   `test/support/documents.ex` (`day_path/1` and `day_document/1` become
   `plan_path/2` and `plan_document/1`), and the weekly recheck job's tree.
-- `@corpus_directories` drops `meals` and `shopping-lists`, and the bare-`ls`
-  assertion moves in all three places `CLAUDE.md` names — `scaffold.ex`,
-  `features/corpus.feature` and `features/auth.feature`. The last is the one
-  that gets forgotten.
+- `@corpus_directories` drops `meals` and `shopping-lists`, and the bare
+  `list_files` assertion moves in all five places `CLAUDE.md` names.
