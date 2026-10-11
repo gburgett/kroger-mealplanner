@@ -5,17 +5,18 @@ defmodule Mealplan.Shopping.Plan do
 
   THIS MODULE DOES NOT PARSE A PLAN. It replaces `Mealplan.Shopping.List`,
   which did — 622 lines of markdown line regexes, and the one admitted
-  exception to "the corpus parser lives only in the CLI" (ADR 0010). ADR 0037
-  removed the exception along with the markdown. What happens here is: build a
-  command, run it in the sandbox, decode the JSON the CLI printed.
+  exception to "the corpus parser lives only in the CLI" (ADR 0010). ADR 0040
+  removes the exception along with the markdown. What happens here is: run
+  the subcommand over the household's documents (`Mealplan.Store.Cli`), decode
+  the JSON the CLI printed, and store the plan it wrote.
 
-  It is the same shape as `Mealplan.Plan`, deliberately, and it keeps the same
-  two disciplines:
+  It is the same shape as `Mealplan.Plan`, deliberately: the path is one
+  element of an argument vector the server builds, and the payload travels on
+  standard input, never in the arguments.
 
-    * Nothing the assistant supplied is interpolated into the command string.
-      The path travels as `--setenv`, and the payload travels on standard
-      input, exactly as `write_file`'s content does.
-    * The exit status has to survive, so there is no pipeline.
+  The writes here are SERVER-composed — candidates found, a send recorded — so
+  they go through `Mealplan.Store.Corpus.commit/4` and are not run past the
+  parser a second time (see `Mealplan.Store`).
 
   ## The anchor is the key
 
@@ -31,11 +32,7 @@ defmodule Mealplan.Shopping.Plan do
   and there should not be one — the document IS the interface.
   """
 
-  alias Mealplan.Sandbox.Session
-
-  # A whole plan's list comes back in the JSON, candidates and all. The 64 KB
-  # an ordinary `bash` call gets would truncate a big week.
-  @output_limit 4_000_000
+  alias Mealplan.Store.Corpus
 
   defmodule Refusal do
     @moduledoc "A plan the retailer tools cannot work on, named well enough to fix."
@@ -69,9 +66,9 @@ defmodule Mealplan.Shopping.Plan do
   cart_link: ...}`. Each item carries `line` — the anchor, and the only key
   anything else should use to address it.
   """
-  @spec read(pid(), String.t()) :: map()
-  def read(session, path) do
-    session
+  @spec read(Corpus.t(), String.t()) :: map()
+  def read(corpus, path) do
+    corpus
     |> run(path, ["--list"], nil)
     |> decode(path)
   end
@@ -88,8 +85,9 @@ defmodule Mealplan.Shopping.Plan do
   household was shown candidates and chose none" is recorded, and it is an
   outcome rather than a failure.
   """
-  @spec attach(pid(), String.t(), map(), map(), [String.t()], String.t(), DateTime.t()) :: map()
-  def attach(session, path, found, searches, not_found, message, now) do
+  @spec attach(Corpus.t(), String.t(), map(), map(), [String.t()], String.t(), DateTime.t()) ::
+          map()
+  def attach(corpus, path, found, searches, not_found, message, now) do
     payload =
       Jason.encode!(%{
         "found" =>
@@ -109,28 +107,25 @@ defmodule Mealplan.Shopping.Plan do
         "notFound" => not_found
       })
 
-    session
+    corpus
     |> run(path, ["--attach"], payload)
-    |> decode(path)
-    |> commit(session, message, now)
+    |> store(corpus, path, message, now)
   end
 
   @doc "Append one send stamp to the plan. See ADR 0012: a cart add is at most once."
-  @spec append_sent(pid(), String.t(), String.t(), String.t(), DateTime.t()) :: map()
-  def append_sent(session, path, stamp, message, now) do
-    session
+  @spec append_sent(Corpus.t(), String.t(), String.t(), String.t(), DateTime.t()) :: map()
+  def append_sent(corpus, path, stamp, message, now) do
+    corpus
     |> run(path, ["--sent"], Jason.encode!(%{"stamp" => stamp}))
-    |> decode(path)
-    |> commit(session, message, now)
+    |> store(corpus, path, message, now)
   end
 
   @doc "Set the Walmart cart link on the plan."
-  @spec set_cart_link(pid(), String.t(), String.t(), String.t(), DateTime.t()) :: map()
-  def set_cart_link(session, path, url, message, now) do
-    session
+  @spec set_cart_link(Corpus.t(), String.t(), String.t(), String.t(), DateTime.t()) :: map()
+  def set_cart_link(corpus, path, url, message, now) do
+    corpus
     |> run(path, ["--cart-link"], Jason.encode!(%{"url" => url}))
-    |> decode(path)
-    |> commit(session, message, now)
+    |> store(corpus, path, message, now)
   end
 
   @doc """
@@ -158,25 +153,17 @@ defmodule Mealplan.Shopping.Plan do
 
   # --- running the command -------------------------------------------------
 
-  defp run(session, path, flags, payload) do
-    command =
-      ~s(mealplan plan candidates --path "$MEALPLAN_PATH" ) <>
-        Enum.join(flags, " ") <> " --json"
+  defp run(corpus, path, flags, payload) do
+    args = ["plan", "candidates", "--path", path] ++ flags ++ ["--json"]
 
-    options = [env: %{"MEALPLAN_PATH" => path}, max_output_bytes: @output_limit]
-    options = if payload, do: Keyword.put(options, :input, payload), else: options
-
-    Session.run(session, command, options)
+    case Corpus.run_cli(corpus, args, input: payload, collect: [path]) do
+      {:ok, result} -> result
+      {:error, message} -> raise Refusal.exception(message)
+    end
   end
 
   defp decode(result, path) do
     cond do
-      result.truncated ->
-        raise Refusal.exception(
-                "#{path} is larger than #{@output_limit} bytes, so its shopping list could not " <>
-                  "be read. Split the range into two plans."
-              )
-
       result.exit_code != 0 ->
         raise Refusal.exception(refusal(result, path))
 
@@ -237,11 +224,20 @@ defmodule Mealplan.Shopping.Plan do
     }
   end
 
-  # The CLI wrote the document; the commit is ours, and it is one message so a
-  # racing `bash` command cannot interleave with it.
-  defp commit(decoded, session, message, now) do
-    _ = Session.commit_if_changed(session, message, now)
-    decoded
+  # The CLI wrote the plan into the parser's temporary copy; storing it is
+  # ours, as one change named with the caller's message. An unchanged plan
+  # records nothing.
+  defp store(result, corpus, path, message, now) do
+    decoded = decode(result, path)
+
+    body =
+      Map.get(result.files, path) ||
+        raise Refusal.exception("mealplan plan candidates did not write #{path}.")
+
+    case Corpus.commit(corpus, [{path, body}], message, now) do
+      {:ok, _} -> decoded
+      {:error, reason} -> raise Refusal.exception(reason)
+    end
   end
 
   # A price goes into the document as a plain decimal — "5.49", never "$5.49"
