@@ -132,7 +132,7 @@ Feature: Connecting a Kroger account
 
   @core
   Scenario: A refusal says how to link, with an address I can open
-    Given the shopping list for "2026-08-25" to "2026-08-31" has been written
+    Given a meal plan from "2026-08-25" to "2026-08-31"
     When I send the shopping list to my Kroger cart
     Then the refusal says how to change shops
     And the refusal names this server's own address

@@ -124,7 +124,7 @@ defmodule Mealplan.Store.Corpus do
   @doc """
   The names directly inside `dir` ("" is the root), sorted, a folder with a
   trailing "/". The corpus directories are listed at the root even when empty,
-  so the listing is the seven names the schema promises.
+  so the listing is the eight names the schema promises.
   """
   @spec list_dir(t(), String.t()) :: [String.t()]
   def list_dir(%__MODULE__{} = corpus, dir) do
@@ -304,7 +304,7 @@ defmodule Mealplan.Store.Corpus do
   """
   @spec check(t(), [{String.t(), String.t()}]) :: {:ok, [String.t()]} | {:error, String.t()}
   def check(%__MODULE__{} = corpus, writes) do
-    to_check = for {path, _} <- writes, String.ends_with?(path, ".md"), do: path
+    to_check = for {path, _} <- writes, checked?(path), do: path
 
     if to_check == [] do
       {:ok, []}
@@ -330,6 +330,13 @@ defmodule Mealplan.Store.Corpus do
       end)
     end
   end
+
+  # A markdown document, and a meal plan (ADR 0040): `mealplan validate` reads
+  # a path in plans/ as a plan.
+  defp checked?(path),
+    do:
+      String.ends_with?(path, ".md") or
+        (String.starts_with?(path, "plans/") and String.ends_with?(path, ".html"))
 
   @doc """
   The arguments that tell `mealplan validate` which days are the change in

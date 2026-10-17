@@ -25,7 +25,7 @@ one of them:
 | The door | `auth.feature` · `sms_otp.feature` · `invitations.feature` · `kroger_link.feature` · `onboarding.feature` | Who gets in at all, who may approve them, how a household is invited and given its own tenant and meal plan, how a Kroger account is connected, and how a brand-new household's assistant gets started without a manual |
 | The tools | `tools.feature` · `documents.feature` | What an assistant is handed, what each verb does, and what a path can never reach |
 | The corpus | `corpus.feature` · `history.feature` | Layout, document shape, validation, history and restore |
-| The work | `recipes` · `meals` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
+| The work | `recipes` · `meals` · `meal_plan` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
 
 ## The layout
 
@@ -127,12 +127,18 @@ should not be doing either of them from memory. Both run the `mealplan` parser
 (ADR 0007) over the household's documents:
 
 - `shopping_list` — unit-aware arithmetic across every recipe of every day in a
-  range. With `out` it stores the list in `shopping-lists/`. The retailer tools
-  read the same parser's `--json` output, which is how the server gets
-  quantities and item names without parsing the markdown back.
+  range. With `out` it stores a markdown copy in `shopping-lists/`.
 - `validate` — the meal plan is written freehand by an agent, so something has
   to catch drift. Every agent write to a recipe or a day is checked the same way
   before it is stored; `validate` reports on everything at once.
+
+`start_meal_plan` and `save_meal_plan` are the same two jobs over one document:
+the meal plan in `plans/`, which holds a range of days and its shopping list
+together (ADR 0040). A save checks the plan, fills each meal from its recipes,
+rescales what was re-served and rebuilds the list (ADR 0041). The retailer
+tools work on that list, through the same parser's `plan candidates --json`,
+which is how the server reads quantities and candidates without parsing the
+document back.
 
 Everything else is deliberately *not* a tool.
 

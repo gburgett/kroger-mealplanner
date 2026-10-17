@@ -49,8 +49,9 @@ defmodule Mealplan.Mcp.Server do
         "shop for the week, or save a recipe, do it through the tools rather than " <>
         "answering from memory: call `open` first to see the meal plan, explore with " <>
         "`list_files`, `read_file` and `grep`, and change it with `write_file` and " <>
-        "`edit_file`. `shopping_list` derives the grocery list, and the Kroger and " <>
-        "Walmart tools put it in a real cart. Every change is recorded; `history` " <>
+        "`edit_file`. `start_meal_plan` and `save_meal_plan` plan a week as one " <>
+        "document that carries its own shopping list, and the Kroger and Walmart " <>
+        "tools put that list in a real cart. Every change is recorded; `history` " <>
         "and `restore_file` walk any of it back.",
       "PREFERENCES. How this household chooses — brands, what it will not eat, cheap " <>
         "against good — is written in preferences/household.md. Read it before you " <>

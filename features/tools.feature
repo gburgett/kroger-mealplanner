@@ -10,6 +10,12 @@ Feature: The tools an assistant is handed
   two jobs that are not exploration, validate and shopping_list (ADR 0038).
   There is no shell, so nothing the agent writes is ever run (ADR 0039).
 
+  start_meal_plan and save_meal_plan run the parser too, over the meal-plan
+  document (ADR 0040). Their descriptions are what tell the assistant that its
+  edits are KEPT and that a section is asked for back rather than retyped — an
+  assistant that does not know would retype an ingredient and scale it from
+  memory (ADR 0041).
+
   The rest are the network the meal plan does not have: a tool exists for the
   network only because the documents cannot do that job by construction
   (ADR 0010). "Is Kroger set up" is not such a job — read_file on
@@ -33,6 +39,8 @@ Feature: The tools an assistant is handed
       | restore_file          |
       | validate              |
       | shopping_list         |
+      | start_meal_plan       |
+      | save_meal_plan        |
       | kroger_find_products  |
       | kroger_send_to_cart   |
       | walmart_find_stores   |

@@ -2,8 +2,8 @@ defmodule Mealplan.Corpus.Scaffold do
   @moduledoc """
   What a brand new meal plan holds (ADR 0038).
 
-  A bare `list_files` prints seven names and nothing else: README.md, config,
-  meals, pantry, preferences, recipes, shopping-lists. The six folders are
+  A bare `list_files` prints eight names and nothing else: README.md, config,
+  meals, pantry, plans, preferences, recipes, shopping-lists. The seven folders are
   listed because the schema names them, not because a document holds them
   open. `config/kroger.md`, `config/walmart.md`, `config/household.md` and
   `preferences/household.md` carry a document from the first moment — the
@@ -17,7 +17,7 @@ defmodule Mealplan.Corpus.Scaffold do
   alias Mealplan.Store
   alias Mealplan.Walmart.Config, as: WalmartConfig
 
-  @corpus_directories ~w(config meals pantry preferences recipes shopping-lists)
+  @corpus_directories ~w(config meals pantry plans preferences recipes shopping-lists)
   def corpus_directories, do: @corpus_directories
 
   @preferences_path "preferences/household.md"

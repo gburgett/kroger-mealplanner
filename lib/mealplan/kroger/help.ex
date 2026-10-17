@@ -34,11 +34,12 @@ defmodule Mealplan.Kroger.Help do
     read_file "config/kroger.md" confirms which shop is set afterwards, and
     history shows when it changed.
 
-    A KROGER PRICE IS A PRICE AT ONE SHOP. A shopping list that has already been
-    matched carries the shop it was matched against in its own front matter, and its
-    products and prices belong to that shop. After changing shops, write the list
-    again with shopping_list and "out", and run kroger_find_products
-    again. The old candidates do not carry over, and they are not worth trusting.\
+    A KROGER PRICE IS A PRICE AT ONE SHOP. A meal plan carries the shop it was
+    started with on its shopping list (data-mp-store), and the products and prices
+    found for it belong to that shop. After changing shops, start the week again
+    with start_meal_plan — give it a name, such as "new shop" — and run
+    kroger_find_products on that plan. The old candidates do not carry over, and
+    they are not worth trusting.\
     """
   end
 

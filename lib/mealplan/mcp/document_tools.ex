@@ -44,7 +44,10 @@ defmodule Mealplan.Mcp.DocumentTools do
                    schema. Read it before you choose anything for them.
       config/      kroger.md, walmart.md: which shops. household.md: how many
                    adults and children are cooked for.
-      shopping-lists/  one document per range of days, written by shopping_list.
+      plans/       a meal plan for a range of days, with its shopping list
+                   inside — what the Kroger and Walmart tools work on. Start
+                   one with start_meal_plan, change it with save_meal_plan.
+      shopping-lists/  a markdown copy of a list, written by shopping_list.
 
   There is no shell. Explore with list_files, read_file and grep; change with
   write_file, edit_file and delete_file. Every change is recorded with the
@@ -142,18 +145,74 @@ defmodule Mealplan.Mcp.DocumentTools do
   One shopping list for a range of days, with the units added up, the pantry
   staples left out, and any stocked consumable left out too. A consumable marked
   "needs recheck" is bought, but its line is marked "(check)" — ask the
-  household whether they already have it, since kroger_send_to_cart refuses to
-  send while any line is still marked that way. Derived from the documents every
+  household whether they already have it. Derived from the documents every
   time, never stored — unless "out" is given.
 
-  "out" stores it as a document in shopping-lists/ (for example
+  "out" stores a markdown copy in shopping-lists/ (for example
   "shopping-lists/2026-08-25--2026-08-31.md"), with the range and the Kroger
-  shop in its front matter. That document is what kroger_find_products,
-  kroger_send_to_cart and the Walmart tools work on. Where those tools say
-  "mealplan shopping-list --out", this is the tool they mean.
+  shop in its front matter. It is for reading. To shop the list, plan the week
+  with start_meal_plan: the Kroger and Walmart tools work on the shopping list
+  inside a meal plan.\
+  """
 
-  Do not write a list again with "out" to add one line: that replaces every
-  candidate already chosen. Add the line with edit_file instead.\
+  # The two meal-plan tools (ADR 0040, ADR 0041). They run the parser, as
+  # validate and shopping_list do, and they are admitted for the same reason:
+  # the arithmetic is the CLI's. The description is the deliverable, not the
+  # schema — it is what tells the assistant that its edits are KEPT and that a
+  # section is ASKED FOR BACK rather than retyped.
+
+  @start_meal_plan_description """
+  Start a meal plan for a range of dates, and show it to the household.
+
+  Use this for "plan next week", "what are we eating", "sort out the shopping"
+  — anything that decides more than one night. It writes a plan document and
+  hands it back; show that document to the household as it is.
+
+  It comes pre-filled: a card for each date in the range, how many the
+  household cooks for (config/household.md), which shop the list is matched
+  against (config/kroger.md), the household's own standing notes
+  (preferences/household.md), and whatever those dates already hold in the
+  most recent plan that overlaps them.
+
+  Two plans may cover the same week and stay separate, which is how "what if we
+  did it cheaper" gets an answer without losing the first plan. The second one
+  needs `name`, and the name goes into the filename, so list_files "plans/"
+  tells them apart and the first line of each says what it holds.
+
+  Change it with save_meal_plan. Do not write a plan with write_file: the
+  arithmetic and the shopping list are done for you.\
+  """
+
+  @save_meal_plan_description """
+  Save a meal plan after a change, and get the corrected document back.
+
+  Post the whole document in `html` after every change the household asks for.
+  It is checked, the arithmetic is done, the shopping list is rebuilt from the
+  meals, and what comes back is what is now saved — show that.
+
+  WHAT YOU WROTE IS KEPT. recipes/ starts a plan off and then stops overruling
+  it. Delete an ingredient line because the household does not want olives
+  tonight and it stays deleted; the recipe is untouched, because they meant
+  tonight and not forever. Add a line to the shopping list for something no
+  recipe asks for — toilet paper — and it stays on the list.
+
+  What this does for you is the arithmetic. A meal that names a recipe but has
+  no ingredients yet gets them, scaled to what that meal serves. Change a
+  meal's servings and every line in it is rescaled — change the number, never
+  the lines.
+
+  NEVER RETYPE AN INGREDIENT TO PUT IT BACK. Ask for the section instead, with
+  `regenerate`, and leave `html` out to save reposting the document:
+
+      regenerate: ["meal:2026-08-26/Dinner"]     that meal, from its recipes
+      regenerate: ["day:2026-08-26"]             every meal that day
+      regenerate: ["shopping-list"]              drop lines added by hand
+      regenerate: ["standing-notes"]             re-copy preferences/household.md
+      regenerate: ["all"]                        start the whole plan over
+
+  Pass `return: "changed"` for a small reply that holds only the sections this
+  save altered — splice those into the document you are showing. The default
+  hands back the whole document.\
   """
 
   # --- schemas --------------------------------------------------------------
@@ -342,6 +401,71 @@ defmodule Mealplan.Mcp.DocumentTools do
           }
         },
         "required" => ["from", "to"]
+      }
+    },
+    %{
+      name: "start_meal_plan",
+      title: "Plan a week — start a meal plan",
+      description: @start_meal_plan_description,
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "from" => %{
+            "type" => "string",
+            "description" => "The first date the plan covers, as YYYY-MM-DD."
+          },
+          "to" => %{
+            "type" => "string",
+            "description" => "The last date the plan covers, as YYYY-MM-DD."
+          },
+          "name" => %{
+            "type" => "string",
+            "description" =>
+              "What makes this plan different from another over the same dates, " <>
+                "for example \"cheap week\". Needed only when one already covers them."
+          },
+          "message" => @message_property
+        },
+        "required" => ["from", "to", "message"]
+      }
+    },
+    %{
+      name: "save_meal_plan",
+      title: "Save a meal plan, and get it back corrected",
+      description: @save_meal_plan_description,
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" =>
+              "The plan to save, for example \"plans/2026-08-24--2026-08-30.html\"."
+          },
+          "html" => %{
+            "type" => "string",
+            "description" =>
+              "The whole meal-plan document, as you are showing it. Leave it out " <>
+                "to work on what is already saved, which is what a regenerate needs."
+          },
+          "regenerate" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" =>
+              "Sections to throw away and build again from recipes/: \"all\", " <>
+                "\"shopping-list\", \"standing-notes\", \"day:<date>\", " <>
+                "\"meal:<date>/<name>\" or \"meal:<date>/<name>/<recipe path>\". " <>
+                "This is how an ingredient comes back — never retype one."
+          },
+          "return" => %{
+            "type" => "string",
+            "enum" => ["whole", "changed", "none"],
+            "description" =>
+              "\"whole\" (the default) hands back the whole document. " <>
+                "\"changed\" hands back only the sections this save altered."
+          },
+          "message" => @message_property
+        },
+        "required" => ["path", "message"]
       }
     }
   ]
@@ -566,6 +690,45 @@ defmodule Mealplan.Mcp.DocumentTools do
               {:ok, text, %{"path" => out}}
             end
         end
+      end
+    end
+  end
+
+  defp run("start_meal_plan", args, corpus, now) do
+    with {:ok, from} <-
+           required(args, "from", "start_meal_plan", "the first date, written YYYY-MM-DD"),
+         {:ok, to} <- required(args, "to", "start_meal_plan", "the last date, written YYYY-MM-DD"),
+         {:ok, message} <- message(args, "start_meal_plan"),
+         {:ok, decoded} <-
+           Mealplan.Plan.start(corpus, from, to, blank_to_nil(args["name"]), message, now) do
+      {:ok, Mealplan.Plan.render(decoded), %{"path" => decoded["path"]}}
+    end
+  end
+
+  defp run("save_meal_plan", args, corpus, now) do
+    with {:ok, path} <-
+           required(
+             args,
+             "path",
+             "save_meal_plan",
+             "the plan, for example plans/2026-08-24--2026-08-30.html"
+           ),
+         {:ok, message} <- message(args, "save_meal_plan") do
+      returning = blank_to_nil(args["return"]) || "whole"
+
+      regenerate =
+        args
+        |> Map.get("regenerate", [])
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+
+      html = if is_binary(args["html"]) and String.trim(args["html"]) != "", do: args["html"]
+
+      with {:ok, decoded} <-
+             Mealplan.Plan.save(corpus, path, html, regenerate, returning, message, now) do
+        {:ok, Mealplan.Plan.render(decoded), %{"path" => decoded["path"]}}
       end
     end
   end
@@ -829,6 +992,15 @@ defmodule Mealplan.Mcp.DocumentTools do
   defp optional_path(nil), do: {:ok, nil}
   defp optional_path(""), do: {:ok, nil}
   defp optional_path(path), do: Paths.normalise(path)
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(_), do: nil
 
   defp string_or(args, key, default) do
     case Map.get(args, key) do

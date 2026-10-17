@@ -23,8 +23,10 @@ defmodule Mealplan.Store.Cli do
   # stderr is split from stdout through a file, because `System.cmd/3` can only
   # merge them, and `--json` output has to arrive clean. The script is fixed
   # text; the program and its arguments arrive as positional parameters, never
-  # inside the script.
-  @script ~s(exec "$0" "$@" 2>"$MEALPLAN_STDERR")
+  # inside the script. Standard input is a file too, /dev/null unless `input:`
+  # is given: a port's stdin never reaches end of file, and `mealplan plan`
+  # reads standard input for a posted document or a payload.
+  @script ~s(exec "$0" "$@" <"$MEALPLAN_STDIN" 2>"$MEALPLAN_STDERR")
 
   @type result :: %{
           stdout: String.t(),
@@ -37,7 +39,9 @@ defmodule Mealplan.Store.Cli do
   Run `mealplan <args>` over `documents` (`[{path, body}]`).
 
   `collect:` names paths to read back out of the directory after the command —
-  how `shopping-list --out` hands its document back.
+  how `shopping-list --out` hands its document back. `input:` is what the
+  command reads on standard input — how `mealplan plan` is handed a posted
+  document or a payload.
   """
   @spec run([{String.t(), String.t()}], [String.t()], keyword()) ::
           {:ok, result()} | {:error, String.t()}
@@ -45,8 +49,12 @@ defmodule Mealplan.Store.Cli do
     with {:ok, binary} <- binary() do
       dir = Scratch.command_dir!()
       stderr_path = dir <> ".stderr"
+      stdin_path = dir <> ".stdin"
+      input = Keyword.get(opts, :input)
 
       try do
+        if input, do: File.write!(stdin_path, input)
+
         for {path, body} <- documents do
           full = Path.join(dir, path)
           File.mkdir_p!(Path.dirname(full))
@@ -57,7 +65,13 @@ defmodule Mealplan.Store.Cli do
           Task.async(fn ->
             System.cmd(
               "/usr/bin/env",
-              ["-i", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "MEALPLAN_STDERR=" <> stderr_path] ++
+              [
+                "-i",
+                "PATH=/usr/bin:/bin",
+                "LANG=C.UTF-8",
+                "MEALPLAN_STDERR=" <> stderr_path,
+                "MEALPLAN_STDIN=" <> if(input, do: stdin_path, else: "/dev/null")
+              ] ++
                 ["/bin/sh", "-c", @script, binary | args],
               cd: dir
             )
@@ -95,6 +109,7 @@ defmodule Mealplan.Store.Cli do
       after
         File.rm_rf(dir)
         File.rm(stderr_path)
+        File.rm(stdin_path)
       end
     end
   end

@@ -28,11 +28,14 @@ Consequences worth internalising before changing anything:
 - **The layout is the schema.** Paths and document conventions must stay
   guessable from a listing and stable enough to grep for. See
   `features/corpus.feature` — that file is the schema definition. A bare
-  `list_files` prints seven names: `README.md`, `config/`, `meals/`, `pantry/`,
-  `preferences/`, `recipes/`, `shopping-lists/`. That listing is asserted in
-  **three** places — `features/corpus.feature`, `features/auth.feature` and
-  `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
-  (`Mealplan.Corpus.Scaffold`) — and all three have to change together.
+  `list_files` prints eight names: `README.md`, `config/`, `meals/`, `pantry/`,
+  `plans/`, `preferences/`, `recipes/`, `shopping-lists/`. That listing is
+  asserted in **five** places — `features/corpus.feature`,
+  `features/auth.feature`, `features/invitations.feature`,
+  `features/documents.feature` and `@corpus_directories` in
+  `lib/mealplan/corpus/scaffold.ex` (`Mealplan.Corpus.Scaffold`) — and all five
+  have to change together. This note said "three" until `plans/` was added
+  and the two it did not name were the ones that failed.
 - **The path is the primary key.** `recipes/chicken-tacos.md`,
   `meals/2026-08-25.md`; `(tenant_id, path)` is the primary key of `documents`.
   Do not add a derived table (ingredients, meal links) that can drift out of
@@ -56,8 +59,9 @@ Consequences worth internalising before changing anything:
   `Mealplan.Store.Corpus.open/2` runs on every request, writes any missing
   scaffold document (`Mealplan.Corpus.Scaffold.documents/2`) as one change
   named `scaffold <paths>`, and never rewrites a document that is there. Adding
-  a corpus directory is three edits and no migration: `@corpus_directories`,
-  `features/corpus.feature`, `features/auth.feature`.
+  a corpus directory is five edits and no migration: `@corpus_directories`,
+  `features/corpus.feature`, `features/auth.feature`,
+  `features/invitations.feature`, `features/documents.feature`.
 - **There are no corpus migrations.** The dated shell scripts went with the
   sandbox. A change to the document format that existing documents must follow
   is an Elixir function over the bodies, in its own ADR.
@@ -66,6 +70,8 @@ Consequences worth internalising before changing anything:
 - **Prefer the file verbs over new tools.** Before adding a tool, ask whether
   `grep` already answers it. Only two things justify a job of their own:
   unit-aware arithmetic (`shopping_list`) and schema validation (`validate`).
+  `start_meal_plan` and `save_meal_plan` are both at once, over the meal-plan
+  document in `plans/` (ADR 0040, ADR 0041).
 - **A tool beyond those exists only when the documents cannot do the job by
   construction.** There is exactly one such job — the network — so four of the
   five retailer tools are network calls: `kroger_find_products`,
@@ -408,8 +414,10 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   means a count (`- 2 eggs`).
 - The shopping list is **derived from the meal plan every time, never stored**:
   read the days in range, follow every meal's links to recipes, scale to that
-  meal's servings, aggregate. `shopping_list` with `out` writes a copy into
-  `shopping-lists/` for the retailer tools to work on.
+  meal's servings, aggregate. `shopping_list` with `out` writes a markdown copy
+  into `shopping-lists/`. The retailer tools work on the list inside a meal
+  plan in `plans/`, which the CLI rebuilds from the plan's meals on every save
+  (ADR 0040).
 - Unit math is conservative. Combine quantities only when the units convert
   (tbsp→cup, oz→lb); otherwise keep separate lines rather than guessing.
 - Countable items round up. You cannot buy 1.5 onions.
@@ -419,8 +427,8 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   now a second line of defence.
 - **Nothing is chosen for the household.** `filter.term` on "boneless chicken
   thighs" returns noise, so `kroger_find_products` writes every candidate down
-  and stops. Choosing is deleting the lines you do not want, which is an
-  ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
+  and stops. Choosing is deleting the candidates you do not want and saving
+  the plan, which is an ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
   is an outcome, not a failure.
 - **How the household chooses is written down, in `preferences/household.md`.**
   Read it before deleting candidates; when it does not settle the question, ask,

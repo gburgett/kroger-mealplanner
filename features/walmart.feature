@@ -19,11 +19,13 @@ Feature: Shopping at Walmart through the affiliate API
     cart holds.
 
   Nothing is chosen for the household here either. Candidates are written under
-  each line and the household chooses by deleting, exactly as with Kroger. A
-  Walmart candidate carries the Walmart item id with a "walmart:" prefix, so a
-  list can hold both shops' products without either tool mistaking the other's:
+  each line of the meal plan's shopping list and the household chooses by
+  deleting, exactly as with Kroger. A Walmart candidate carries the Walmart item
+  id with a "walmart:" prefix, so a list can hold both shops' products without
+  either tool mistaking the other's:
 
-      - 1 `walmart:945193065` Great Value Whole Milk — size unknown — $3.94
+      <li data-mp-candidate="walmart:945193065" data-mp-count="1"
+          data-mp-description="Great Value Whole Milk" data-mp-price="3.94">…</li>
 
   See ADR 0017.
 
@@ -33,7 +35,6 @@ Feature: Shopping at Walmart through the affiliate API
       | 1.5      | lb   | boneless chicken thighs |
       | 8        | oz   | shredded cheddar        |
       | 12       |      | corn tortillas          |
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
 
   @core
   Scenario: Finding the Walmart stores near me, and setting my default
@@ -57,7 +58,7 @@ Feature: Shopping at Walmart through the affiliate API
       | cheddar                 | 10449042  | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
       | cheddar                 | 10315005  | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
       | corn tortillas          | 23983284  | Mission White Corn Tortillas                     | 2.94  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Walmart for the products on the shopping list
     Then the shopping list has 2 candidates for "shredded cheddar"
     And the shopping list has the candidate "walmart:10449042" for "shredded cheddar"
@@ -70,7 +71,7 @@ Feature: Shopping at Walmart through the affiliate API
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
       | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Walmart for the products on the shopping list
     Then every product Walmart offered for "cheddar" is still on the shopping list
     And my Walmart cart received nothing
@@ -82,7 +83,8 @@ Feature: Shopping at Walmart through the affiliate API
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
       | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I keep only the candidate "walmart:10449042" for "shredded cheddar"
     Then the shopping list has 1 candidate for "shredded cheddar"
     And the shopping list has the candidate "walmart:10449042" for "shredded cheddar"
@@ -98,7 +100,8 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner says nothing was added to the cart
     And my Walmart cart received nothing
@@ -117,7 +120,8 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I ask for the Walmart cart link
     Then the cart link carries the Walmart store "5435"
 
@@ -129,7 +133,7 @@ Feature: Shopping at Walmart through the affiliate API
     Given Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     And I ask Walmart for the products on the shopping list
     When I ask for the Walmart cart link
     Then the meal planner says nothing was added to the cart
@@ -145,7 +149,8 @@ Feature: Shopping at Walmart through the affiliate API
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
       | cheddar | 10315005 | Great Value Mild Cheddar Shredded Cheese         | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
     And no Walmart cart link was built
@@ -156,7 +161,7 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Walmart for the products on the shopping list
     Then the shopping list lists "corn tortillas" as not found at this store
     And the shopping list has no candidates for "corn tortillas"
@@ -171,7 +176,8 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I ask for the Walmart cart link
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
     And no Walmart cart link was built
@@ -189,8 +195,9 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
-    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
+    When I tell the meal plan we need "shredded cheddar" after all
     And I ask for the Walmart cart link
     Then the meal planner says nothing was added to the cart
     And the file "pantry/consumables.md" contains the line "- shredded cheddar: needs recheck"
@@ -201,34 +208,19 @@ Feature: Shopping at Walmart through the affiliate API
     walmart_cart_link takes only the "walmart:" ids and reports the rest
     rather than building a link carrying Kroger UPCs.
 
-    (The list is written directly here because "## Not found at this store" is
-    sticky on purpose: whichever shop is asked first moves the lines it has
-    nothing for, and a mixed shop is the household's own arrangement.)
+    (The candidates are written straight onto the plan here because a
+    not-found mark is sticky on purpose: whichever shop is asked first marks
+    the lines it has nothing for, and a mixed shop is the household's own
+    arrangement.)
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And I shop at Walmart "Cincinnati Walmart Supercenter"
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" contains:
-      """
-      ---
-      from: 2026-08-25
-      to: 2026-08-31
-      store: 01400513
-      modality: pickup
-      ---
-
-      # Shopping list for 2026-08-25 to 2026-08-31
-
-      ## Meat
-
-      - 1.5 lb boneless chicken thighs — 2026-08-25
-        - 1 `walmart:945193065` Great Value Boneless Skinless Chicken Thighs — size unknown — $5.48
-
-      ## Dairy
-
-      - 8 oz shredded cheddar — 2026-08-25
-        - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
-      """
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the shopping list has the candidates:
+      | line                                        | product           | description                                  |
+      | 1.5 lb boneless chicken thighs — 2026-08-25 | walmart:945193065 | Great Value Boneless Skinless Chicken Thighs |
+      | 8 oz shredded cheddar — 2026-08-25          | 0001111050158     | Kroger Sharp Cheddar Shredded Cheese         |
     When I ask for the Walmart cart link
     Then the cart link would add:
       | item id   | quantity |
@@ -240,27 +232,11 @@ Feature: Shopping at Walmart through the affiliate API
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And I shop at Walmart "Cincinnati Walmart Supercenter"
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" contains:
-      """
-      ---
-      from: 2026-08-25
-      to: 2026-08-31
-      store: 01400513
-      modality: pickup
-      ---
-
-      # Shopping list for 2026-08-25 to 2026-08-31
-
-      ## Meat
-
-      - 1.5 lb boneless chicken thighs — 2026-08-25
-        - 1 `walmart:945193065` Great Value Boneless Skinless Chicken Thighs — size unknown — $5.48
-
-      ## Dairy
-
-      - 8 oz shredded cheddar — 2026-08-25
-        - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
-      """
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the shopping list has the candidates:
+      | line                                        | product           | description                                  |
+      | 1.5 lb boneless chicken thighs — 2026-08-25 | walmart:945193065 | Great Value Boneless Skinless Chicken Thighs |
+      | 8 oz shredded cheddar — 2026-08-25          | 0001111050158     | Kroger Sharp Cheddar Shredded Cheese         |
     When I send the shopping list to my Kroger cart
     Then my Kroger cart was sent:
       | upc           | quantity |
@@ -271,11 +247,11 @@ Feature: Shopping at Walmart through the affiliate API
   Scenario: Walmart being unreachable does not lose the list
     Given I shop at Walmart "Cincinnati Walmart Supercenter"
     And Walmart answers every product search with 500
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Walmart for the products on the shopping list
     Then the meal planner refuses, and names the Walmart endpoint and the status
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
-    And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
+    And the meal plan "plans/2026-08-25--2026-08-31.html" exists
+    And the shopping list has the line "8 oz shredded cheddar — 2026-08-25"
 
   @core
   Scenario: The handshake instructions explain the Walmart flow
@@ -309,6 +285,8 @@ Feature: Shopping at Walmart through the affiliate API
       | restore_file         |
       | validate             |
       | shopping_list        |
+      | start_meal_plan      |
+      | save_meal_plan       |
       | kroger_find_products |
       | kroger_send_to_cart  |
     And the meal planner's instructions say nothing about Walmart
@@ -329,7 +307,8 @@ Feature: Shopping at Walmart through the affiliate API
     And Walmart sells:
       | search  | item id  | name                                             | price |
       | cheddar | 10449042 | Great Value Finely Shredded Sharp Cheddar Cheese | 2.22  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Walmart
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Walmart
     When I ask for a Walmart cart link with the item "walmart:999999999"
     Then the meal planner refuses, and names the item "walmart:999999999"
     And no Walmart cart link was built
