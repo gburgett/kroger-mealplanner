@@ -1,18 +1,17 @@
 @core
 Feature: Building the shopping list
   As a busy housewife
-  I want one ingredient list for a range of dates
+  I want one ingredient list for the days I plan
   So that I make a single trip and buy exactly what the week's meals need
 
-  This is the one job that is not exploration, and the one job an agent should
-  not do in its head: it is unit-aware arithmetic over every ingredient of every
-  recipe of every day in the range. So it is a tool, shopping_list, which runs
-  the `mealplan` parser over the documents, and the agent calls it rather than
-  adding the numbers up itself.
+  The list is inside the meal plan (ADR 0040), and it is the one job an agent
+  should not do in its head: unit-aware arithmetic over every ingredient of
+  every meal in the plan. So the server does it — `save_meal_plan` runs the
+  `mealplan` parser, which rebuilds the list from the plan's own meals on every
+  save — and the assistant never adds the numbers up itself.
 
-  The list is derived from the documents every time, never stored. Two lines for
-  the same item combine when their units convert; when they do not, the item
-  stays on separate lines rather than being silently guessed at.
+  Two lines for the same item combine when their units convert; when they do
+  not, the item stays on separate lines rather than being silently guessed at.
 
   Background:
     Given a meal plan
@@ -32,70 +31,58 @@ Feature: Building the shopping list
       | 1        | lb   | green beans   |
       | 3        |      | garlic cloves |
 
-  Scenario: A list for a single day
-    Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command succeeds
-    And the shopping list has 4 items
-    And the shopping list includes "1.5 lb boneless chicken thighs"
-    And the shopping list includes "12 corn tortillas"
+  Scenario: A list for a single night
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       |
+      | 2026-08-25 | Dinner | Chicken Tacos |
+    Then the plan's shopping list has 4 lines
+    And the plan's shopping list includes "1.5 lb boneless chicken thighs"
+    And the plan's shopping list includes "12 corn tortillas"
 
-  Scenario: Ingredients shared across days are combined
-    Given I have planned the days:
-      | date       | recipes         |
-      | 2026-08-25 | Chicken Tacos   |
-      | 2026-08-26 | Chicken Pot Pie |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-26"
-    Then the shopping list includes "3.5 lb boneless chicken thighs"
-    And the shopping list includes "2 yellow onion"
-    And the shopping list has 5 items
+  Scenario: Ingredients shared across nights are combined
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes         |
+      | 2026-08-25 | Dinner | Chicken Tacos   |
+      | 2026-08-26 | Dinner | Chicken Pot Pie |
+    Then the plan's shopping list includes "3.5 lb boneless chicken thighs"
+    And the plan's shopping list includes "2 yellow onion"
+    And the plan's shopping list has 5 lines
 
   Scenario: Making the same meal twice in one week doubles it
-    Given I have planned the days:
-      | date       | recipes       |
-      | 2026-08-25 | Chicken Tacos |
-      | 2026-08-28 | Chicken Tacos |
-    When I ask for the shopping list from "2026-08-24" to "2026-08-30"
-    Then the shopping list includes "3 lb boneless chicken thighs"
-    And the shopping list includes "24 corn tortillas"
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       |
+      | 2026-08-25 | Dinner | Chicken Tacos |
+      | 2026-08-28 | Dinner | Chicken Tacos |
+    Then the plan's shopping list includes "3 lb boneless chicken thighs"
+    And the plan's shopping list includes "24 corn tortillas"
 
   Scenario: A meal cooked for more people scales its recipes
-    Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos" for 8 people
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "3 lb boneless chicken thighs"
-    And the shopping list includes "24 corn tortillas"
-    And the shopping list includes "2 cup shredded cheddar"
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 8        |
+    Then the plan's shopping list includes "3 lb boneless chicken thighs"
+    And the plan's shopping list includes "24 corn tortillas"
+    And the plan's shopping list includes "2 cup shredded cheddar"
 
   Scenario: Scaling that lands between whole units rounds up what you have to buy whole
-    Given I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos" for 6 people
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "2 yellow onion"
-    And the shopping list includes "2.25 lb boneless chicken thighs"
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 6        |
+    Then the plan's shopping list includes "2 yellow onion"
+    And the plan's shopping list includes "2.25 lb boneless chicken thighs"
 
-  Scenario: Meals on the same day add together
+  Scenario: Meals on the same day add together, each scaled to its own servings
     Given I have recorded the recipe "Morning Oats" serving 1 with the ingredients:
-      | quantity | unit | item       |
+      | quantity | unit | item        |
       | 1        | cup  | rolled oats |
     And I have recorded the recipe "Evening Crumble" serving 4 with the ingredients:
-      | quantity | unit | item       |
+      | quantity | unit | item        |
       | 2        | cup  | rolled oats |
-    And I have planned the day "2026-08-25" with the meals:
-      | name      | recipes         | servings |
-      | Breakfast | Morning Oats    | 1        |
-      | Dinner    | Evening Crumble | 4        |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command succeeds
-    And the shopping list includes "3 cup rolled oats"
-
-  Scenario: Each meal scales to its own number of people
-    Given I have recorded the recipe "Breakfast Burrito" serving 1 with the ingredients:
-      | quantity | unit | item |
-      | 2        |      | eggs |
-    And I have planned the day "2026-08-25" with the meals:
-      | name      | recipes           | servings |
-      | Breakfast | Breakfast Burrito | 3        |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "6 eggs"
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal      | recipes         | servings |
+      | 2026-08-25 | Breakfast | Morning Oats    | 3        |
+      | 2026-08-25 | Dinner    | Evening Crumble | 4        |
+    Then the plan's shopping list includes "5 cup rolled oats"
 
   Scenario: Compatible units are converted before adding up
     Given I have recorded the recipe "Buttered Noodles" serving 4 with the ingredients:
@@ -104,12 +91,11 @@ Feature: Building the shopping list
     And I have recorded the recipe "Cornbread" serving 8 with the ingredients:
       | quantity | unit | item   |
       | 0.5      | cup  | butter |
-    And I have planned the days:
-      | date       | recipes          |
-      | 2026-08-25 | Buttered Noodles |
-      | 2026-08-26 | Cornbread        |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-26"
-    Then the shopping list includes "1 cup butter"
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes          |
+      | 2026-08-25 | Dinner | Buttered Noodles |
+      | 2026-08-26 | Dinner | Cornbread        |
+    Then the plan's shopping list includes "1 cup butter"
 
   Scenario: Incompatible units stay on separate lines rather than being guessed
     Given I have recorded the recipe "Marinara" serving 4 with the ingredients:
@@ -118,103 +104,57 @@ Feature: Building the shopping list
     And I have recorded the recipe "Bruschetta" serving 4 with the ingredients:
       | quantity | unit | item     |
       | 4        |      | tomatoes |
-    And I have planned the days:
-      | date       | recipes    |
-      | 2026-08-25 | Marinara   |
-      | 2026-08-26 | Bruschetta |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-26"
-    Then the shopping list includes "1.75 lb tomatoes"
-    And the shopping list includes "4 tomatoes"
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes    |
+      | 2026-08-25 | Dinner | Marinara   |
+      | 2026-08-26 | Dinner | Bruschetta |
+    Then the plan's shopping list includes "1.75 lb tomatoes"
+    And the plan's shopping list includes "4 tomatoes"
 
-  Scenario: Each line says which days it is for
-    Given I have planned the days:
-      | date       | recipes         |
-      | 2026-08-25 | Chicken Tacos   |
-      | 2026-08-26 | Chicken Pot Pie |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-26"
-    Then the line "boneless chicken thighs" is needed for the dinners on "2026-08-25" and "2026-08-26"
-    And the line "corn tortillas" is needed for the dinner on "2026-08-25"
+  Scenario: Each line says which nights it is for
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes         |
+      | 2026-08-25 | Dinner | Chicken Tacos   |
+      | 2026-08-26 | Dinner | Chicken Pot Pie |
+    Then the line "boneless chicken thighs" is needed on "2026-08-25" and "2026-08-26"
+    And the line "corn tortillas" is needed on "2026-08-25"
 
   Scenario: The list is grouped so I can walk the store once
-    Given I have planned dinner on "2026-08-25" with the recipes "Chicken Tacos" and "Garlic Green Beans"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the line "boneless chicken thighs" is in the "Meat & Seafood" section
-    And the line "green beans" is in the "Produce" section
-    And the line "shredded cheddar" is in the "Dairy" section
-
-  Scenario: The list is markdown, so it can be saved or read aloud as it stands
-    Given I have planned dinner on "2026-08-25" with the recipe "Garlic Green Beans"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the output is:
-      """
-      # Shopping list for 2026-08-25 to 2026-08-25
-
-      ## Produce
-
-      - 1 lb green beans — 2026-08-25
-      - 3 garlic cloves — 2026-08-25
-      """
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes                           |
+      | 2026-08-25 | Dinner | Chicken Tacos, Garlic Green Beans |
+    Then the line "boneless chicken thighs" is in the "Meat & Seafood" aisle
+    And the line "green beans" is in the "Produce" aisle
+    And the line "shredded cheddar" is in the "Dairy" aisle
 
   Scenario: An ingredient we do not recognise still makes the list
     Given I have recorded the recipe "Nostalgia Casserole" serving 4 with the ingredients:
       | quantity | unit | item                |
       | 1        |      | tin of mystery soup |
-    And I have planned dinner on "2026-08-25" with the recipe "Nostalgia Casserole"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "1 tin of mystery soup"
-    And the line "tin of mystery soup" is in the "Other" section
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes             |
+      | 2026-08-25 | Dinner | Nostalgia Casserole |
+    Then the plan's shopping list includes "1 tin of mystery soup"
+    And the line "tin of mystery soup" is in the "Other" aisle
 
-  Scenario: Days outside the range are not shopped for
-    Given I have planned the days:
-      | date       | recipes         |
-      | 2026-08-24 | Chicken Tacos   |
-      | 2026-08-31 | Chicken Pot Pie |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-30"
-    Then the shopping list is empty
+  Scenario: The plan covers both of its end dates
+    Given a meal plan from "2026-08-25" to "2026-08-30" with:
+      | date       | meal   | recipes         |
+      | 2026-08-25 | Dinner | Chicken Tacos   |
+      | 2026-08-30 | Dinner | Chicken Pot Pie |
+    Then the plan's shopping list includes "3.5 lb boneless chicken thighs"
 
-  Scenario: The range includes both end dates
-    Given I have planned the days:
-      | date       | recipes         |
-      | 2026-08-25 | Chicken Tacos   |
-      | 2026-08-30 | Chicken Pot Pie |
-    When I ask for the shopping list from "2026-08-25" to "2026-08-30"
-    Then the shopping list includes "3.5 lb boneless chicken thighs"
-
-  Scenario: Days with no recipes contribute nothing
-    Given I have planned dinner on "2026-08-25" with no recipes and the note "Leftovers night"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command succeeds
-    And the shopping list is empty
-
-  Scenario: A range with nothing planned says so plainly
-    When I ask for the shopping list from "2026-09-01" to "2026-09-07"
-    Then the command succeeds
-    And the output says no meals are planned in that range
-
-  Scenario: A broken recipe stops the list rather than quietly under-buying
-    Given the file "recipes/chicken-tacos.md" contains:
-      """
-      ---
-      name: Chicken Tacos
-      servings: 4
-      ---
-
-      ## Ingredients
-
-      - a good handful of cheese
-      """
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command fails
-    And the output names the file "recipes/chicken-tacos.md"
-    And the output names the line "- a good handful of cheese"
+  Scenario: A plan with nothing planned has an empty list
+    Given a meal plan from "2026-09-01" to "2026-09-07"
+    Then the plan's shopping list is empty
+    And the meal plan reports no problems
 
   Scenario: The end of the range cannot come before the start
-    When I ask for the shopping list from "2026-08-30" to "2026-08-25"
-    Then the command fails
-    And the output says the end date is before the start date
+    When I start a meal plan from "2026-08-30" to "2026-08-25"
+    Then the call is refused
+    And the plan refusal names "before"
 
   Scenario: A date that is not a date
-    When I ask for the shopping list from "next-tuesday" to "2026-08-25"
-    Then the command fails
-    And the output says a date must be written as YYYY-MM-DD
+    When I start a meal plan from "next-tuesday" to "2026-08-25"
+    Then the call is refused
+    And the plan refusal names "YYYY-MM-DD"

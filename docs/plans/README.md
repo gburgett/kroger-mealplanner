@@ -19,5 +19,5 @@ and deleted once its work is done — that is the difference between a plan and 
 | [0004](0004-import-pinterest-boards.md) | Import boards from Pinterest as pins-and-links | proposed, not started |
 | [0005](0005-migrate-the-server-and-jobs-to-elixir-phoenix-and-postgres.md) | Migrate the server and jobs to Elixir, Phoenix and PostgreSQL | proposed; blocked on plan 0006 |
 | [0006](0006-reach-the-corpus-only-through-the-sandbox-session.md) | Reach the corpus only through the sandbox session | in progress, 2026-09-01 |
-| [0007](0007-make-the-meal-plan-one-html-document.md) | Make the meal plan one HTML document | in progress, 2026-09-22 |
-| [0007-progress](0007-progress.md) | Plan 0007 — progress, and what is left | phases 0-2 done; rebased onto ADR 0039, 2026-10-11 |
+| [0007](0007-make-the-meal-plan-one-html-document.md) | Make the meal plan one HTML document | done, 2026-10-17 |
+| [0007-progress](0007-progress.md) | Plan 0007 — progress, and what is left | all four phases done, 2026-10-17 |

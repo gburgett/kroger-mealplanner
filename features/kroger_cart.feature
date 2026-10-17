@@ -325,14 +325,13 @@ Feature: Sending the list to Kroger
 
   @core
   Scenario: The cart tools work on a meal plan, and say so
-    A shopping list written with shopping_list and "out" is a markdown copy. The
-    products are written onto the plan's own list, so the tool names the plan
-    to start rather than writing candidates nowhere useful.
+    The products are written onto the plan's own list, so a document that is
+    not a meal plan is refused, and the refusal names the tool that starts one.
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I ask Kroger for the products on the list "shopping-lists/2026-08-25--2026-08-31.md"
-    Then the meal planner refuses, and names the path "shopping-lists/2026-08-25--2026-08-31.md"
+    When I ask Kroger for the products on the list "recipes/chicken-tacos.md"
+    Then the meal planner refuses, and names the path "recipes/chicken-tacos.md"
     And the refusal says to call "start_meal_plan"
 
   @security

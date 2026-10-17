@@ -45,7 +45,7 @@ defmodule Mealplan.Store.Paths do
       bad = Enum.find(segments, &(not Regex.match?(@segment, &1))) ->
         {:error,
          ~s("#{path}" has a part, "#{bad}", that is not a plain name. Each part of a path is letters, ) <>
-           ~s(digits, ".", "-" and "_", and does not start with "." — for example "meals/2026-08-25.md".)}
+           ~s(digits, ".", "-" and "_", and does not start with "." — for example "recipes/chicken-tacos.md".)}
 
       true ->
         {:ok, trimmed}

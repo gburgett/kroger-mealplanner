@@ -10,8 +10,9 @@ Feature: Leaving out what we already have
   things they name behave differently:
 
   "pantry/staples.md" holds what the agent never buys — salt, flour, oil.
-  These never appear on a list unless "--include-staples" says to buy one
-  anyway this once.
+  These never appear on a meal plan's shopping list. To buy one anyway this
+  once, the household asks for it by name: an ad-hoc line on the plan's list,
+  which no staple can drop.
 
   "pantry/consumables.md" holds what the household keeps SOME of, but which
   runs out — ketchup, eggs, olive oil. Each line carries a status:
@@ -19,7 +20,7 @@ Feature: Leaving out what we already have
   same as a staple. One marked "needs recheck" is not left off — it is
   bought like any ordinary ingredient, but its line on the shopping list is
   marked "(check)", because the household may still have some and nobody
-  has confirmed either way. The list itself says to ask before buying, and
+  has confirmed either way. Saving the plan says to ask before buying, and
   "kroger_send_to_cart" refuses to send while a "(check)" line is still on
   it — see ADR 0016. Flipping the status by hand is how the household says
   "we are running low" today; a future background job that watches how
@@ -28,7 +29,7 @@ Feature: Leaving out what we already have
   does. See ADR 0014.
 
   Both files are plain markdown lists: editable by hand, greppable, and read
-  by the shopping list every time it runs.
+  every time a meal plan is saved.
 
   Background:
     Given a meal plan
@@ -38,7 +39,6 @@ Feature: Leaving out what we already have
       | 0.25     | tsp  | salt  |
       | 2        |      | eggs  |
       | 1        | cup  | milk  |
-    And I have planned dinner on "2026-08-25" with the recipe "Pancakes"
 
   Scenario: Recording what we always keep in
     When I write the file "pantry/staples.md":
@@ -54,32 +54,35 @@ Feature: Leaving out what we already have
 
   Scenario: Staples are dropped from the list
     Given the pantry staples are "salt" and "flour"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list has 2 items
-    And the shopping list includes "2 eggs"
-    And the shopping list does not include "salt"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the plan's shopping list has 2 lines
+    And the plan's shopping list includes "2 eggs"
+    And the plan's shopping list does not include "salt"
 
   Scenario: I can see what was left out as a staple, and why
     Given the pantry staples are "salt"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the output says "salt" was left out as a pantry staple
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan says "salt" was left out as a pantry staple
 
   Scenario: Buying a staple anyway when we have run out
     Given the pantry staples are "flour"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the staples
-    Then the shopping list includes "1.5 cup flour"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    When I add "1 bag flour" to the shopping list
+    And I save the meal plan
+    Then the plan's shopping list includes "1 bag flour"
 
   Scenario: Dropping something from the staples
     Given the pantry staples are "salt" and "flour"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
     When I edit "pantry/staples.md" removing the line "- flour"
-    And I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "1.5 cup flour"
+    And I save the meal plan
+    Then the plan's shopping list includes "1.5 cup flour"
 
-  Scenario: A folder with no staples document is fine
+  Scenario: A meal plan with no staples document is fine
     Given the file "pantry/staples.md" does not exist
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command succeeds
-    And the shopping list has 4 items
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan reports no problems
+    And the plan's shopping list has 4 lines
 
   Scenario: Recording what runs out over time
     When I write the file "pantry/consumables.md":
@@ -96,48 +99,46 @@ Feature: Leaving out what we already have
 
   Scenario: A stocked consumable is left off the list
     Given the pantry consumable "eggs" is "stocked"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list does not include "eggs"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the plan's shopping list does not include "eggs"
 
   Scenario: A consumable needing a recheck is bought like any ingredient
     Given the pantry consumable "eggs" is "needs recheck"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "2 eggs"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the plan's shopping list includes "2 eggs"
 
   Scenario: A consumable needing a recheck is marked on the list
     Given the pantry consumable "eggs" is "needs recheck"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list marks "eggs" for a check
-
-  Scenario: A stocked consumable is never marked for a check
-    Given the pantry consumable "eggs" is "stocked"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the consumables
-    Then the shopping list does not mark "eggs" for a check
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan's shopping list marks "eggs" for a check
 
   Scenario: An ingredient with no consumable entry is never marked
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list does not mark "eggs" for a check
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan's shopping list does not mark "eggs" for a check
 
-  Scenario: The output tells the agent to have the household check
+  Scenario: Saving the plan tells the agent to have the household check
     Given the pantry consumable "eggs" is "needs recheck"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the output says to check with the household about "eggs"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan reports a warning naming "2 eggs — 2026-08-25"
+    And the meal plan reports a warning naming "ask the household"
 
   Scenario: I can see what was left out as a consumable, and why
     Given the pantry consumable "eggs" is "stocked"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the output says "eggs" was left out as a pantry consumable
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan says "eggs" was left out as a pantry consumable
 
   Scenario: Buying a stocked consumable anyway
     Given the pantry consumable "eggs" is "stocked"
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25" including the consumables
-    Then the shopping list includes "2 eggs"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    When I add "1 dozen eggs" to the shopping list
+    And I save the meal plan
+    Then the plan's shopping list includes "1 dozen eggs"
 
-  Scenario: A folder with no consumables document is fine
+  Scenario: A meal plan with no consumables document is fine
     Given the file "pantry/consumables.md" does not exist
-    When I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the command succeeds
-    And the shopping list has 4 items
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the meal plan reports no problems
+    And the plan's shopping list has 4 lines
 
   Scenario: A line with no recognised status is left alone
     When I write the file "pantry/consumables.md":
@@ -146,5 +147,5 @@ Feature: Leaving out what we already have
 
       - eggs: somewhere in the garage, ask grandma
       """
-    And I ask for the shopping list from "2026-08-25" to "2026-08-25"
-    Then the shopping list includes "2 eggs"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Pancakes" for dinner on "2026-08-25"
+    Then the plan's shopping list includes "2 eggs"

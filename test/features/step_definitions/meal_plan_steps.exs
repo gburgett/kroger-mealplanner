@@ -115,6 +115,16 @@ defmodule Mealplan.Features.MealPlanSteps do
     {:ok, plan_meal(context, meal, date, [recipe])}
   end
 
+  step "I plan {string} on {string} with the recipe {string} for {int} people",
+       %{args: [meal, date, recipe, count]} = context do
+    {:ok, plan_meal(context, meal, date, [recipe], servings: count)}
+  end
+
+  step "I plan {string} on {string} with no recipes and the note {string}",
+       %{args: [meal, date, note]} = context do
+    {:ok, plan_meal(context, meal, date, [], note: note)}
+  end
+
   step "I plan {string} on {string} with the missing recipe {string}",
        %{args: [meal, date, path]} = context do
     {:ok, plan_meal_paths(context, meal, date, [path])}
@@ -266,15 +276,92 @@ defmodule Mealplan.Features.MealPlanSteps do
     {:ok, context}
   end
 
+  # The list's lines as the CLI derives them, not the document's text: the
+  # list section also says what the pantry left out, and "salt" there is not
+  # salt on the list.
   step "the plan's shopping list includes {string}", %{args: [text]} = context do
-    list = shopping_list(saved(context))
-    assert list =~ text, list
+    lines = list_lines(context)
+    assert Enum.any?(lines, &String.contains?(&1, text)), Enum.join(lines, "\n")
     {:ok, context}
   end
 
   step "the plan's shopping list does not include {string}", %{args: [text]} = context do
-    list = shopping_list(saved(context))
-    refute list =~ text, list
+    lines = list_lines(context)
+    refute Enum.any?(lines, &String.contains?(&1, text)), Enum.join(lines, "\n")
+    {:ok, context}
+  end
+
+  step "the plan's shopping list has {int} lines", %{args: [count]} = context do
+    lines = list_lines(context)
+    assert length(lines) == count, Enum.join(lines, "\n")
+    {:ok, context}
+  end
+
+  step "the plan's shopping list is empty", context do
+    assert list_lines(context) == [], Enum.join(list_lines(context), "\n")
+    {:ok, context}
+  end
+
+  step "the line {string} is needed on {string} and {string}",
+       %{args: [item, first, second]} = context do
+    assert FeatureCorpus.plan_line(context, item).nights == [first, second]
+    {:ok, context}
+  end
+
+  step "the line {string} is needed on {string}", %{args: [item, date]} = context do
+    assert FeatureCorpus.plan_line(context, item).nights == [date]
+    {:ok, context}
+  end
+
+  step "the line {string} is in the {string} aisle", %{args: [item, aisle]} = context do
+    line = FeatureCorpus.plan_line(context, item)
+    assert line.section == aisle, ~s("#{item}" is in "#{line.section}", not "#{aisle}")
+    {:ok, context}
+  end
+
+  step "the meal plan says {string} was left out as a pantry staple",
+       %{args: [item]} = context do
+    assert left_out(context, "pantry staples") =~ item
+    {:ok, context}
+  end
+
+  step "the meal plan says {string} was left out as a pantry consumable",
+       %{args: [item]} = context do
+    assert left_out(context, "stocked pantry consumables") =~ item
+    {:ok, context}
+  end
+
+  step "the meal {string} on {string} has the note {string}",
+       %{args: [meal, date, note]} = context do
+    block = meal_block(saved(context), date, meal)
+    assert block =~ ~s(<p data-mp-note class="note">#{note}</p>), block
+    {:ok, context}
+  end
+
+  # --- what a save says about the household size ----------------------------
+
+  step "the meal plan warns that the meal {string} on {string} serves too few",
+       %{args: [meal, date]} = context do
+    assert serving_warning(context, meal, date) =~ "too few", response_text(context)
+    {:ok, context}
+  end
+
+  step "the meal plan warns that the meal {string} on {string} serves more than double",
+       %{args: [meal, date]} = context do
+    assert serving_warning(context, meal, date) =~ "more than double", response_text(context)
+    {:ok, context}
+  end
+
+  step "the meal plan does not warn that the meal {string} on {string} serves too few",
+       %{args: [meal, date]} = context do
+    refute serving_warning(context, meal, date) =~ "too few", response_text(context)
+    {:ok, context}
+  end
+
+  step "the meal plan does not warn about any meal's servings", context do
+    refute response_text(context) =~ ~r/too few for the household|more than double the household/,
+           response_text(context)
+
     {:ok, context}
   end
 
@@ -409,12 +496,15 @@ defmodule Mealplan.Features.MealPlanSteps do
     |> then(fn acc ->
       Enum.reduce(rows, acc, fn row, acc ->
         recipes =
-          row["recipes"]
+          (row["recipes"] || "")
           |> String.split(",")
           |> Enum.map(&String.trim/1)
           |> Enum.reject(&(&1 == ""))
 
-        plan_meal(acc, row["meal"], row["date"], recipes)
+        plan_meal(acc, row["meal"] || "Dinner", row["date"], recipes,
+          servings: blank(row["servings"]),
+          note: blank(row["note"])
+        )
       end)
     end)
     |> save_plan([], "whole", "plan the week")
@@ -474,14 +564,28 @@ defmodule Mealplan.Features.MealPlanSteps do
 
   # Add a meal to the document the assistant is holding: a recipe reference and
   # no ingredients, which is the gap rule 2 fills on the next save.
-  defp plan_meal(context, meal, date, recipes),
-    do: plan_meal_paths(context, meal, date, Enum.map(recipes, &recipe_path/1))
+  defp plan_meal(context, meal, date, recipes, opts \\ []),
+    do: plan_meal_paths(context, meal, date, Enum.map(recipes, &recipe_path/1), opts)
 
-  defp plan_meal_paths(context, meal, date, paths) do
+  defp plan_meal_paths(context, meal, date, paths, opts \\ []) do
     references = Enum.map_join(paths, "", &~s(<div data-mp-recipe="#{&1}"></div>))
-    # No data-mp-servings: a meal with none of its own feeds what its recipes
-    # feed, which is the domain rule and keeps the recipe's own quantities.
-    block = ~s(<div data-mp-meal="#{meal}" class="meal">#{references}</div>)
+
+    # No data-mp-servings unless the scenario gives one: a meal with none of
+    # its own feeds what its recipes feed, which is the domain rule and keeps
+    # the recipe's own quantities.
+    servings =
+      case opts[:servings] do
+        nil -> ""
+        count -> ~s( data-mp-servings="#{count}")
+      end
+
+    note =
+      case opts[:note] do
+        nil -> ""
+        text -> ~s(<p data-mp-note class="note">#{text}</p>)
+      end
+
+    block = ~s(<div data-mp-meal="#{meal}"#{servings} class="meal">#{note}#{references}</div>)
 
     document =
       case day_open_tag(context.plan_doc, date) do
@@ -561,6 +665,37 @@ defmodule Mealplan.Features.MealPlanSteps do
       [_, rest] -> rest
       _ -> ""
     end
+  end
+
+  defp blank(nil), do: nil
+
+  defp blank(text) do
+    case String.trim(text) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp list_lines(context), do: Enum.map(FeatureCorpus.plan_list(context).items, & &1.line)
+
+  # The plan's own note on what the pantry kept off the list, by kind.
+  defp left_out(context, kind) do
+    case Regex.run(~r/Left out as #{kind}: ([^<.]*)/, saved(context)) do
+      [_, items] ->
+        items
+
+      _ ->
+        flunk(
+          ~s(the plan says nothing was left out as #{kind}:\n#{shopping_list(saved(context))})
+        )
+    end
+  end
+
+  # The warning a save gave about one meal's servings, or "".
+  defp serving_warning(context, meal, date) do
+    response_text(context)
+    |> String.split("\n")
+    |> Enum.find("", &String.contains?(&1, "#{meal} on #{date} serves"))
   end
 
   defp days(document), do: length(Regex.scan(~r/<section data-mp-day\b/, document))

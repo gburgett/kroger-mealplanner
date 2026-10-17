@@ -6,8 +6,9 @@ defmodule Mealplan.Mcp.Tools do
   `anubis_mcp` (ADR 0020). Everything a client actually reads or an agent acts
   on stays here:
 
-  - the meal plan's own tools — the file verbs, `validate` and
-    `shopping_list` — which live in `Mealplan.Mcp.DocumentTools` (ADR 0038);
+  - the meal plan's own tools — the file verbs, `validate`, `start_meal_plan`
+    and `save_meal_plan` — which live in `Mealplan.Mcp.DocumentTools`
+    (ADR 0038, ADR 0041);
   - the network tools, which the documents cannot do by construction
     (ADR 0010, ADR 0017), with their descriptions, hand-authored schemas and
     "name the argument" refusals.
@@ -566,7 +567,13 @@ defmodule Mealplan.Mcp.Tools do
   @retired ~w(bash close)
   @no_shell "there is no shell: the meal plan is documents, and nothing an assistant writes " <>
               "is run (ADR 0039). Explore with list_files, read_file and grep; change with " <>
-              "write_file, edit_file and delete_file; shopping_list derives the grocery list."
+              "write_file, edit_file and delete_file; start_meal_plan plans a week, and its " <>
+              "shopping list is inside it."
+
+  # Retired by ADR 0040: the list is inside a meal plan, rebuilt on every save.
+  @no_shopping_list "there is no shopping_list tool any more: the shopping list is inside a " <>
+                      "meal plan, and every save_meal_plan rebuilds it (ADR 0040). Plan the week " <>
+                      "with start_meal_plan; read_file on the plan shows its list."
 
   @doc """
   Run one tool. `args` is the decoded `params.arguments` map (string keys).
@@ -591,6 +598,9 @@ defmodule Mealplan.Mcp.Tools do
 
         name in @retired ->
           {:ok, error_result(@no_shell)}
+
+        name == "shopping_list" ->
+          {:ok, error_result(@no_shopping_list)}
 
         true ->
           do_call(name, args, tenant, now)

@@ -50,12 +50,10 @@ Feature: An invited household gets its own meal plan
     And the output lists:
       | README.md       |
       | config/         |
-      | meals/          |
       | pantry/         |
       | plans/          |
       | preferences/    |
       | recipes/        |
-      | shopping-lists/ |
 
   Scenario: A new household starts empty, and another household's plan is untouched
     Given "+15095550142" has been invited and has approved a client

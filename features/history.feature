@@ -113,19 +113,21 @@ Feature: The meal plan remembers what it used to say
     Then the command succeeds
     And the recipe "Chicken Tacos" serves 4
 
-  Scenario: Undoing a day of planning
+  Scenario: Undoing a week of planning
     Restoring a document to a change from before it existed deletes it: the
     meal plan is then exactly as it was.
 
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned the days:
-      | date       | recipes       |
-      | 2026-08-24 | Chicken Tacos |
-      | 2026-08-25 | Chicken Tacos |
-    When I restore "meals/2026-08-25.md" as it was before it was written
+    And a meal plan from "2026-08-17" to "2026-08-23" with:
+      | date       | meal   | recipes       |
+      | 2026-08-18 | Dinner | Chicken Tacos |
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       |
+      | 2026-08-25 | Dinner | Chicken Tacos |
+    When I restore "plans/2026-08-24--2026-08-30.html" as it was before it was written
     Then the command succeeds
-    And the file "meals/2026-08-25.md" does not exist in the meal plan
-    And the file "meals/2026-08-24.md" exists in the meal plan
+    And the file "plans/2026-08-24--2026-08-30.html" does not exist in the meal plan
+    And the file "plans/2026-08-17--2026-08-23.html" exists in the meal plan
 
   Scenario: An invalid document is never stored, so there is nothing broken to recover from
     When I write the file "recipes/broken.md":

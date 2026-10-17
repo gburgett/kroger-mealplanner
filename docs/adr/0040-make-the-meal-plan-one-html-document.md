@@ -143,6 +143,32 @@ documents. The retailer tools call CLI subcommands and decode JSON. ADR 0007's
 rule — one parser, in one language, in one place — holds again with no
 exception.
 
+### What it removes
+
+`meals/` and `shopping-lists/` leave the meal plan. Nothing reads them, so
+nothing is kept for them:
+
+* The scaffold lists six names, not eight.
+* A write to either folder is refused, and the refusal names
+  `start_meal_plan`. A day written there would be planned and never shopped
+  for. The documents already there can still be read and deleted.
+* The `shopping_list` tool and `mealplan shopping-list` are deleted. The list
+  is inside the plan, and every save rebuilds it. A client that still calls
+  the tool is told where the list is.
+* A recipe a plan uses may be deleted. The plan keeps the ingredients it was
+  given, and its next save warns. The guard that refused to delete a recipe a
+  day linked to is gone.
+* The serving warnings move from `validate` over a day to the plan's save.
+  They are given for a meal the save filled or rescaled, so a standing plan is
+  not flagged again by every later save.
+* A meal filled from a recipe with a line nobody can read is a problem on the
+  plan, naming the recipe and the line. That keeps the rule that a broken
+  document stops the list rather than under-buying.
+* Existing households keep the documents they have in `meals/`. The assistant
+  moves a week into a plan once, by reading the days and planning them with
+  `start_meal_plan` and `save_meal_plan`. Plan 0007 says why there is no
+  script for it.
+
 ### Consequences
 
 * Good: one save per change. The artifact the household reads is the document the
@@ -172,6 +198,14 @@ decision itself:
 * "A mangled document comes back whole" — canonical render.
 * "Saving an unchanged plan changes nothing" — idempotence, which is what
   stops a recorded change on every no-op save.
+
+`features/shopping_list.feature`, `features/pantry.feature` and
+`features/family_size.feature` prove the arithmetic, the pantry and the
+household size on the plan's list. "A day written the old way is pointed at
+the meal plan" and "A recipe with a line nobody can read is a problem, not a
+quiet under-buy" in `features/meal_plan.feature`, and "Asking for the old
+shopping_list tool is told where the list is now" in
+`features/documents.feature`, prove what this record removes.
 
 `features/kroger_cart.feature` proves the answer to a "(check)": "Answering a
 check line on the plan lets the list send", "The answer to a check is for this

@@ -30,6 +30,7 @@ Feature: Planning a week as one meal-plan document
       | Pasta Puttanesca   | 4        | 1 lb spaghetti, 4 oz olives, 24 oz marinara     |
       | Sunday Pot Roast   | 6        | 3 lb beef chuck, 2 lb potatoes, 1 lb carrots    |
       | Garlic Green Beans | 4        | 1 lb green beans, 2 tbsp butter                 |
+      | Pancakes           | 4        | 2 cup flour, 2 eggs                             |
 
   # --- starting a plan -----------------------------------------------------
 
@@ -80,6 +81,34 @@ Feature: Planning a week as one meal-plan document
     And the output contains "<!-- plantrify plan"
     And the output contains "2026-08-24..2026-08-30"
     And the output contains "1 meal"
+
+  # --- the meals of a day ----------------------------------------------------
+  #
+  # One day may hold any number of meals. A household that plans one dinner
+  # plans one; a household that plans five small meals plans five. What they
+  # are called, and how many there are, is a preference — read
+  # "preferences/household.md" before planning a day.
+
+  Scenario: A day holds as many meals as the household plans, named what they call them
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal             | recipes                              | servings |
+      | 2026-08-25 | Breakfast        | Pancakes                             | 2        |
+      | 2026-08-25 | Second Breakfast | Pancakes                             | 1        |
+      | 2026-08-25 | Dinner           | Sunday Pot Roast, Garlic Green Beans | 6        |
+    Then the meal "Breakfast" on "2026-08-25" uses the recipe "Pancakes"
+    And the meal "Breakfast" on "2026-08-25" is stamped for 2 servings
+    And the meal "Second Breakfast" on "2026-08-25" is stamped for 1 servings
+    And the meal "Dinner" on "2026-08-25" uses the recipe "Sunday Pot Roast"
+    And the meal "Dinner" on "2026-08-25" uses the recipe "Garlic Green Beans"
+    And the plan's shopping list includes "1.5 cup flour"
+
+  Scenario: A night with no cooking is a meal with a note and no recipes
+    Given a meal plan from "2026-08-24" to "2026-08-30"
+    When I plan "Dinner" on "2026-08-27" with no recipes and the note "Leftovers night."
+    And I save the meal plan
+    Then the meal "Dinner" on "2026-08-27" has the note "Leftovers night."
+    And the plan's shopping list is empty
+    And the meal plan reports no problems
 
   # --- saving, and what a save keeps ---------------------------------------
 
@@ -270,6 +299,48 @@ Feature: Planning a week as one meal-plan document
     Then the meal plan reports a problem naming "2026-09-14"
     And the problem names the range "2026-08-24 to 2026-08-30"
 
+  Scenario: A day written the old way is pointed at the meal plan
+    A planned night lived in "meals/<date>.md" before ADR 0040. Nothing reads
+    that folder now, so a day written there would be planned and never shopped
+    for. The write is refused, and the refusal names the tool to use instead.
+
+    When I write the file "meals/2026-08-25.md":
+      """
+      ---
+      date: 2026-08-25
+      ---
+
+      ## Dinner
+
+      - [Chicken Tacos](../recipes/chicken-tacos.md)
+      """
+    Then the command fails
+    And the output mentions "start_meal_plan"
+    And the file "meals/2026-08-25.md" does not exist in the meal plan
+
+  Scenario: A recipe with a line nobody can read is a problem, not a quiet under-buy
+    The store refuses a broken recipe when it is written, so this is the second
+    line of defence: a plan filled from one says so, naming the recipe and the
+    line, rather than leaving the cheese off the list.
+
+    Given the file "recipes/chicken-tacos.md" contains:
+      """
+      ---
+      name: Chicken Tacos
+      servings: 4
+      ---
+
+      ## Ingredients
+
+      - 1.5 lb chicken thighs
+      - a good handful of cheese
+      """
+    And a meal plan from "2026-08-24" to "2026-08-30"
+    When I plan "Dinner" on "2026-08-25" with the recipe "Chicken Tacos"
+    And I save the meal plan
+    Then the meal plan reports a problem naming "recipes/chicken-tacos.md"
+    And the meal plan reports a problem naming "a good handful of cheese"
+
   # --- two plans over one week ---------------------------------------------
 
   Scenario: Two plans cover the same week without touching each other
@@ -320,6 +391,18 @@ Feature: Planning a week as one meal-plan document
     When I regenerate "shopping-list" in "plans/2026-08-24--2026-08-30.html"
     Then the call is refused
     And the plan refusal names "start_meal_plan"
+
+  Scenario: "When did we last make this" is a grep over the plans
+    Given a meal plan from "2026-08-10" to "2026-08-16" with:
+      | date       | meal   | recipes       |
+      | 2026-08-11 | Dinner | Chicken Tacos |
+    And a meal plan from "2026-08-17" to "2026-08-23" with:
+      | date       | meal   | recipes       |
+      | 2026-08-18 | Dinner | Chicken Tacos |
+    When I find the documents in "plans" that mention "recipes/chicken-tacos.md"
+    Then the output lists:
+      | plans/2026-08-10--2026-08-16.html |
+      | plans/2026-08-17--2026-08-23.html |
 
   Scenario: Saving a plan records it with the message the assistant gave
     Given a meal plan from "2026-08-24" to "2026-08-30"

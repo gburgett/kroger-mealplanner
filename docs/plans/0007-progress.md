@@ -6,7 +6,7 @@ which holds the plan itself; this file holds only what is done, what is next,
 and the traps already paid for.
 
 **Branch:** `claude/meal-plan-artifact-impl-pwicht`
-**As of:** 2026-10-17, after phase 3, with the full suite green.
+**As of:** 2026-10-17, after phase 4 — plan 0007 is done — with the full suite green.
 
 ## State
 
@@ -16,11 +16,11 @@ and the traps already paid for.
 | 1 | `cli/src/{html,plan,render}.rs`, `mealplan plan …` | done |
 | 2 | `start_meal_plan` / `save_meal_plan`, `plans/` in the scaffold, step definitions | done |
 | 3 | the Kroger and Walmart pipeline onto the plan document | done |
-| 4 | remove `meals/` and `shopping-lists/` | **not started** |
+| 4 | remove `meals/` and `shopping-lists/` | done |
 
-`plans/` lives BESIDE `meals/` and `shopping-lists/` right now. That is the
-phase order working as intended — nothing old has been taken away yet, so a
-household's existing documents still behave exactly as they did.
+`plans/` is the only place a planned day lives. `meals/` and
+`shopping-lists/` are retired: a household's existing documents there can be
+read and deleted, and nothing writes or reads them.
 
 ## Rebased onto ADR 0038 and ADR 0039
 
@@ -69,13 +69,14 @@ The branch was rebased onto both on 2026-10-11. What that changed:
 ### Verified
 
 * `cargo test` in `cli/` — 38 pass.
-* `mix test --only mealplan` — 32 scenarios, 0 failures.
+* `mix test --only mealplan` — 37 scenarios, 0 failures.
 * `test/mealplan/shopping/plan_test.exs` — the seam, through the real binary:
   read, attach with an unknown anchor skipped, the send stamp and the cart
   link, each read back from the store.
-* **The full suite: 393 tests, 0 failures, 1 excluded** (`@future`), every
+* **The full suite: 369 tests, 0 failures, 1 excluded** (`@future`), every
   `@security` scenario included. `./cli/build.sh && mix test`, OTP 28 and
-  Elixir 1.19.
+  Elixir 1.19. Fewer than phase 3's 393 because `meals.feature` and the
+  `shopping_list` tool's scenarios went with what they specified.
 
 ## Environment
 
@@ -262,7 +263,42 @@ stay stable across a save: candidates attached to `1 lb ground beef — Mon`
 must still find that line after an unrelated edit elsewhere in the document,
 or after its check is answered.
 
-## Phase 4 — remove the old shapes
+## Phase 4 — remove the old shapes. DONE.
+
+`meals/` and `shopping-lists/` are gone from the scaffold, the corpus README,
+the tool descriptions and every feature file but one: "A day written the old
+way is pointed at the meal plan" names `meals/` because it is about that
+folder. The bare listing is six names.
+
+* **The `shopping_list` tool and `mealplan shopping-list` are deleted.** They
+  derived a list from `meals/`, and a plan carries its own. A client that still
+  calls the tool is told where the list is. The CLI keeps the three pantry
+  matchers the plan uses, in `cli/src/pantry.rs`; the rest of
+  `shopping_list.rs` is gone, and so is the day reader in `corpus.rs` and
+  `validate --changed`.
+* **A write to `meals/` or `shopping-lists/` is refused**, naming
+  `start_meal_plan`. An assistant working from an old README would otherwise
+  plan a day nothing reads. Documents already there can be read and deleted.
+* **A recipe a plan uses can be deleted.** The plan keeps its ingredients and
+  warns on its next save, as `meal_plan.feature` already said. The guard that
+  refused to delete a recipe a day linked to is gone.
+* **The household-size warnings are the plan's.** A save warns for each meal it
+  filled or rescaled that feeds too few or more than double the household.
+  "The warning belongs to the change" holds: an untouched meal is not warned
+  about again.
+* **Three more checks on a save**, each found by moving a feature that had
+  them on the old shapes: a meal filled from a recipe with an unreadable line
+  is a problem naming the recipe and the line (it used to fill the meal short,
+  silently); each `(check)` line is a warning that says to ask the household;
+  and the plan's "left out" note says which items were staples and which were
+  stocked consumables.
+* **Moved features.** `meals.feature` is deleted; what it said that the plan
+  did not — any number of meals a day, named as the household calls them, and
+  a night with a note and no cooking — is in `meal_plan.feature`.
+  `shopping_list.feature`, `pantry.feature` and `family_size.feature` assert
+  the same rules on the plan's list. `corpus.feature` defines the plan's
+  shape where it defined a day's. The step definitions nothing uses any more,
+  and the day helpers in `test/support/documents.ex`, are deleted.
 
 **There is no migration script, and no `import-legacy-days` subcommand.** Both
 were planned and both are cancelled. Moving one household's `meals/` into
@@ -273,15 +309,9 @@ subcommand that exist for it alone would be tooling built to run a single
 time. ADR 0039 removed `migrations/`; a change every household must follow
 unattended is an Elixir function over the bodies, in its own ADR, and this is
 not one.
-- `priv/corpus/README.md` — the schema document. `## meals/` and
-  `## shopping-lists/` become `## plans/`; "The two commands" becomes three.
-- `features/README.md` — the folder diagram and the layer table.
-- `CLAUDE.md` / `AGENTS.md` — the names a bare `list_files` prints (eight
-  now, six after phase 4), the layout notes that still say `meals/`, and
-  "Everything is markdown".
-- The rest of the `meals/` references: `family_size.feature`,
-  `consumable_recheck.feature`, `pantry.feature`, `history.feature`,
-  `test/support/documents.ex` (`day_path/1` and `day_document/1` become
-  `plan_path/2` and `plan_document/1`), and the weekly recheck job's tree.
-- `@corpus_directories` drops `meals` and `shopping-lists`, and the bare
-  `list_files` assertion moves in all five places `CLAUDE.md` names.
+
+**Still open, and the operator's.** A deployed household keeps its old
+`README.md`, because the scaffold writes a missing document and never
+rewrites one. Its assistant reads a schema that still describes `meals/`
+until the operator replaces the README or deletes it so the next request
+scaffolds the new one — the same step ADR 0039 asked for.

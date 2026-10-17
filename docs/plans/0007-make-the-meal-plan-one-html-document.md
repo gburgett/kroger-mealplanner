@@ -1,6 +1,6 @@
 # Plan 0007 — Make the meal plan one HTML document
 
-**Status:** in progress, 2026-09-22.
+**Status:** done, 2026-10-17.
 **Implements:** ADR 0040 (the document is the store) and ADR 0041 (the two
 tools). Neither decision is argued here; where this plan looks like it is
 arguing one, the argument belongs in the record.

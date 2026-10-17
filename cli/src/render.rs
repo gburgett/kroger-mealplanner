@@ -291,13 +291,22 @@ fn shopping_list(saved: &Saved) -> String {
         out.push_str("</ul>\n</div>\n");
     }
 
-    if !saved.left_out.is_empty() {
-        let items: Vec<String> =
-            saved.left_out.iter().map(|(item, _)| escape(item)).collect();
-        out.push_str(&format!(
-            "<p class=\"left-out\">Left out, because the pantry already has them: {}.</p>\n",
-            items.join(", ")
-        ));
+    // Said by kind, because the household changes each in a different place:
+    // a staple in pantry/staples.md, a consumable's status in
+    // pantry/consumables.md.
+    for (reason, kind) in [("staple", "pantry staples"), ("consumable", "stocked pantry consumables")] {
+        let items: Vec<String> = saved
+            .left_out
+            .iter()
+            .filter(|(_, why)| *why == reason)
+            .map(|(item, _)| escape(item))
+            .collect();
+        if !items.is_empty() {
+            out.push_str(&format!(
+                "<p class=\"left-out\">Left out as {kind}: {}.</p>\n",
+                items.join(", ")
+            ));
+        }
     }
 
     for sent in &plan.sent {

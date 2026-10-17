@@ -182,11 +182,4 @@ defmodule Mealplan.FeatureCorpus do
         flunk("a shopping-list line is never closed")
     end
   end
-
-  @doc "Write the shopping list for a range into `out` through the tool, and fail if it fails."
-  def write_list(context, from, to, out) do
-    context = call(context, "shopping_list", %{"from" => from, "to" => to, "out" => out})
-    assert context.last.exit_code == 0, "writing the list failed:\n#{context.last.stdout}"
-    context
-  end
 end

@@ -5,11 +5,10 @@
 //! document format defined in exactly one place despite the two languages. See
 //! ADR 0007 and ADR 0038.
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use crate::quantity::{parse_quantity, to_display_number, unit_named, Number, Unit};
+use crate::quantity::{parse_quantity, unit_named, Number, Unit};
 
 /// Something wrong with a document, named well enough to act on.
 ///
@@ -46,29 +45,6 @@ pub struct Recipe {
     pub ingredients: Vec<Ingredient>,
 }
 
-pub struct RecipeLink {
-    pub name: String,
-    /// Normalised to a root-relative path: "../recipes/x.md" becomes
-    /// "recipes/x.md", which is what the error message should say.
-    pub target: String,
-    pub line: usize,
-}
-
-pub struct Meal {
-    pub name: String,
-    /// One-based line of the `## <name>` heading, for error messages.
-    pub line: usize,
-    /// Absent when the meal feeds whatever its recipes feed.
-    pub servings: Option<Number>,
-    pub recipes: Vec<RecipeLink>,
-}
-
-pub struct Day {
-    pub path: String,
-    pub date: String,
-    pub meals: Vec<Meal>,
-}
-
 /// Whether a consumable is left off the shopping list right now.
 ///
 /// The household (or, later, a background job — see ADR 0014) flips this by
@@ -87,15 +63,13 @@ pub struct Consumable {
 
 pub struct Corpus {
     pub recipes: Vec<Recipe>,
-    pub days: Vec<Day>,
     pub staples: Vec<String>,
     pub consumables: Vec<Consumable>,
     pub problems: Vec<Problem>,
-    /// Serving-size checks that are advisory, not corruption. A day is still
-    /// valid; the household just wants a look before it shops.
+    /// Advisory, not corruption: a meal plan's own checks add to these.
     pub warnings: Vec<Problem>,
     /// adults + children from `config/household.md`, or None when the household
-    /// never answered — in which case the validator has no serving opinion.
+    /// never answered — in which case a plan has no serving opinion.
     pub household_servings: Option<Number>,
 }
 
@@ -109,7 +83,6 @@ impl Corpus {
 pub fn load(root: &Path, only: Option<&str>) -> Corpus {
     let mut corpus = Corpus {
         recipes: Vec::new(),
-        days: Vec::new(),
         staples: Vec::new(),
         consumables: Vec::new(),
         problems: Vec::new(),
@@ -125,22 +98,16 @@ pub fn load(root: &Path, only: Option<&str>) -> Corpus {
         }
         read_recipe(root, &path, &mut corpus);
     }
-    for path in documents(root, "meals") {
-        if wanted.as_deref().is_some_and(|only| only != path) {
-            continue;
-        }
-        read_day(root, &path, &mut corpus);
-    }
 
     corpus.staples = read_staples(root);
     corpus.consumables = read_consumables(root);
     corpus.household_servings = read_household_servings(root, &mut corpus);
 
     if let Some(only) = wanted {
-        // A path outside recipes/ and meals/ has no schema to check. README.md
-        // and the pantry documents are ordinary markdown on purpose.
-        let known = corpus.recipes.iter().any(|recipe| recipe.path == only)
-            || corpus.days.iter().any(|day| day.path == only);
+        // A path outside recipes/ has no markdown schema to check. README.md
+        // and the pantry documents are ordinary markdown on purpose, and a
+        // meal plan is checked by `plan`.
+        let known = corpus.recipes.iter().any(|recipe| recipe.path == only);
         if !known && !root.join(&only).exists() {
             corpus.problems.push(Problem {
                 file: only,
@@ -251,136 +218,6 @@ pub fn parse_ingredient(body: &str) -> Option<Ingredient> {
 
 // --- days ------------------------------------------------------------------
 
-fn read_day(root: &Path, path: &str, corpus: &mut Corpus) {
-    let Some(text) = read(root, path, corpus) else { return };
-    let stem = path.trim_start_matches("meals/").trim_end_matches(".md");
-
-    let filename_date = is_date(stem);
-    if !filename_date {
-        corpus.problems.push(Problem {
-            file: path.to_string(),
-            line: None,
-            message: format!(
-                "the filename is not a date. A day of meals is named for its date, as YYYY-MM-DD.md — `meals/2026-08-25.md`, not `meals/{stem}.md`."
-            ),
-        });
-    }
-
-    let Some(front) = front_matter(&text) else {
-        corpus.problems.push(missing_front_matter(path, "day of meals", "date:"));
-        return;
-    };
-
-    let date = field(&front, "date").unwrap_or_default();
-    if date.is_empty() {
-        corpus.problems.push(Problem {
-            file: path.to_string(),
-            line: None,
-            message: "the front matter has no `date:`. A day of meals records its date, for example `date: 2026-08-25`.".to_string(),
-        });
-    } else if filename_date && date != stem {
-        corpus.problems.push(Problem {
-            file: path.to_string(),
-            line: None,
-            message: format!(
-                "the filename says {stem} and the front matter date says {date}. The filename and the date must match — the filename is what keeps one day in one file."
-            ),
-        });
-    }
-
-    // The old one-dinner shape held `servings:` in the front matter. Now that
-    // a day holds any number of meals, servings belongs to a meal — and a
-    // leftover front-matter line would otherwise scale nothing and silently
-    // under-buy. Fail it by name.
-    if field(&front, "servings").is_some() {
-        corpus.problems.push(Problem {
-            file: path.to_string(),
-            line: None,
-            message: "the front matter has `servings:`, but servings belongs to a meal now. Move it under the `## <meal>` heading it feeds — a day can hold several meals, each feeding a different number of people.".to_string(),
-        });
-    }
-
-    let meals = read_meals(root, path, &text, corpus);
-    corpus.days.push(Day { path: path.to_string(), date, meals });
-}
-
-/// The meals a day holds, one per `## <name>` heading.
-///
-/// Links sit directly under their meal heading. An optional `servings:` line
-/// says how many people that meal feeds. Anything else inside the meal is
-/// prose and left alone, which is what lets a day carry notes.
-fn read_meals(root: &Path, path: &str, text: &str, corpus: &mut Corpus) -> Vec<Meal> {
-    let mut meals: Vec<Meal> = Vec::new();
-    let mut current: Option<Meal> = None;
-
-    for (index, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        let number = index + 1;
-
-        if line.starts_with("## ") {
-            if let Some(meal) = current.take() {
-                meals.push(meal);
-            }
-            current = Some(Meal {
-                name: line["## ".len()..].trim().to_string(),
-                line: number,
-                servings: None,
-                recipes: Vec::new(),
-            });
-            continue;
-        }
-
-        // A title at any other level is a boundary: the day title above, or a
-        // heading inside a meal's own prose.
-        if line.starts_with('#') {
-            if let Some(meal) = current.take() {
-                meals.push(meal);
-            }
-            continue;
-        }
-
-        let Some(meal) = current.as_mut() else { continue };
-
-        if let Some(value) = line.strip_prefix("servings:") {
-            let value = value.trim();
-            match crate::quantity::parse_number(value) {
-                Some(parsed) if parsed > Number::from_integer(0) => {
-                    meal.servings = Some(parsed);
-                }
-                _ => corpus.problems.push(Problem {
-                    file: path.to_string(),
-                    line: Some(number),
-                    message: format!(
-                        "cannot read `servings: {value}` in the meal `{}`. Servings is a whole number, for example `servings: 4`.",
-                        meal.name
-                    ),
-                }),
-            }
-            continue;
-        }
-
-        let Some(link) = markdown_link(line) else { continue };
-        let target = resolve(path, &link.1);
-        if !root.join(&target).exists() {
-            corpus.problems.push(Problem {
-                file: path.to_string(),
-                line: Some(number),
-                message: format!(
-                    "{target} is missing. This meal links to a recipe that is not in the folder — record it, or remove the link."
-                ),
-            });
-        }
-        meal.recipes.push(RecipeLink { name: link.0, target, line: number });
-    }
-
-    if let Some(meal) = current {
-        meals.push(meal);
-    }
-    meals
-}
-
-// --- pantry ----------------------------------------------------------------
-
 fn read_staples(root: &Path) -> Vec<String> {
     // A missing file is fine: the household keeps nothing in.
     let Ok(text) = fs::read_to_string(root.join("pantry/staples.md")) else { return Vec::new() };
@@ -484,78 +321,6 @@ fn read_household_servings(root: &Path, corpus: &mut Corpus) -> Option<Number> {
     }
 }
 
-/// Warn, never fail, when a meal feeds too few people or more than double the
-/// household. A lighter meal than the whole household is ordinary (a weekday
-/// breakfast for one), so these are advisory, not corruption.
-///
-/// `changed` names the days that are the change in front of the agent right
-/// now — the server passes the documents its latest change touched, and the
-/// one being written (`--changed`). Only those are warned about, so a standing
-/// plan whose Tuesday lunch serves one does not get re-flagged on every later
-/// `mealplan validate` that has nothing to do with it. `None` — nobody said
-/// what changed — warns about every offending day rather than silently none.
-pub fn check_servings(corpus: &mut Corpus, changed: Option<&HashSet<String>>) {
-    let Some(expected) = corpus.household_servings else {
-        return;
-    };
-    let twice = expected * Number::from_integer(2);
-    let mut warnings = Vec::new();
-
-    for day in &corpus.days {
-        if let Some(changed) = changed {
-            if !changed.contains(day.path.as_str()) {
-                continue;
-            }
-        }
-
-        for meal in &day.meals {
-            let Some(servings) = effective_servings(corpus, meal) else {
-                continue;
-            };
-
-            if servings < expected {
-                warnings.push(Problem {
-                    file: day.path.clone(),
-                    line: Some(meal.line),
-                    message: format!(
-                        "{} serves {}, too few for the household of {}. If everyone is eating, raise its `servings:`.",
-                        meal.name,
-                        to_display_number(servings),
-                        to_display_number(expected)
-                    ),
-                });
-            } else if servings > twice {
-                warnings.push(Problem {
-                    file: day.path.clone(),
-                    line: Some(meal.line),
-                    message: format!(
-                        "{} serves {}, more than double the household of {}. Check that `servings:` is not a doubled recipe amount.",
-                        meal.name,
-                        to_display_number(servings),
-                        to_display_number(expected)
-                    ),
-                });
-            }
-        }
-    }
-
-    corpus.warnings = warnings;
-}
-
-/// What a meal feeds: its own `servings:` line, or — without one — what its
-/// recipes feed. A meal with no recipes and no servings claims nothing, so it
-/// is never checked.
-fn effective_servings(corpus: &Corpus, meal: &Meal) -> Option<Number> {
-    if let Some(servings) = meal.servings {
-        return Some(servings);
-    }
-    meal.recipes
-        .iter()
-        .filter_map(|link| corpus.recipe(&link.target))
-        .map(|recipe| recipe.servings)
-        .max()
-}
-
 /// A whole, non-negative count: "2". Not "2.5", not "two".
 fn parse_count(raw: &str) -> Option<i128> {
     let text = raw.trim();
@@ -628,30 +393,6 @@ fn section<'a>(text: &'a str, heading: &str) -> Vec<(usize, &'a str)> {
         }
     }
     found
-}
-
-fn markdown_link(line: &str) -> Option<(String, String)> {
-    let body = line.strip_prefix("- ")?;
-    let rest = body.strip_prefix('[')?;
-    let (name, rest) = rest.split_once("](")?;
-    let target = rest.strip_suffix(')')?;
-    Some((name.to_string(), target.to_string()))
-}
-
-/// "meals/2026-08-25.md" + "../recipes/x.md" -> "recipes/x.md".
-fn resolve(from: &str, target: &str) -> String {
-    let mut parts: Vec<&str> = from.split('/').collect();
-    parts.pop();
-    for piece in target.split('/') {
-        match piece {
-            "." | "" => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other),
-        }
-    }
-    parts.join("/")
 }
 
 pub fn is_date(text: &str) -> bool {

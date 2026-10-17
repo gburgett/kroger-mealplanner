@@ -1,14 +1,15 @@
 # The meal plan
 
-Markdown documents, laid out like a folder. Explore them with `list_files`,
+Documents, laid out like a folder: markdown for the recipes, the pantry, the
+preferences and the shops, and one meal-plan document per week. Explore them with `list_files`,
 `grep` and `read_file`, and change them with `write_file`, `edit_file` and
 `delete_file`. The path is the primary key, so uniqueness and ordering come
 from the layout and there is no index to keep in step.
 
 Every change is recorded with the message you give. `history` lists the
 changes and `restore_file` puts any document back as it was after any of them,
-so nothing is ever lost by overwriting it. A recipe or a day that does not
-match the format below is refused when you write it, naming the line.
+so nothing is ever lost by overwriting it. A recipe that does not match the
+format below is refused when you write it, naming the line.
 
 ## recipes/
 
@@ -34,45 +35,6 @@ tags: [quick, kid-friendly]
 
 Sear the chicken, shred it, warm the tortillas in a dry skillet.
 ```
-
-## meals/
-
-One document per day. The filename is the ISO date, so `list_files meals` is
-the calendar in order and there is one day per file by construction. A day holds
-as many meals as this household plans — one `## <meal>` section each.
-
-```markdown
----
-date: 2026-08-25
----
-
-# Meals for Tuesday, August 25, 2026
-
-## Dinner
-
-servings: 4
-
-- [Chicken Tacos](../recipes/chicken-tacos.md)
-```
-
-A meal may link to no recipes at all — carry the note as prose under its
-heading. A day with no cooking is the front matter, a title and a note, with
-no meals:
-
-```markdown
----
-date: 2026-08-27
----
-
-# Meals for Thursday, August 27, 2026
-
-Leftovers night.
-```
-
-A meal's `servings:` line says how many people it feeds. Without one, the
-meal feeds what its recipes feed. Which meals a household plans, and how
-many, is written in `preferences/household.md` — read it before writing a
-new day.
 
 ## pantry/
 
@@ -154,11 +116,17 @@ one number family it can read.
 
 ## plans/
 
-A meal plan for a range of days, as one HTML document that carries its own
-shopping list: `plans/2026-08-25--2026-08-31.html`, and a second plan over the
+A meal plan for a range of days, as one HTML document that holds each day's
+meals and carries the week's shopping list: `plans/2026-08-25--2026-08-31.html`, and a second plan over the
 same days needs a name, `plans/2026-08-25--2026-08-31-cheap-week.html`. Start
 one with `start_meal_plan` and change it with `save_meal_plan` — never with
-`write_file`, because the save does the arithmetic. The first line of every
+`write_file`, because the save does the arithmetic. A day holds as many meals
+as this household plans; which, and what they are called, is written in
+`preferences/household.md` — read it before planning a day. A meal names its
+recipes, may carry its own servings and a note, and a night with no cooking
+is a meal with a note and no recipes. `recipes/` fills a meal the first time;
+after that the meal keeps what you wrote, and `regenerate` asks for a section
+back. The first line of every
 plan is a summary, so `grep` in `plans/` for `<!-- plantrify plan` is the
 index.
 
@@ -192,12 +160,6 @@ unanswered. Ask. If they have it, mark it `stocked` in pantry/consumables.md
 and the line leaves the list. If they need it, add `data-mp-confirmed` to the
 line and save the plan — the answer is for this plan only.
 
-## shopping-lists/
-
-A markdown copy of the list for a range of nights, written by `shopping_list`
-with `out`: `shopping-lists/2026-08-25--2026-08-31.md`. It is for reading. The
-Kroger and Walmart tools work on the shopping list inside a plan.
-
 ## The ingredient line
 
 A recipe's ingredients are one markdown list item each, and the shape is:
@@ -215,15 +177,13 @@ document and the line.
 ## The jobs that are not exploration
 
 Everything else is reading and writing documents. These are not, because
-neither should be done from memory:
+none of them should be done from memory:
 
     validate [path]                  check the meal plan, or one document
-    shopping_list from, to [, out]   one list for a range of days
     start_meal_plan from, to         a plan for a range of days, in plans/
     save_meal_plan path [, html]     check a plan and do its arithmetic
 
-`shopping_list` reads the days in the range, follows every meal's links,
-scales each recipe to that meal's servings and adds the quantities up with the
-units. It is derived from the meal plan every time and stored only when `out`
-names a document in `shopping-lists/`. A plan does the same arithmetic over its
-own meals on every save, and keeps what you wrote.
+A save fills each meal from its recipes the first time, scales it to that
+meal's servings, adds the week's quantities up with their units, and leaves
+out what the pantry has. It keeps what you wrote, and warns when a meal feeds
+too few people for the household or more than double.

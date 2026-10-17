@@ -51,8 +51,8 @@ own, and if it is, in what shape.
 Chosen option: **two tools, `start_meal_plan` and `save_meal_plan`.**
 
 Both are thin. Neither holds logic. Each runs the matching CLI subcommand over
-the household's documents, the way `validate` and `shopping_list` do
-(`Mealplan.Store.Cli`), with the posted document on standard input. The
+the household's documents, the way `validate` does (`Mealplan.Store.Cli`),
+with the posted document on standard input. The
 server stores the document the CLI wrote as one change, named with the
 message the agent gave, and returns what the CLI printed. The CLI stays the
 only thing that reads or writes a plan, so ADR 0040 and ADR 0007 are not
@@ -80,6 +80,14 @@ The description is the deliverable, not the schema. Each must say:
 * `regenerate` is how a section comes back from `recipes/`. Never retype it.
 * `return: "changed"` sends back only what moved.
 
+### What it retires
+
+The `shopping_list` tool did the arithmetic over `meals/`. ADR 0040 removes
+that folder, and a save does the same arithmetic inside the plan, so
+`shopping_list` is deleted. Two tools are admitted and one goes, so the
+count grows by one. `validate` and these two are the jobs that are not
+exploration.
+
 ### What stays a file verb
 
 Everything else. A plan is read with `read_file`, found with `list_files` and
@@ -93,7 +101,8 @@ cannot reach the store by that route either.
 * Good: the agent is told how the document behaves before it edits one.
 * Good: the document travels as an argument and reaches the parser on
   standard input, so no quoting can corrupt it.
-* Bad: two more tools. Every addition makes the next one easier to argue for.
+* Bad: one more tool than before, net. Every addition makes the next one
+  easier to argue for.
 * Neutral: `write_file` still accepts a plan, checked. Its arithmetic is
   then the agent's own, which the description of `start_meal_plan` warns
   against.

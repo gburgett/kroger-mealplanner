@@ -48,8 +48,8 @@ defmodule Mealplan.Kroger.Config do
 
     A Kroger account is connected. The shopping is matched against **#{name}**#{address_part}, for #{choice.modality}.
 
-    `shopping_list` with `out` set to `shopping-lists/<from>--<to>.md` writes a
-    list against this store, and the prices on it are this store's prices.
+    A meal plan started now is matched against this store, and the prices found
+    for its shopping list are this store's prices.
 
     #{how_to(base_url)}
     """

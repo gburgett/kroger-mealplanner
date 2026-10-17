@@ -284,7 +284,6 @@ Feature: Shopping at Walmart through the affiliate API
       | history              |
       | restore_file         |
       | validate             |
-      | shopping_list        |
       | start_meal_plan      |
       | save_meal_plan       |
       | kroger_find_products |

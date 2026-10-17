@@ -41,7 +41,7 @@ use crate::html;
 use crate::quantity::{format_number, Measure, Number};
 use num_traits::Zero;
 use crate::sections;
-use crate::shopping_list;
+use crate::pantry;
 
 pub const DIRECTORY: &str = "plans";
 
@@ -603,6 +603,20 @@ pub fn save(root: &Path, mut plan: Plan, regenerate: &[Section]) -> Saved {
                         if recipe.title.is_empty() {
                             recipe.title = known.name.clone();
                         }
+                        // A recipe with a line nobody can read would fill the
+                        // meal short, and the household finds out at the shop.
+                        // Say so, naming the recipe and the line.
+                        for broken in corpus.problems.iter().filter(|p| p.file == recipe.path) {
+                            problems.push(Problem {
+                                file: broken.file.clone(),
+                                line: broken.line,
+                                message: format!(
+                                    "{} on {} is filled from this recipe, and {} Fix the recipe, \
+                                     then ask for the meal back with --regenerate meal:{}/{}.",
+                                    meal.name, day.date, broken.message, day.date, meal.name
+                                ),
+                            });
+                        }
                         let factor = servings / known.servings;
                         recipe.ingredients = Some(Block {
                             for_servings: Some(servings),
@@ -667,6 +681,55 @@ pub fn save(root: &Path, mut plan: Plan, regenerate: &[Section]) -> Saved {
         }
     }
 
+    // Warn, never refuse, when a meal feeds too few people or more than double
+    // the household (config/household.md). Only for a meal this save filled or
+    // rescaled: a standing Tuesday lunch for one is not flagged on every save
+    // that has nothing to do with it.
+    if let Some(expected) = corpus.household_servings {
+        let twice = expected * Number::from_integer(2);
+        for day in &plan.days {
+            for meal in &day.meals {
+                if !changed.contains(&meal_section(&day.date, &meal.name)) {
+                    continue;
+                }
+                let claimed = meal.servings.or_else(|| {
+                    meal.recipes
+                        .iter()
+                        .filter_map(|recipe| corpus.recipe(&recipe.path))
+                        .map(|recipe| recipe.servings)
+                        .max()
+                });
+                let Some(servings) = claimed else { continue };
+                let advice = if servings < expected {
+                    Some(format!(
+                        "too few for the household of {}. If everyone is eating, raise its servings.",
+                        format_number(expected)
+                    ))
+                } else if servings > twice {
+                    Some(format!(
+                        "more than double the household of {}. Check that its servings are not a \
+                         doubled recipe amount.",
+                        format_number(expected)
+                    ))
+                } else {
+                    None
+                };
+                if let Some(advice) = advice {
+                    warnings.push(Problem {
+                        file: plan.path.clone(),
+                        line: None,
+                        message: format!(
+                            "{} on {} serves {}, {advice}",
+                            meal.name,
+                            day.date,
+                            format_number(servings)
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
     let (mut list, left_out) = derive(&plan, &corpus);
 
     // An answer the household gave on this plan stands until the pantry stops
@@ -679,6 +742,23 @@ pub fn save(root: &Path, mut plan: Plan, regenerate: &[Section]) -> Saved {
         }
     }
     plan.confirmed = list.iter().filter(|line| line.confirmed).map(ListLine::anchor).collect();
+
+    // A "(check)" is a question for the household, and the save is where the
+    // assistant hears it (ADR 0016).
+    for line in list.iter().filter(|line| line.check) {
+        warnings.push(Problem {
+            file: plan.path.clone(),
+            line: None,
+            message: format!(
+                "\"{}\" is marked (check): pantry/consumables.md says {} needs a recheck, so \
+                 ask the household whether they still have some. If they do, mark it stocked \
+                 there; if they need it, add data-mp-confirmed to the line. The cart tools \
+                 send nothing while a line is marked.",
+                line.anchor(),
+                line.item
+            ),
+        });
+    }
 
     // Any meal that moved moves the list with it, so `--return changed` has to
     // say so. An assistant that spliced back only the meal and kept a stale
@@ -761,15 +841,15 @@ fn derive(plan: &Plan, corpus: &corpus::Corpus) -> (Vec<ListLine>, Vec<(String, 
                 let Some(block) = &recipe.ingredients else { continue };
                 for line in &block.lines {
                     let Some(ingredient) = &line.parsed else { continue };
-                    if shopping_list::is_staple(&corpus.staples, &ingredient.item) {
+                    if pantry::is_staple(&corpus.staples, &ingredient.item) {
                         dropped.insert((ingredient.item.clone(), "staple"));
                         continue;
                     }
-                    if shopping_list::is_stocked(&corpus.consumables, &ingredient.item) {
+                    if pantry::is_stocked(&corpus.consumables, &ingredient.item) {
                         dropped.insert((ingredient.item.clone(), "consumable"));
                         continue;
                     }
-                    let check = shopping_list::needs_recheck(&corpus.consumables, &ingredient.item);
+                    let check = pantry::needs_recheck(&corpus.consumables, &ingredient.item);
                     let measure = Measure::of(ingredient.quantity, ingredient.unit);
                     add(&mut lines, &ingredient.item, Some(measure), &day.date, check);
                 }
