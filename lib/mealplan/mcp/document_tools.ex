@@ -44,7 +44,10 @@ defmodule Mealplan.Mcp.DocumentTools do
                    schema. Read it before you choose anything for them.
       config/      kroger.md, walmart.md: which shops. household.md: how many
                    adults and children are cooked for.
-      shopping-lists/  one document per range of days, written by shopping_list.
+      plans/       a meal plan for a range of days, with its shopping list
+                   inside — what the Kroger and Walmart tools work on. Start
+                   one with start_meal_plan, change it with save_meal_plan.
+      shopping-lists/  a markdown copy of a list, written by shopping_list.
 
   There is no shell. Explore with list_files, read_file and grep; change with
   write_file, edit_file and delete_file. Every change is recorded with the
@@ -142,18 +145,14 @@ defmodule Mealplan.Mcp.DocumentTools do
   One shopping list for a range of days, with the units added up, the pantry
   staples left out, and any stocked consumable left out too. A consumable marked
   "needs recheck" is bought, but its line is marked "(check)" — ask the
-  household whether they already have it, since kroger_send_to_cart refuses to
-  send while any line is still marked that way. Derived from the documents every
+  household whether they already have it. Derived from the documents every
   time, never stored — unless "out" is given.
 
-  "out" stores it as a document in shopping-lists/ (for example
+  "out" stores a markdown copy in shopping-lists/ (for example
   "shopping-lists/2026-08-25--2026-08-31.md"), with the range and the Kroger
-  shop in its front matter. That document is what kroger_find_products,
-  kroger_send_to_cart and the Walmart tools work on. Where those tools say
-  "mealplan shopping-list --out", this is the tool they mean.
-
-  Do not write a list again with "out" to add one line: that replaces every
-  candidate already chosen. Add the line with edit_file instead.\
+  shop in its front matter. It is for reading. To shop the list, plan the week
+  with start_meal_plan: the Kroger and Walmart tools work on the shopping list
+  inside a meal plan.\
   """
 
   # The two meal-plan tools (ADR 0040, ADR 0041). They run the parser, as

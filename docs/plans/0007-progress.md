@@ -6,7 +6,7 @@ which holds the plan itself; this file holds only what is done, what is next,
 and the traps already paid for.
 
 **Branch:** `claude/meal-plan-artifact-impl-pwicht`
-**As of:** 2026-10-11, rebased onto ADR 0039, with the full suite green.
+**As of:** 2026-10-17, after phase 3, with the full suite green.
 
 ## State
 
@@ -15,7 +15,7 @@ and the traps already paid for.
 | 0 | ADR 0040, ADR 0041, plan 0007, `features/meal_plan.feature` | done |
 | 1 | `cli/src/{html,plan,render}.rs`, `mealplan plan …` | done |
 | 2 | `start_meal_plan` / `save_meal_plan`, `plans/` in the scaffold, step definitions | done |
-| 3 | the Kroger and Walmart pipeline onto the plan document | **in progress** — the CLI side and the Elixir seam are done; the five tool bodies are not |
+| 3 | the Kroger and Walmart pipeline onto the plan document | done |
 | 4 | remove `meals/` and `shopping-lists/` | **not started** |
 
 `plans/` lives BESIDE `meals/` and `shopping-lists/` right now. That is the
@@ -68,12 +68,12 @@ The branch was rebased onto both on 2026-10-11. What that changed:
 
 ### Verified
 
-* `cargo test` in `cli/` — 36 pass.
+* `cargo test` in `cli/` — 38 pass.
 * `mix test --only mealplan` — 32 scenarios, 0 failures.
 * `test/mealplan/shopping/plan_test.exs` — the seam, through the real binary:
   read, attach with an unknown anchor skipped, the send stamp and the cart
   link, each read back from the store.
-* **The full suite: 390 tests, 0 failures, 1 excluded** (`@future`), every
+* **The full suite: 393 tests, 0 failures, 1 excluded** (`@future`), every
   `@security` scenario included. `./cli/build.sh && mix test`, OTP 28 and
   Elixir 1.19.
 
@@ -215,58 +215,52 @@ says "size unknown" and "no price" out loud, because a blank reads as an
 oversight. Verified: the fields survive a plain save and a second save is
 byte-identical.
 
-### Chunk 3 — the five tool bodies, not started
+### Chunk 3 — the five tool bodies. DONE.
 
-**One move, not a dispatch.** An earlier draft of this file proposed having
-`Mealplan.Shopping.Tools` dispatch on the path so the four retailer feature
-files could move one at a time. That was rejected, and rightly: there is no
-backwards compatibility to keep and no migration path to ease, so two code
-paths would have been complexity bought for nothing. Chunk 3 moves all five
-tool bodies and all four feature files together and deletes
-`lib/mealplan/shopping/list.ex` in the same commit, which is what plan 0007
-said in the first place.
+All five tool bodies, and the retailer feature files, moved together, and
+`lib/mealplan/shopping/list.ex` is deleted. No Elixir module parses a corpus
+document now. The five tools take a plan path and refuse anything else,
+naming `start_meal_plan`; every rule they had is kept — the `(check)` refusal,
+one candidate per line, the at-most-once send (ADR 0012), the consumables
+write-back, nothing unchosen in a link (ADR 0017).
 
-The same answer takes the migration out of phase 4 — see there.
+* **Reading is one `--list`.** On markdown a tool did two reads and three
+  writes. Now it reads the derived list once, searches what is unmatched, and
+  writes once with `--attach`. Attaching candidates lifts a not-found mark,
+  so `move_out_of_not_found` has no equivalent.
+* **`kroger_send_to_cart` stores the plan and the pantry as one change.**
+  `Mealplan.Shopping.Plan.with_sent/3` hands back the plan with the send stamp
+  appended, NOT stored, and the tool stages it with the pantry inside
+  `Mealplan.Store.transaction/2`. That settles the question this file left
+  open.
+* **A send stamp is one line the server composes**: the time, then
+  `` <count> × `<UPC>` <description> `` for each product, then "the cart cannot
+  be read back". The repeat guard finds the backticked UPCs in it again. It is
+  the server reading its own record, not a corpus format.
+* **A "(check)" is answered on the plan** (decided 2026-10-17, written into
+  ADR 0040). On markdown the household deleted the mark from the line. On a
+  plan the list is rebuilt on every save, so `data-mp-confirmed` on the line
+  says "we are out — buy it", for this plan only. The pantry is not changed
+  until a send marks the item bought. The answer is dropped when the pantry
+  stops asking and when the list is regenerated. "(check)" was part of the
+  anchor, so answering it would have orphaned the line's candidates; it is
+  not any more, and `ListLine::text()` is what the household reads, mark
+  included. Removing it from the anchor turns four scenarios red.
+* **The scenarios set up a plan where they wrote a list.** "Given a meal plan
+  from … with "Chicken Tacos" for dinner on …" goes through `start_meal_plan`
+  and `save_meal_plan`. Choosing, confirming, rewriting a search term and
+  adding a line nobody cooks are all edits to the plan posted back with
+  `save_meal_plan` (`Mealplan.FeatureCorpus.edit_plan/3`). Assertions read the
+  list the CLI derives, through `Mealplan.Shopping.Plan.read/2`.
+* **The Walmart cart link says what it is not, on the plan itself**: the CLI
+  renders "building this link added nothing" beside it.
+* **`shopping_list` with `out` still writes `shopping-lists/`**, and nothing
+  reads it. Its description says it is a copy for reading. Phase 4 removes it.
 
-`test/features/step_definitions/meal_plan_steps.exs` already has the
-vocabulary the moved scenarios need — "a meal plan from X to Y with:", "I plan
-Dinner on DATE with the recipe R" — so the feature files change and the step
-definitions mostly gain a plan path rather than new steps.
-
-`test/features/step_definitions/meal_plan_steps.exs` already has the
-vocabulary the moved scenarios need — "a meal plan from X to Y with:", "I plan
-Dinner on DATE with the recipe R" — so the feature files change and the step
-definitions mostly gain a plan path rather than new steps.
-
-
-`mealplan plan shopping-list --path PATH --json` IS implemented and already
-emits everything the retailer tools need per line: `line` (the anchor text),
-`item`, `quantity`, `unit`, `section`, `adhoc`, `check`, `nights` and
-`candidates`. `plan.rs` already parses and re-renders `data-mp-candidate`,
-`data-mp-count`, `data-mp-search`, `data-mp-not-found`, `data-mp-sent` and
-`data-mp-cart-link`, so the document side of phase 3 is done — what is missing
-is the command that WRITES candidates into a plan, and the Elixir that calls it.
-
-The five tool bodies in `lib/mealplan/shopping/tools.ex` keep every rule they
-have — the `(check)` refusal, one candidate per line, the at-most-once send
-(ADR 0012), the consumables write-back — and change only how they read and
-write. `Mealplan.Store.transaction/2` still gives `kroger_send_to_cart` its
-atomic multi-document write. The seam's writes go straight to
-`Corpus.commit/4`, so a send that must land with the pantry write-back needs
-the seam to accept the transaction's context, or to hand back the body for
-the transaction to stage. Decide that before moving `kroger_send_to_cart`.
-
-Then `features/kroger_cart.feature`, `kroger_link.feature`,
-`product_search.feature` and `walmart.feature` move from a shopping-list path
-to a plan path.
-
-**The anchor contract is the thing to not break**, for a reason that is NOT
-the one this file first gave. `ListLine::anchor()` has to stay stable across a
-save: candidates attached to `1 lb ground beef — Mon` must still find that
-line after an unrelated edit elsewhere in the document. That a household
-migrating off a markdown list would keep its candidates was the original
-reason, and it no longer applies — there is no such migration. The two
-renderers happen to agree and no longer have to.
+**The anchor contract is the thing to not break.** `ListLine::anchor()` has to
+stay stable across a save: candidates attached to `1 lb ground beef — Mon`
+must still find that line after an unrelated edit elsewhere in the document,
+or after its check is answered.
 
 ## Phase 4 — remove the old shapes
 

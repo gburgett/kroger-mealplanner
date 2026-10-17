@@ -305,7 +305,9 @@ fn shopping_list(saved: &Saved) -> String {
     }
     if let Some(link) = &plan.cart_link {
         out.push_str(&format!(
-            "<p><a data-mp-cart-link=\"{}\" href=\"{}\">Open the Walmart cart</a></p>\n",
+            "<p><a data-mp-cart-link=\"{}\" href=\"{}\">Open the Walmart cart</a> — \
+             building this link added nothing. It fills the cart only when it is opened, and \
+             nobody can know whether it was.</p>\n",
             escape(link),
             escape(link)
         ));
@@ -337,6 +339,9 @@ fn item(saved: &Saved, line: &ListLine) -> String {
     if line.check {
         attributes.push_str(" data-mp-check");
     }
+    if line.confirmed {
+        attributes.push_str(" data-mp-confirmed");
+    }
     if saved.plan.not_found.contains(&anchor) {
         attributes.push_str(" data-mp-not-found");
     }
@@ -346,7 +351,7 @@ fn item(saved: &Saved, line: &ListLine) -> String {
 
     let mut out = format!(
         "<li {attributes}>\n<span data-mp-item-text>{}</span>\n",
-        escape(&anchor)
+        escape(&line.text())
     );
 
     if let Some(candidates) = saved.plan.candidates.get(&anchor) {

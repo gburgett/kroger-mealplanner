@@ -414,8 +414,10 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   means a count (`- 2 eggs`).
 - The shopping list is **derived from the meal plan every time, never stored**:
   read the days in range, follow every meal's links to recipes, scale to that
-  meal's servings, aggregate. `shopping_list` with `out` writes a copy into
-  `shopping-lists/` for the retailer tools to work on.
+  meal's servings, aggregate. `shopping_list` with `out` writes a markdown copy
+  into `shopping-lists/`. The retailer tools work on the list inside a meal
+  plan in `plans/`, which the CLI rebuilds from the plan's meals on every save
+  (ADR 0040).
 - Unit math is conservative. Combine quantities only when the units convert
   (tbsp→cup, oz→lb); otherwise keep separate lines rather than guessing.
 - Countable items round up. You cannot buy 1.5 onions.
@@ -425,8 +427,8 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
   now a second line of defence.
 - **Nothing is chosen for the household.** `filter.term` on "boneless chicken
   thighs" returns noise, so `kroger_find_products` writes every candidate down
-  and stops. Choosing is deleting the lines you do not want, which is an
-  ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
+  and stops. Choosing is deleting the candidates you do not want and saving
+  the plan, which is an ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
   is an outcome, not a failure.
 - **How the household chooses is written down, in `preferences/household.md`.**
   Read it before deleting candidates; when it does not settle the question, ask,

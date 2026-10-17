@@ -152,41 +152,51 @@ household. The household's *preferences* stay prose-only in
 `preferences/household.md`; this file exists only because the validator needs
 one number family it can read.
 
-## shopping-lists/
+## plans/
 
-One document per range of nights, named for the range:
-`shopping-lists/2026-08-25--2026-08-31.md`, written by `shopping_list` with
-`out`. The list itself is still derived from the meal plan every time — writing it down is not storing it, it is the sheet
-of paper the Kroger products get written onto.
+A meal plan for a range of days, as one HTML document that carries its own
+shopping list: `plans/2026-08-25--2026-08-31.html`, and a second plan over the
+same days needs a name, `plans/2026-08-25--2026-08-31-cheap-week.html`. Start
+one with `start_meal_plan` and change it with `save_meal_plan` — never with
+`write_file`, because the save does the arithmetic. The first line of every
+plan is a summary, so `grep` in `plans/` for `<!-- plantrify plan` is the
+index.
 
-```markdown
----
-from: 2026-08-25
-to: 2026-08-31
-store: 01400513
-modality: pickup
----
+The shopping list is rebuilt from the plan's meals on every save. Each line is
+an `<li data-mp-item="…">`, and the Kroger and Walmart tools write the products
+they find under it as **candidate products**:
 
-# Shopping list for 2026-08-25 to 2026-08-31
-
-## Dairy
-
-- 8 oz shredded cheddar — 2026-08-25
-  - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
+```html
+<li data-mp-item="8 oz shredded cheddar — 2026-08-25" data-mp-search="shredded cheddar">
+<span data-mp-item-text>8 oz shredded cheddar — 2026-08-25</span>
+<ul class="cand">
+<li data-mp-candidate="0001111050158" data-mp-count="1"
+    data-mp-description="Kroger Sharp Cheddar Shredded Cheese"
+    data-mp-size="8 oz" data-mp-price="2.00">…</li>
+</ul>
+</li>
 ```
 
-An indented list item under a line is a **candidate product**, and the shape is
-fixed so that grep for `` `[0-9]{13}` `` lists every Kroger UPC in play:
-
-    - <count> `<product id>` <description> — <size> — <price>
-
 The id says which shop the product came from: a Kroger candidate carries a
-13-digit UPC, a Walmart one carries the item id as `walmart:<id>` — grep for
-`` `walmart:[0-9]+` `` lists every Walmart product in play.
+13-digit UPC, a Walmart one carries the item id as `walmart:<id>`. A price is a
+plain decimal, never `$`, so a bill can be added up.
 
 Nothing is ever chosen for you. Choose by deleting the candidates you do not
-want, until one is left. Set `<count>` yourself, by comparing what the line
-needs against the package size — three 8 oz bags is `3`, not `1`.
+want, until one is left, and save the plan. Set `data-mp-count` yourself, by
+comparing what the line needs against the package size — three 8 oz bags is
+`3`, not `1`.
+
+A line marked `data-mp-check` reads "(check)": pantry/consumables.md says the
+household may still have it, and the cart tools refuse to send while one is
+unanswered. Ask. If they have it, mark it `stocked` in pantry/consumables.md
+and the line leaves the list. If they need it, add `data-mp-confirmed` to the
+line and save the plan — the answer is for this plan only.
+
+## shopping-lists/
+
+A markdown copy of the list for a range of nights, written by `shopping_list`
+with `out`: `shopping-lists/2026-08-25--2026-08-31.md`. It is for reading. The
+Kroger and Walmart tools work on the shopping list inside a plan.
 
 ## The ingredient line
 
@@ -202,15 +212,18 @@ This is the format `grep` has to find and the parser has to read. If a line
 does not match it, `write_file` refuses it and `validate` reports it, naming the
 document and the line.
 
-## The two jobs that are not exploration
+## The jobs that are not exploration
 
-Everything else is reading and writing documents. These two are not, because
+Everything else is reading and writing documents. These are not, because
 neither should be done from memory:
 
     validate [path]                  check the meal plan, or one document
     shopping_list from, to [, out]   one list for a range of days
+    start_meal_plan from, to         a plan for a range of days, in plans/
+    save_meal_plan path [, html]     check a plan and do its arithmetic
 
 `shopping_list` reads the days in the range, follows every meal's links,
 scales each recipe to that meal's servings and adds the quantities up with the
 units. It is derived from the meal plan every time and stored only when `out`
-names a document in `shopping-lists/`.
+names a document in `shopping-lists/`. A plan does the same arithmetic over its
+own meals on every save, and keeps what you wrote.

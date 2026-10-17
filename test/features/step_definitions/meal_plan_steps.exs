@@ -60,6 +60,27 @@ defmodule Mealplan.Features.MealPlanSteps do
     {:ok, given_plan(context, from, to, name)}
   end
 
+  # The one-line form the retailer features use: one week, one dinner.
+  step "a meal plan from {string} to {string} with {string} for dinner on {string}",
+       %{args: [from, to, recipe, date]} = context do
+    rows = [%{"date" => date, "meal" => "Dinner", "recipes" => recipe}]
+    {:ok, given_plan(context, from, to, nil, rows)}
+  end
+
+  # "Yes, we are out — buy it": the answer to a "(check)" line, given on this
+  # plan. An assistant marks the line and saves the plan (ADR 0040).
+  step ~r/^I tell the meal plan we need "(.*)" after all$/, %{args: [item]} = context do
+    {:ok,
+     FeatureCorpus.edit_plan(
+       context,
+       fn document ->
+         tag = FeatureCorpus.item_tag(document, item)
+         String.replace(document, tag, String.replace_suffix(tag, ">", " data-mp-confirmed>"))
+       end,
+       "we need #{item} after all"
+     )}
+  end
+
   step "I regenerate {string} in {string}", %{args: [section, path]} = context do
     {:ok,
      context
@@ -269,6 +290,17 @@ defmodule Mealplan.Features.MealPlanSteps do
     {:ok, context}
   end
 
+  step ~r/^the meal plan's shopping list marks "(.*)" for a check$/, %{args: [item]} = context do
+    assert FeatureCorpus.plan_line(context, item).check, ~s|"#{item}" is not marked "(check)"|
+    {:ok, context}
+  end
+
+  step ~r/^the meal plan's shopping list does not mark "(.*)" for a check$/,
+       %{args: [item]} = context do
+    refute FeatureCorpus.plan_line(context, item).check, ~s|"#{item}" is still marked "(check)"|
+    {:ok, context}
+  end
+
   step "the stored meal plan is unchanged", context do
     assert saved(context) == context.plan_before, "the plan was rewritten"
     {:ok, context}
@@ -369,12 +401,13 @@ defmodule Mealplan.Features.MealPlanSteps do
   # --- the plumbing ---------------------------------------------------------
 
   # Start a plan and fill it from the scenario's table, through the tools.
-  defp given_plan(context, from, to, name) do
+  defp given_plan(context, from, to, name, rows \\ nil) do
+    rows = rows || context.datatable.maps
     context = start_plan(context, from, to, name)
 
     context
     |> then(fn acc ->
-      Enum.reduce(context.datatable.maps, acc, fn row, acc ->
+      Enum.reduce(rows, acc, fn row, acc ->
         recipes =
           row["recipes"]
           |> String.split(",")

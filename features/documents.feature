@@ -209,20 +209,20 @@ Feature: The meal plan is documents in the database, behind file verbs
     And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "2 cup salsa"
     And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "from: 2026-08-25"
 
-  Scenario: Kroger candidates land on a document list
+  Scenario: Kroger candidates land on the meal plan's shopping list
     Given my Kroger account is connected
     And the household shops at Kroger store "Kroger On the Rhine" for pickup
     And the recipe "Chicken Tacos" serving 4 is stored as a document with the ingredients:
       | quantity | unit | item           |
       | 1        | lb   | chicken thighs |
-    And dinner on "2026-08-25" is stored as a document with the recipe "Chicken Tacos"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     And Kroger sells at my store:
       | search         | upc           | description                    | size | price |
       | chicken thighs | 0001111000123 | Kroger Boneless Chicken Thighs | 1 lb | 3.99  |
-    When I call "shopping_list" from "2026-08-25" to "2026-08-31" out to "shopping-lists/2026-08-25--2026-08-31.md"
-    And I call "kroger_find_products" on "shopping-lists/2026-08-25--2026-08-31.md"
+    When I call "kroger_find_products" on "plans/2026-08-25--2026-08-31.html"
     Then the tool call succeeds
-    And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "`0001111000123` Kroger Boneless Chicken Thighs"
+    And the document "plans/2026-08-25--2026-08-31.html" mentions "0001111000123"
+    And the document "plans/2026-08-25--2026-08-31.html" mentions "Kroger Boneless Chicken Thighs"
 
   @security
   Scenario Outline: A path cannot leave the household's meal plan

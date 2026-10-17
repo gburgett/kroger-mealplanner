@@ -122,6 +122,15 @@ The list aggregates the **document's** ingredient blocks. It does not read
 are still assigned by `sections::section_for`. A line marked `(check)` still
 stops a cart send.
 
+A line the CLI marks `(check)` is still answered by the household. On a
+markdown list they deleted the mark from the line. On a plan the list is
+rebuilt on every save, so the answer is kept on the line instead:
+`data-mp-confirmed` says "we are out — buy it" for this plan only. The pantry
+is not changed until a cart send marks the item bought (ADR 0016). The answer
+is dropped when the pantry stops asking, and when the shopping list is
+regenerated. "(check)" is not part of the line's anchor, so the products
+already found for the line stay with it when it is answered.
+
 An ad-hoc line is a line with no recipe behind it. The household says "I also
 need toilet paper", and the agent adds one. The staples filter never drops it,
 because no recipe put it there. ADR 0036 already reduced such a line to a
@@ -164,8 +173,11 @@ decision itself:
 * "Saving an unchanged plan changes nothing" — idempotence, which is what
   stops a recorded change on every no-op save.
 
-`features/shopping_list.feature` keeps the arithmetic scenarios and asserts
-them inside the document.
+`features/kroger_cart.feature` proves the answer to a "(check)": "Answering a
+check line on the plan lets the list send", "The answer to a check is for this
+plan only" and "Regenerating the shopping list asks the check again". The
+retailer features — `kroger_cart`, `product_search`, `walmart` — run on the
+plan's shopping list.
 
 ## Pros and Cons of the Options
 

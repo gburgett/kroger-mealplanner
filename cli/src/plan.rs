@@ -68,6 +68,11 @@ pub struct Plan {
     pub candidates: BTreeMap<String, Vec<Candidate>>,
     pub searches: BTreeMap<String, String>,
     pub not_found: BTreeSet<String>,
+    /// Lines the household has answered "yes, we are out — buy it" for, while
+    /// pantry/consumables.md still says "needs recheck". The answer is for
+    /// this plan only; the pantry is not touched until a cart send marks the
+    /// item bought (ADR 0016, ADR 0040).
+    pub confirmed: BTreeSet<String>,
     pub sent: Vec<String>,
     pub cart_link: Option<String>,
     pub prose: Vec<String>,
@@ -138,7 +143,11 @@ pub struct ListLine {
     pub item: String,
     pub measure: Option<Measure>,
     pub nights: BTreeSet<String>,
+    /// Still to be asked about: the pantry says "needs recheck" and the
+    /// household has not answered on this plan.
     pub check: bool,
+    /// The pantry says "needs recheck", and the household answered "buy it".
+    pub confirmed: bool,
     pub adhoc: bool,
     pub section: String,
 }
@@ -152,18 +161,28 @@ impl ListLine {
     /// document. That is why a line is addressed by its text and never by a
     /// number.
     ///
-    /// It happens to match `shopping_list::render_line` as well. That is not a
-    /// contract — there is no markdown list left to carry candidates over
-    /// from — and neither renderer has to follow the other.
+    /// "(check)" is NOT part of it. Answering a check is an edit to this line,
+    /// and an anchor that moved with the answer would leave the products
+    /// already found for the line behind. `text()` is what the household
+    /// reads, mark included.
     pub fn anchor(&self) -> String {
         let nights: Vec<&str> = self.nights.iter().map(String::as_str).collect();
-        let mark = if self.check { " (check)" } else { "" };
         match &self.measure {
             Some(measure) if !nights.is_empty() => {
-                format!("{} {} — {}{mark}", measure.render(), self.item, nights.join(", "))
+                format!("{} {} — {}", measure.render(), self.item, nights.join(", "))
             }
-            Some(measure) => format!("{} {}{mark}", measure.render(), self.item),
-            None => format!("{}{mark}", self.item),
+            Some(measure) => format!("{} {}", measure.render(), self.item),
+            None => self.item.clone(),
+        }
+    }
+
+    /// The line as the household reads it: the anchor, and "(check)" while
+    /// it is still to be asked about.
+    pub fn text(&self) -> String {
+        if self.check {
+            format!("{} (check)", self.anchor())
+        } else {
+            self.anchor()
         }
     }
 }
@@ -321,6 +340,7 @@ pub fn parse(path: &str, source: &str) -> Plan {
         candidates: BTreeMap::new(),
         searches: BTreeMap::new(),
         not_found: BTreeSet::new(),
+        confirmed: BTreeSet::new(),
         sent: Vec::new(),
         cart_link: None,
         prose: Vec::new(),
@@ -381,10 +401,15 @@ pub fn parse(path: &str, source: &str) -> Plan {
         for item in list.find_all("data-mp-item") {
             let anchor = match item.attribute("data-mp-item") {
                 Some(value) if !value.is_empty() => value.to_string(),
+                // A line with no data-mp-item is read by its text, and the
+                // text carries "(check)" while one is pending — the anchor
+                // does not.
                 _ => item
                     .find("data-mp-item-text")
                     .map(|text| text.text())
-                    .unwrap_or_else(|| item.text()),
+                    .unwrap_or_else(|| item.text())
+                    .trim_end_matches(" (check)")
+                    .to_string(),
             };
             if anchor.is_empty() {
                 continue;
@@ -394,6 +419,9 @@ pub fn parse(path: &str, source: &str) -> Plan {
             }
             if item.has_attribute("data-mp-not-found") {
                 plan.not_found.insert(anchor.clone());
+            }
+            if item.has_attribute("data-mp-confirmed") {
+                plan.confirmed.insert(anchor.clone());
             }
             if let Some(search) = item.attribute("data-mp-search").filter(|v| !v.is_empty()) {
                 plan.searches.insert(anchor.clone(), search.to_string());
@@ -508,6 +536,7 @@ pub fn save(root: &Path, mut plan: Plan, regenerate: &[Section]) -> Saved {
         match section {
             Section::ShoppingList | Section::All => {
                 plan.adhoc.clear();
+                plan.confirmed.clear();
                 changed.insert("shopping-list".to_string());
             }
             _ => {}
@@ -638,7 +667,18 @@ pub fn save(root: &Path, mut plan: Plan, regenerate: &[Section]) -> Saved {
         }
     }
 
-    let (list, left_out) = derive(&plan, &corpus);
+    let (mut list, left_out) = derive(&plan, &corpus);
+
+    // An answer the household gave on this plan stands until the pantry stops
+    // asking. A confirmation for a line that no longer needs a recheck is
+    // dropped: there is no question left for it to answer.
+    for line in &mut list {
+        if line.check && plan.confirmed.contains(&line.anchor()) {
+            line.check = false;
+            line.confirmed = true;
+        }
+    }
+    plan.confirmed = list.iter().filter(|line| line.confirmed).map(ListLine::anchor).collect();
 
     // Any meal that moved moves the list with it, so `--return changed` has to
     // say so. An assistant that spliced back only the meal and kept a stale
@@ -746,6 +786,7 @@ fn derive(plan: &Plan, corpus: &corpus::Corpus) -> (Vec<ListLine>, Vec<(String, 
             measure: None,
             nights: BTreeSet::new(),
             check: false,
+            confirmed: false,
             adhoc: true,
             section: sections::section_for(&adhoc.text).to_string(),
         });
@@ -793,6 +834,7 @@ fn add(lines: &mut Vec<ListLine>, item: &str, measure: Option<Measure>, night: &
         measure,
         nights,
         check,
+        confirmed: false,
         adhoc: false,
         section: sections::OTHER.to_string(),
     });
@@ -845,6 +887,7 @@ pub fn start(root: &Path, request: Start) -> Plan {
         candidates: BTreeMap::new(),
         searches: BTreeMap::new(),
         not_found: BTreeSet::new(),
+        confirmed: BTreeSet::new(),
         sent: Vec::new(),
         cart_link: None,
         prose: Vec::new(),
@@ -1005,6 +1048,7 @@ mod tests {
             candidates: BTreeMap::new(),
             searches: BTreeMap::new(),
             not_found: BTreeSet::new(),
+            confirmed: BTreeSet::new(),
             sent: Vec::new(),
             cart_link: None,
             prose: Vec::new(),
@@ -1189,6 +1233,46 @@ mod tests {
             parse_section("meal:2026-08-26/Dinner/recipes/pasta.md").unwrap(),
             Section::Recipe("2026-08-26".into(), "Dinner".into(), "recipes/pasta.md".into())
         );
+    }
+
+    // --- answering a "(check)" -------------------------------------------
+
+    fn cheddar(check: bool) -> ListLine {
+        let ingredient = corpus::parse_ingredient("8 oz shredded cheddar").expect("parses");
+        ListLine {
+            item: ingredient.item.clone(),
+            measure: Some(Measure::of(ingredient.quantity, ingredient.unit)),
+            nights: ["2026-08-25".to_string()].into_iter().collect(),
+            check,
+            confirmed: false,
+            adhoc: false,
+            section: "Dairy & Eggs".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_anchor_does_not_move_when_a_check_is_answered() {
+        // Products found for a line are keyed by its anchor. If "(check)" were
+        // part of it, answering the check would leave them behind.
+        assert_eq!(cheddar(true).anchor(), cheddar(false).anchor());
+        assert_eq!(cheddar(true).anchor(), "8 oz shredded cheddar — 2026-08-25");
+        assert_eq!(cheddar(true).text(), "8 oz shredded cheddar — 2026-08-25 (check)");
+        assert_eq!(cheddar(false).text(), cheddar(false).anchor());
+    }
+
+    #[test]
+    fn a_confirmed_line_is_read_back_by_its_anchor() {
+        let source = r#"<div data-mp-plan data-from="2026-08-24" data-to="2026-08-30">
+<section data-mp-shopping-list>
+<li data-mp-item="8 oz shredded cheddar — 2026-08-25" data-mp-confirmed>
+<span data-mp-item-text>8 oz shredded cheddar — 2026-08-25</span></li>
+<li data-mp-item="" data-mp-confirmed><span data-mp-item-text>2 lb carrots — 2026-08-26 (check)</span></li>
+</section></div>"#;
+        let plan = parse("plans/2026-08-24--2026-08-30.html", source);
+        assert!(plan.confirmed.contains("8 oz shredded cheddar — 2026-08-25"));
+        // Read by its text when data-mp-item is empty: the mark is not the
+        // anchor.
+        assert!(plan.confirmed.contains("2 lb carrots — 2026-08-26"), "{:?}", plan.confirmed);
     }
 
     #[test]
@@ -1721,6 +1805,7 @@ fn list_json(saved: &Saved) -> String {
                             json::field("section", json::string(&line.section)),
                             json::field("adhoc", json::boolean(line.adhoc)),
                             json::field("check", json::boolean(line.check)),
+                            json::field("confirmed", json::boolean(line.confirmed)),
                             json::field(
                                 "notFound",
                                 json::boolean(saved.plan.not_found.contains(&anchor)),

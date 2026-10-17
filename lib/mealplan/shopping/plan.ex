@@ -20,16 +20,17 @@ defmodule Mealplan.Shopping.Plan do
 
   ## The anchor is the key
 
-  Every map in a payload is keyed by the line's rendered text — what
+  Every map in a payload is keyed by the line's anchor — what
   `ListLine::anchor()` in `cli/src/plan.rs` produces — and never by a line
-  number. `cli/src/shopping_list.rs` renders a markdown line the same way, so
-  a household that already had candidates against a markdown list keeps them
-  across the migration. Do not "tidy" either renderer without the other.
+  number. The anchor does not carry "(check)": answering a check is an edit to
+  the line, and an anchor that moved with the answer would leave the line's
+  candidates behind.
 
   What is NOT here, on purpose: choosing. `kroger_find_products` writes every
-  candidate down and stops, and the household chooses by deleting the lines it
-  does not want, which is an ordinary `write_file`. There is no choose call
-  and there should not be one — the document IS the interface.
+  candidate down and stops, and the household chooses by deleting the
+  candidates it does not want and saving the plan with `save_meal_plan`. There
+  is no choose call and there should not be one — the document IS the
+  interface.
   """
 
   alias Mealplan.Store.Corpus
@@ -120,6 +121,20 @@ defmodule Mealplan.Shopping.Plan do
     |> store(corpus, path, message, now)
   end
 
+  @doc """
+  The plan with one send stamp appended, NOT stored.
+
+  For a caller that stores it with another document as one change —
+  `kroger_send_to_cart` writes the plan and the pantry together inside
+  `Mealplan.Store.transaction/2`.
+  """
+  @spec with_sent(Corpus.t(), String.t(), String.t()) :: String.t()
+  def with_sent(corpus, path, stamp) do
+    result = run(corpus, path, ["--sent"], Jason.encode!(%{"stamp" => stamp}))
+    _ = decode(result, path)
+    written!(result, path)
+  end
+
   @doc "Set the Walmart cart link on the plan."
   @spec set_cart_link(Corpus.t(), String.t(), String.t(), String.t(), DateTime.t()) :: map()
   def set_cart_link(corpus, path, url, message, now) do
@@ -207,6 +222,7 @@ defmodule Mealplan.Shopping.Plan do
       section: Map.get(raw, "section", ""),
       adhoc: Map.get(raw, "adhoc", false),
       check: Map.get(raw, "check", false),
+      confirmed: Map.get(raw, "confirmed", false),
       not_found: Map.get(raw, "notFound", false),
       search: Map.get(raw, "search"),
       nights: Map.get(raw, "nights", []),
@@ -229,15 +245,17 @@ defmodule Mealplan.Shopping.Plan do
   # records nothing.
   defp store(result, corpus, path, message, now) do
     decoded = decode(result, path)
-
-    body =
-      Map.get(result.files, path) ||
-        raise Refusal.exception("mealplan plan candidates did not write #{path}.")
+    body = written!(result, path)
 
     case Corpus.commit(corpus, [{path, body}], message, now) do
       {:ok, _} -> decoded
       {:error, reason} -> raise Refusal.exception(reason)
     end
+  end
+
+  defp written!(result, path) do
+    Map.get(result.files, path) ||
+      raise Refusal.exception("mealplan plan candidates did not write #{path}.")
   end
 
   # A price goes into the document as a plain decimal — "5.49", never "$5.49"
