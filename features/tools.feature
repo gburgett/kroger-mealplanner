@@ -6,9 +6,15 @@ Feature: The tools an assistant is handed
 
   The meal plan is documents with paths like a folder, and the tools are the
   verbs a coding agent already uses on a repository: list, read, search,
-  write, edit, delete — plus history and restore, so nothing is lost, and the
-  two jobs that are not exploration, validate and shopping_list (ADR 0038).
+  write, edit, delete — plus history and restore, so nothing is lost, and
+  validate, the job that is not exploration (ADR 0038).
   There is no shell, so nothing the agent writes is ever run (ADR 0039).
+
+  start_meal_plan and save_meal_plan run the parser too, over the meal-plan
+  document (ADR 0040), and the shopping list is inside it. Their descriptions are what tell the assistant that its
+  edits are KEPT and that a section is asked for back rather than retyped — an
+  assistant that does not know would retype an ingredient and scale it from
+  memory (ADR 0041).
 
   The rest are the network the meal plan does not have: a tool exists for the
   network only because the documents cannot do that job by construction
@@ -32,7 +38,8 @@ Feature: The tools an assistant is handed
       | history               |
       | restore_file          |
       | validate              |
-      | shopping_list         |
+      | start_meal_plan       |
+      | save_meal_plan        |
       | kroger_find_products  |
       | kroger_send_to_cart   |
       | walmart_find_stores   |
@@ -90,8 +97,11 @@ Feature: The tools an assistant is handed
       | delete_file           | message    |
       | restore_file          | change     |
       | restore_file          | message    |
-      | shopping_list         | from       |
-      | shopping_list         | to         |
+      | start_meal_plan       | from       |
+      | start_meal_plan       | to         |
+      | start_meal_plan       | message    |
+      | save_meal_plan        | path       |
+      | save_meal_plan        | message    |
       | kroger_find_products  | path       |
       | kroger_find_products  | message    |
       | kroger_send_to_cart   | path       |
@@ -123,5 +133,5 @@ Feature: The tools an assistant is handed
   Scenario: The README is where the agent is told to start
     When I read "README.md"
     Then the output describes the "recipes/" folder
-    And the output describes the "meals/" folder
+    And the output describes the "plans/" folder
     And the output describes the ingredient line format

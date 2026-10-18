@@ -87,10 +87,99 @@ defmodule Mealplan.FeatureCorpus do
     }
   end
 
-  @doc "Write the shopping list for a range into `out` through the tool, and fail if it fails."
-  def write_list(context, from, to, out) do
-    context = call(context, "shopping_list", %{"from" => from, "to" => to, "out" => out})
-    assert context.last.exit_code == 0, "writing the list failed:\n#{context.last.stdout}"
-    context
+  # --- the meal plan's shopping list (ADR 0040) ------------------------------
+
+  @default_plan "plans/2026-08-25--2026-08-31.html"
+
+  @doc """
+  The plan a retailer scenario is working on: the one it named, else the one
+  it last started, else the week every retailer feature plans.
+  """
+  def plan_path(context), do: context[:list_path] || context[:plan_path] || @default_plan
+
+  @doc """
+  The plan's shopping list as the CLI derives it from the stored document —
+  `Mealplan.Shopping.Plan.read/2`, the same read the retailer tools make.
+  """
+  def plan_list(context, path \\ nil) do
+    corpus = Mealplan.Store.Corpus.handle(context.tenant)
+    Mealplan.Shopping.Plan.read(corpus, path || plan_path(context))
+  end
+
+  @doc "The one line of the plan's list whose text holds `text`. Fails the step otherwise."
+  def plan_line(context, text) do
+    list = plan_list(context)
+
+    case Enum.filter(list.items, &String.contains?(&1.line, text)) do
+      [item] ->
+        item
+
+      [] ->
+        flunk(
+          ~s(no line of the plan's list holds "#{text}":\n#{Enum.map_join(list.items, "\n", & &1.line)})
+        )
+
+      many ->
+        flunk(~s(#{length(many)} lines hold "#{text}":\n#{Enum.map_join(many, "\n", & &1.line)}))
+    end
+  end
+
+  @doc """
+  Change the stored plan the way an assistant does: take the document, edit it,
+  and post it back with save_meal_plan. `fun` gets the document and returns the
+  edited one. Fails the step when the save is refused.
+  """
+  def edit_plan(context, fun, message \\ "edit the meal plan") do
+    path = plan_path(context)
+    edited = fun.(read!(context, path))
+
+    {:ok, response} =
+      Mealplan.Mcp.Tools.call(
+        "save_meal_plan",
+        %{"path" => path, "html" => edited, "message" => message, "return" => "none"},
+        context.tenant,
+        context.now
+      )
+
+    refute response["isError"], "save_meal_plan refused the edit:\n#{result(response).text}"
+    Map.put(context, :plan_doc, read!(context, path))
+  end
+
+  @doc """
+  The opening tag of the list line whose anchor holds `text`, in `document`.
+  `data-mp-item` is the anchor (ADR 0040), so this is how an edit finds its line.
+  """
+  def item_tag(document, text) do
+    case Regex.scan(~r/<li data-mp-item="[^"]*#{Regex.escape(text)}[^"]*"[^>]*>/u, document) do
+      [[tag]] -> tag
+      [] -> flunk(~s(no shopping-list line holds "#{text}"))
+      many -> flunk(~s(#{length(many)} shopping-list lines hold "#{text}"))
+    end
+  end
+
+  @doc """
+  The whole `<li data-mp-item …>…</li>` element of that line, nested candidates
+  included.
+  """
+  def item_element(document, text) do
+    tag = item_tag(document, text)
+    [_, rest] = String.split(document, tag, parts: 2)
+    tag <> close_li(rest, 1, "")
+  end
+
+  defp close_li(_rest, 0, acc), do: acc
+
+  defp close_li(rest, depth, acc) do
+    case Regex.run(~r/<li\b|<\/li>/, rest, return: :index) do
+      [{at, len}] ->
+        piece = binary_part(rest, 0, at + len)
+        token = binary_part(rest, at, len)
+        rest = binary_part(rest, at + len, byte_size(rest) - at - len)
+        depth = if token == "</li>", do: depth - 1, else: depth + 1
+        close_li(rest, depth, acc <> piece)
+
+      nil ->
+        flunk("a shopping-list line is never closed")
+    end
   end
 end

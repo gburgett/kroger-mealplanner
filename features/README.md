@@ -6,9 +6,10 @@ so the behaviour drives the technology choices rather than the reverse.
 ## What is being specified
 
 There is no CRUD API. The **MCP server keeps each household's meal plan as
-markdown documents laid out like a folder, and hands the assistant file verbs
-over them**: `list_files`, `read_file`, `grep`, `write_file`, `edit_file`,
-`delete_file`, `history`, `restore_file`, `validate` and `shopping_list`. The
+documents laid out like a folder, and hands the assistant file verbs over
+them**: `list_files`, `read_file`, `grep`, `write_file`, `edit_file`,
+`delete_file`, `history`, `restore_file`, `validate`, and `start_meal_plan`
+and `save_meal_plan` for the week's meal-plan document. The
 assistant plans meals the way a coding agent explores a repository. There is
 no shell, and nothing the assistant writes is run (ADR 0038, ADR 0039).
 
@@ -25,7 +26,7 @@ one of them:
 | The door | `auth.feature` · `sms_otp.feature` · `invitations.feature` · `kroger_link.feature` · `onboarding.feature` | Who gets in at all, who may approve them, how a household is invited and given its own tenant and meal plan, how a Kroger account is connected, and how a brand-new household's assistant gets started without a manual |
 | The tools | `tools.feature` · `documents.feature` | What an assistant is handed, what each verb does, and what a path can never reach |
 | The corpus | `corpus.feature` · `history.feature` | Layout, document shape, validation, history and restore |
-| The work | `recipes` · `meals` · `shopping_list` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
+| The work | `recipes` · `meal_plan` · `shopping_list` · `family_size` · `pantry` · `preferences` · `kroger_cart` · `walmart` | What the housewife actually gets out of it |
 
 ## The layout
 
@@ -38,15 +39,15 @@ one of them:
 │   └── household.md   how many adults + children to cook for (front matter)
 ├── recipes/           one document per recipe, filename = slugged name
 │   └── chicken-tacos.md
-├── meals/           one document per day, filename = ISO date.
-│   │                  A day holds any number of `## <meal>` sections
-│   └── 2026-08-25.md
 ├── pantry/
-│   └── staples.md
-├── preferences/
-│   └── household.md   how this household chooses. Prose, no schema.
-└── shopping-lists/    one document per range of nights
-    └── 2026-08-25--2026-08-31.md
+│   ├── staples.md     never bought
+│   └── consumables.md kept, but runs out: "stocked" or "needs recheck"
+├── plans/             one meal plan per range of days, filename = the range.
+│   │                  HTML the CLI writes: each day's meals, and the week's
+│   │                  shopping list with the products found for it
+│   └── 2026-08-24--2026-08-30.html
+└── preferences/
+    └── household.md   how this household chooses. Prose, no schema.
 ```
 
 The Kroger **credential** is not in the meal plan and cannot be reached from it.
@@ -61,7 +62,7 @@ the message the agent gave, so an agent that overwrites a recipe it should not
 have can always be walked back with `restore_file` — see `history.feature`.
 
 The path *is* the primary key. That is what makes `list_files recipes` the
-recipe list, `list_files meals` the calendar in order, and uniqueness a property
+recipe list, `list_files plans` the weeks in order, and uniqueness a property
 of the store rather than something we have to enforce.
 
 ## Conventions
@@ -72,15 +73,17 @@ of the store rather than something we have to enforce.
   a count (`- 2 eggs`). This is the format `grep` has to be able to find and the
   format `mealplan` has to be able to parse, so it is specified in
   `corpus.feature` and nowhere else.
-- **A day holds one `## <meal>` section per meal.** Each meal links to its
-  recipes with ordinary markdown links, so the meal plan is navigable in any
-  editor and grep for `chicken-tacos.md` over `meals` answers "when did we last
-  make this". A meal may carry a `servings:` line for how many people it feeds;
-  without one it feeds what its recipes feed.
+- **A week is one meal plan, and a day in it holds any number of meals.** Each
+  meal names its recipes by path, so grep for `recipes/chicken-tacos.md` over
+  `plans` answers "when did we last make this". A meal may carry its own
+  servings; without them it feeds what its recipes feed. Scenarios build a plan
+  through `start_meal_plan` and `save_meal_plan` — "Given a meal plan from … to
+  … with:" — and never by planting HTML, because a fixture the CLI never wrote
+  proves nothing about the CLI.
 - **`preferences/household.md` has no schema, on purpose.** It is prose about how
   the household chooses — brands, what it will not eat, cheap against good — and
   how many meals it plans each day. The assistant reads it before it deletes
-  candidates from a shopping list and before it writes a day; no tool ever
+  candidates from a shopping list and before it plans a day; no tool ever
   parses it, and `mealplan validate` ignores it. A new meal plan ships a
   worked example that says, in the document itself, that it is an example and is
   meant to be rewritten. Every other document here has a shape that can be got
@@ -120,19 +123,22 @@ of the store rather than something we have to enforce.
   mock records every request it received and answers with the turns a
   scenario scripted in advance, never a real model.
 
-## Why there are `validate` and `shopping_list` tools
+## Why there are `validate`, `start_meal_plan` and `save_meal_plan` tools
 
 Exploration is the file verbs. But two jobs are not exploration, and an LLM
-should not be doing either of them from memory. Both run the `mealplan` parser
-(ADR 0007) over the household's documents:
+should not be doing either of them from memory. All three tools run the
+`mealplan` parser (ADR 0007) over the household's documents:
 
-- `shopping_list` — unit-aware arithmetic across every recipe of every day in a
-  range. With `out` it stores the list in `shopping-lists/`. The retailer tools
-  read the same parser's `--json` output, which is how the server gets
-  quantities and item names without parsing the markdown back.
-- `validate` — the meal plan is written freehand by an agent, so something has
-  to catch drift. Every agent write to a recipe or a day is checked the same way
-  before it is stored; `validate` reports on everything at once.
+- `validate` — documents are written freehand by an agent, so something has to
+  catch drift. Every agent write to a recipe or a meal plan is checked the same
+  way before it is stored; `validate` reports on everything at once.
+- `start_meal_plan` and `save_meal_plan` — unit-aware arithmetic over one
+  document: the meal plan in `plans/`, which holds a range of days and its
+  shopping list together (ADR 0040). A save checks the plan, fills each meal
+  from its recipes, rescales what was re-served and rebuilds the list
+  (ADR 0041). The retailer tools work on that list, through the same parser's
+  `plan candidates --json`, which is how the server reads quantities and
+  candidates without parsing the document back.
 
 Everything else is deliberately *not* a tool.
 

@@ -6,14 +6,17 @@ Kroger cart.
 
 ## The interface is MCP, and MCP is file verbs over documents
 
-**The MCP server is the product.** A household's meal plan is markdown
-documents laid out like a folder, stored as rows in the server's database, and
-the assistant reaches them through file verbs: `list_files`, `read_file`,
-`grep`, `write_file`, `edit_file`, `delete_file`, `history`, `restore_file`,
-plus `validate` and `shopping_list` (`Mealplan.Mcp.DocumentTools`). An
+**The MCP server is the product.** A household's meal plan is documents laid
+out like a folder, stored as rows in the server's database, and the assistant
+reaches them through file verbs: `list_files`, `read_file`, `grep`,
+`write_file`, `edit_file`, `delete_file`, `history`, `restore_file`, plus
+`validate`, `start_meal_plan` and `save_meal_plan`
+(`Mealplan.Mcp.DocumentTools`). Recipes, the pantry, the preferences and the
+shops are markdown; a week is one meal-plan document in `plans/`, HTML the CLI
+writes, holding the week's meals and its shopping list (ADR 0040). An
 assistant plans meals the way a coding agent explores a repository, and that
-is the whole interface. There are no CRUD tools for recipes or days: a recipe
-is a document, and a document is written whole or edited in place.
+is the whole interface. There are no CRUD tools for recipes: a recipe is a
+document, and a document is written whole or edited in place.
 
 **There is no shell, and nothing an assistant writes is ever run.** That is the
 design (ADR 0038, ADR 0039). It used to be a sandboxed bash over a git folder —
@@ -28,13 +31,16 @@ Consequences worth internalising before changing anything:
 - **The layout is the schema.** Paths and document conventions must stay
   guessable from a listing and stable enough to grep for. See
   `features/corpus.feature` — that file is the schema definition. A bare
-  `list_files` prints seven names: `README.md`, `config/`, `meals/`, `pantry/`,
-  `preferences/`, `recipes/`, `shopping-lists/`. That listing is asserted in
-  **three** places — `features/corpus.feature`, `features/auth.feature` and
-  `@corpus_directories` in `lib/mealplan/corpus/scaffold.ex`
-  (`Mealplan.Corpus.Scaffold`) — and all three have to change together.
+  `list_files` prints six names: `README.md`, `config/`, `pantry/`, `plans/`,
+  `preferences/`, `recipes/`. That listing is asserted in **five** places — `features/corpus.feature`,
+  `features/auth.feature`, `features/invitations.feature`,
+  `features/documents.feature` and `@corpus_directories` in
+  `lib/mealplan/corpus/scaffold.ex` (`Mealplan.Corpus.Scaffold`) — and all five
+  have to change together. This note said "three" until `plans/` was added
+  and the two it did not name were the ones that failed.
 - **The path is the primary key.** `recipes/chicken-tacos.md`,
-  `meals/2026-08-25.md`; `(tenant_id, path)` is the primary key of `documents`.
+  `plans/2026-08-24--2026-08-30.html`; `(tenant_id, path)` is the primary key
+  of `documents`.
   Do not add a derived table (ingredients, meal links) that can drift out of
   step with the body — the body is the truth, and one household's documents are
   small enough to search in memory.
@@ -46,26 +52,35 @@ Consequences worth internalising before changing anything:
   would silently destroy a recipe collected over years. See
   `features/history.feature`.
 - **A write the agent makes is checked before it is stored.** A markdown
-  document goes through `mealplan validate <path>` against the household's
-  documents with the change in place (`Mealplan.Store.Corpus.write/6`); a
-  problem refuses the write with the parser's own text, naming the line. A
-  recipe a planned day links to cannot be deleted. Writes the SERVER composes —
+  document or a meal plan goes through `mealplan validate <path>` against the
+  household's documents with the change in place
+  (`Mealplan.Store.Corpus.write/6`); a problem refuses the write with the
+  parser's own text, naming the line. A write to `meals/` or `shopping-lists/`
+  — the folders ADR 0040 retired — is refused, naming `start_meal_plan`.
+  Deleting a recipe a plan uses is allowed: the plan keeps the ingredients it
+  was given, and its next save warns. Writes the SERVER composes —
   scaffold, candidates found, a cart send — go through `Mealplan.Store` and are
   not checked, so a refusal can never lose the record of a cart add.
 - **Scaffolding writes what is missing, and records itself.**
   `Mealplan.Store.Corpus.open/2` runs on every request, writes any missing
   scaffold document (`Mealplan.Corpus.Scaffold.documents/2`) as one change
   named `scaffold <paths>`, and never rewrites a document that is there. Adding
-  a corpus directory is three edits and no migration: `@corpus_directories`,
-  `features/corpus.feature`, `features/auth.feature`.
+  a corpus directory is five edits and no migration: `@corpus_directories`,
+  `features/corpus.feature`, `features/auth.feature`,
+  `features/invitations.feature`, `features/documents.feature`.
 - **There are no corpus migrations.** The dated shell scripts went with the
   sandbox. A change to the document format that existing documents must follow
   is an Elixir function over the bodies, in its own ADR.
-- **Everything is markdown a human can open and edit.** If a change would make a
-  document unreadable in a text editor, it is the wrong change.
+- **Everything is a document a human can open and read.** Markdown, and the
+  meal plan's HTML, which any browser renders and a text editor still reads.
+  If a change would make a document unreadable to a person, it is the wrong
+  change.
 - **Prefer the file verbs over new tools.** Before adding a tool, ask whether
   `grep` already answers it. Only two things justify a job of their own:
-  unit-aware arithmetic (`shopping_list`) and schema validation (`validate`).
+  unit-aware arithmetic and schema validation. `validate` is the second;
+  `start_meal_plan` and `save_meal_plan` are both at once, over the meal-plan
+  document in `plans/` (ADR 0040, ADR 0041). There is no `shopping_list` tool:
+  the list is inside the plan, and a client that still calls it is told so.
 - **A tool beyond those exists only when the documents cannot do the job by
   construction.** There is exactly one such job — the network — so four of the
   five retailer tools are network calls: `kroger_find_products`,
@@ -398,29 +413,35 @@ live beside it as trade studies, for example `docs/sandbox-trade-study.md`.
 
 ## Domain rules worth not rediscovering
 
-- One day per file, any number of meals — enforced by the date being the
-  filename (`meals/2026-08-25.md`). A day holds one `## <meal>` section per
-  meal; each meal links to zero or more recipes, may carry a `servings:` line
-  and may carry notes. A day with no cooking is just the front matter and a
-  note with no meals at all. Which meals a household plans, and what it calls
-  them, is prose in `preferences/household.md` — read it before writing a day.
+- One meal plan per range of days, named for the range
+  (`plans/2026-08-24--2026-08-30.html`); a second plan over the same days
+  needs a name. Each day holds any number of meals; each meal names zero or
+  more recipes, may carry its own servings and a note. A night with no
+  cooking is a meal with a note and no recipes. Which meals a household plans,
+  and what it calls them, is prose in `preferences/household.md` — read it
+  before planning a day.
+- **The plan is authored, not derived** (ADR 0040). `recipes/` fills a meal
+  the first time; after that the meal carries its own ingredients, and the
+  household's edits — no olives tonight — stay. A section comes back from the
+  recipes only when it is asked for by name with `regenerate`.
 - An ingredient is one markdown list item: `- <quantity> [unit] <item>`. No unit
   means a count (`- 2 eggs`).
-- The shopping list is **derived from the meal plan every time, never stored**:
-  read the days in range, follow every meal's links to recipes, scale to that
-  meal's servings, aggregate. `shopping_list` with `out` writes a copy into
-  `shopping-lists/` for the retailer tools to work on.
+- The shopping list is **rebuilt from the plan's meals on every save**, inside
+  the plan: every meal's ingredients, scaled to that meal's servings, added up,
+  with the pantry's staples and stocked consumables left out. The retailer
+  tools work on that list (ADR 0040). A line the household asked for by name
+  is kept on it, and no staple drops it.
 - Unit math is conservative. Combine quantities only when the units convert
   (tbsp→cup, oz→lb); otherwise keep separate lines rather than guessing.
 - Countable items round up. You cannot buy 1.5 onions.
 - A broken document fails the shopping list loudly. Quietly under-buying is
   worse than an error, because the housewife only finds out at the store. The
-  store refuses to hold a broken recipe or day in the first place, so this is
-  now a second line of defence.
+  store refuses to hold a broken recipe in the first place, so a plan filled
+  from one reporting a problem is the second line of defence.
 - **Nothing is chosen for the household.** `filter.term` on "boneless chicken
   thighs" returns noise, so `kroger_find_products` writes every candidate down
-  and stops. Choosing is deleting the lines you do not want, which is an
-  ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
+  and stops. Choosing is deleting the candidates you do not want and saving
+  the plan, which is an ordinary edit to an ordinary document. "I was shown candidates and chose nothing"
   is an outcome, not a failure.
 - **How the household chooses is written down, in `preferences/household.md`.**
   Read it before deleting candidates; when it does not settle the question, ask,

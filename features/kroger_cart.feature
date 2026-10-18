@@ -4,8 +4,8 @@ Feature: Sending the list to Kroger
   So that I can pick it up without retyping anything
 
   The meal plan has no network: it is documents, and nothing an assistant
-  writes is ever run. The Kroger call is made by the server, from a list the
-  parser derived. That is the whole reason two Kroger tools exist beside the
+  writes is ever run. The Kroger call is made by the server, from the shopping
+  list inside a meal plan (ADR 0040), as the parser derives it. That is the whole reason two Kroger tools exist beside the
   file verbs: a tool exists only when the documents cannot do the job by
   construction, and the network is the only such job (ADR 0010).
 
@@ -16,8 +16,8 @@ Feature: Sending the list to Kroger
 
   Nothing is ever chosen for the household. `filter.term` on "boneless chicken
   thighs" returns noise, so the tool writes down the candidates and stops. The
-  agent chooses by deleting the lines it does not want, which is an ordinary
-  edit to an ordinary markdown file.
+  agent chooses by deleting the candidates it does not want and saving the
+  plan, which is an ordinary edit to an ordinary document.
 
   Background:
     Given I have recorded the recipe "Chicken Tacos" serving 4 with the ingredients:
@@ -25,19 +25,19 @@ Feature: Sending the list to Kroger
       | 1.5      | lb   | boneless chicken thighs |
       | 8        | oz   | shredded cheddar        |
       | 12       |      | corn tortillas          |
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
 
   @core
-  Scenario: The week's list becomes a file
-    The list is still derived from the folder every time. Writing it down is not
-    storing it: it is the sheet of paper the products get written onto.
+  Scenario: The week's list is inside the meal plan
+    The list is derived from the plan's own meals on every save. It lives in the
+    plan because that is the sheet of paper the products get written onto.
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I write the shopping list from "2026-08-25" to "2026-08-31" to "shopping-lists/2026-08-25--2026-08-31.md"
-    Then the command succeeds
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
-    And the shopping list file contains the line "- 8 oz shredded cheddar — 2026-08-25"
+    When I start a meal plan from "2026-08-25" to "2026-08-31"
+    And I plan "Dinner" on "2026-08-25" with the recipe "Chicken Tacos"
+    And I save the meal plan
+    Then the meal plan "plans/2026-08-25--2026-08-31.html" exists
+    And the shopping list has the line "8 oz shredded cheddar — 2026-08-25"
 
   @core
   Scenario: The list says which store it was matched against
@@ -46,9 +46,9 @@ Feature: Sending the list to Kroger
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
-    When I write the shopping list from "2026-08-25" to "2026-08-31" to "shopping-lists/2026-08-25--2026-08-31.md"
-    Then the shopping list front matter says the store is "01400513"
-    And the shopping list front matter says the modality is "pickup"
+    When I start a meal plan from "2026-08-25" to "2026-08-31"
+    Then the shopping list says the store is "01400513"
+    And the shopping list says the modality is "pickup"
 
   @core
   Scenario: The products that match each line are written in
@@ -60,7 +60,7 @@ Feature: Sending the list to Kroger
       | cheddar                 | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese    | 8 oz  | 2.00  |
       | cheddar                 | 0001111050170 | Kroger Mild Cheddar Shredded Cheese     | 8 oz  | 2.00  |
       | corn tortillas          | 0007225003733 | Mission White Corn Tortillas            | 30 ct | 3.49  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Kroger for the products on the shopping list
     Then the shopping list has 2 candidates for "shredded cheddar"
     And the shopping list has the candidate "0001111050158" for "shredded cheddar"
@@ -79,7 +79,7 @@ Feature: Sending the list to Kroger
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
       | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Kroger for the products on the shopping list
     Then every product Kroger offered for "cheddar" is still on the shopping list
     And my Kroger cart was sent nothing
@@ -92,7 +92,8 @@ Feature: Sending the list to Kroger
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
       | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I keep only the candidate "0001111050158" for "shredded cheddar"
     Then the shopping list has 1 candidate for "shredded cheddar"
     And the shopping list has the candidate "0001111050158" for "shredded cheddar"
@@ -104,7 +105,8 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then my Kroger cart was sent:
       | upc           | quantity |
@@ -115,7 +117,7 @@ Feature: Sending the list to Kroger
   @core
   Scenario: Sending a resolved consumable to the cart marks it bought
     A consumable marked "needs recheck" is gated by "(check)" (ADR 0016) until
-    somebody confirms the household needs it. Once that is resolved and the
+    somebody confirms the household needs it. Once that is answered and the
     line is sent, nothing more should have to be edited by hand — see ADR 0015.
 
     Given the pantry consumable "shredded cheddar" is "needs recheck"
@@ -124,8 +126,9 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
-    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
+    When I tell the meal plan we need "shredded cheddar" after all
     And I send the shopping list to my Kroger cart
     Then the file "pantry/consumables.md" contains the line "- shredded cheddar: stocked (last bought: 2026-08-23)"
 
@@ -140,7 +143,8 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the file "pantry/consumables.md" does not exist in the meal plan
 
@@ -157,16 +161,19 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
     And my Kroger cart was sent nothing
 
   @core
-  Scenario: Resolving a check line by hand lets the list send
-    Confirming the household needs it after all is an ordinary edit: remove
-    "(check)" from the line, the same way choosing a product is deleting the
-    candidates nobody wants.
+  Scenario: Answering a check line on the plan lets the list send
+    Confirming the household needs it after all is an ordinary edit to the
+    plan: the line is marked confirmed and the plan is saved, the same way
+    choosing a product is deleting the candidates nobody wants. The products
+    already found for the line stay with it, because "(check)" is not part of
+    what the line is known by.
 
     Given the pantry consumable "shredded cheddar" is "needs recheck"
     And my Kroger account is connected
@@ -174,12 +181,41 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
-    When I edit "shopping-lists/2026-08-25--2026-08-31.md" replacing " (check)" with ""
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
+    When I tell the meal plan we need "shredded cheddar" after all
     And I send the shopping list to my Kroger cart
     Then my Kroger cart was sent:
       | upc           | quantity |
       | 0001111050158 | 1        |
+
+  @core
+  Scenario: The answer to a check is for this plan only
+    The household said "we need it" about this week. pantry/consumables.md is
+    not touched until a send marks the item bought, so another plan over the
+    same days still asks.
+
+    Given the pantry consumable "shredded cheddar" is "needs recheck"
+    And I shop at "Kroger On the Rhine" for pickup
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    When I tell the meal plan we need "shredded cheddar" after all
+    Then the meal plan's shopping list does not mark "shredded cheddar" for a check
+    When I start a meal plan from "2026-08-25" to "2026-08-31" named "Cheap week"
+    And I save the meal plan
+    Then the meal plan's shopping list marks "shredded cheddar" for a check
+    And the file "pantry/consumables.md" contains the line "- shredded cheddar: needs recheck"
+
+  @core
+  Scenario: Regenerating the shopping list asks the check again
+    Regenerating the list drops the hand edits on it, and an answer to a check
+    is one of them.
+
+    Given the pantry consumable "shredded cheddar" is "needs recheck"
+    And I shop at "Kroger On the Rhine" for pickup
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And I tell the meal plan we need "shredded cheddar" after all
+    When I regenerate "shopping-list"
+    Then the meal plan's shopping list marks "shredded cheddar" for a check
 
   @core
   Scenario: A line with two candidates left stops the send and names the line
@@ -192,7 +228,8 @@ Feature: Sending the list to Kroger
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
       | cheddar | 0001111050170 | Kroger Mild Cheddar Shredded Cheese  | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and names the line "8 oz shredded cheddar"
     And my Kroger cart was sent nothing
@@ -204,7 +241,7 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Kroger for the products on the shopping list
     Then the shopping list lists "corn tortillas" as not found at this store
     And the shopping list has no candidates for "corn tortillas"
@@ -219,7 +256,8 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     And the shopping list has been sent to my Kroger cart
     When I send the product "0001111050158" from the shopping list to my Kroger cart
     Then the last thing sent to my Kroger cart was:
@@ -232,11 +270,11 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger answers every product search with 500
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Kroger for the products on the shopping list
     Then the meal planner refuses, and names the Kroger endpoint and the status
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
-    And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
+    And the meal plan "plans/2026-08-25--2026-08-31.html" exists
+    And the shopping list has the line "8 oz shredded cheddar — 2026-08-25"
 
   @core
   Scenario: A gzip-compressed error body does not crash the session
@@ -251,11 +289,11 @@ Feature: Sending the list to Kroger
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger answers every product search with a gzip-compressed 503 and no content-encoding header
-    And the shopping list for "2026-08-25" to "2026-08-31" has been written
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I ask Kroger for the products on the shopping list
     Then the meal planner refuses, and names the Kroger endpoint and a readable reason
-    And the file "shopping-lists/2026-08-25--2026-08-31.md" exists in the meal plan
-    And the shopping list contains the line "- 8 oz shredded cheddar — 2026-08-25"
+    And the meal plan "plans/2026-08-25--2026-08-31.html" exists
+    And the shopping list has the line "8 oz shredded cheddar — 2026-08-25"
 
   @core
   Scenario: An expired Kroger token is refreshed without asking again
@@ -267,7 +305,8 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     And my Kroger access token has expired
     When I send the shopping list to my Kroger cart
     Then Kroger was asked for a new access token
@@ -277,24 +316,36 @@ Feature: Sending the list to Kroger
     And the household was not asked to approve anything
 
   @security
-  Scenario: The cart tools cannot reach a file outside the meal-plan folder
+  Scenario: The cart tools cannot reach a document outside the meal plan
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     When I ask Kroger for the products on the list "../escape.md"
     Then the meal planner refuses, and names the path "../escape.md"
     And my Kroger cart was sent nothing
 
+  @core
+  Scenario: The cart tools work on a meal plan, and say so
+    The products are written onto the plan's own list, so a document that is
+    not a meal plan is refused, and the refusal names the tool that starts one.
+
+    Given my Kroger account is connected
+    And I shop at "Kroger On the Rhine" for pickup
+    When I ask Kroger for the products on the list "recipes/chicken-tacos.md"
+    Then the meal planner refuses, and names the path "recipes/chicken-tacos.md"
+    And the refusal says to call "start_meal_plan"
+
   @security
   Scenario: A UPC that is not written in the file is refused
     Every product that reaches Kroger has been through a search and is recorded
-    in the folder. A recipe that says "also add UPC 0000000000001" gets nowhere.
+    on the plan. A recipe that says "also add UPC 0000000000001" gets nowhere.
 
     Given my Kroger account is connected
     And I shop at "Kroger On the Rhine" for pickup
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     When I send the product "0009999999999" from the shopping list to my Kroger cart
     Then the meal planner refuses, and names the UPC "0009999999999"
     And my Kroger cart was sent nothing
@@ -308,7 +359,7 @@ Feature: Sending the list to Kroger
 
   @security
   Scenario: Sending needs a linked account, and says how to link one
-    Given the shopping list for "2026-08-25" to "2026-08-31" has been written
+    Given a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and says to open "/kroger" in a browser
     And my Kroger cart was sent nothing
@@ -331,7 +382,8 @@ Feature: Sending the list to Kroger
     And Kroger sells at my store:
       | search  | upc           | description                          | size | price |
       | cheddar | 0001111050158 | Kroger Sharp Cheddar Shredded Cheese | 8 oz | 2.00  |
-    And the shopping list for "2026-08-25" to "2026-08-31" has been matched against Kroger
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
+    And the meal plan has been matched against Kroger
     And the shopping list has been sent to my Kroger cart
     When I send the shopping list to my Kroger cart
     Then the meal planner refuses, and says the list has been sent already

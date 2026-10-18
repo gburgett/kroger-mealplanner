@@ -57,12 +57,6 @@ defmodule Mealplan.Features.DocumentSteps do
     {:ok, plant(context, Shapes.recipe_path(name), body)}
   end
 
-  step "dinner on {string} is stored as a document with the recipe {string}",
-       %{args: [date, name]} = context do
-    {:ok,
-     plant(context, Shapes.day_path(date), Shapes.dinner_document(date: date, recipes: [name]))}
-  end
-
   # What the /kroger store picker does: the server writes config/kroger.md.
   step "the household shops at Kroger store {string} for {word}",
        %{args: [name, modality]} = context do
@@ -113,11 +107,6 @@ defmodule Mealplan.Features.DocumentSteps do
 
   step "I call {string} on {string}", %{args: [name, path]} = context do
     {:ok, call(context, name, %{"path" => path, "message" => "#{name} #{path}"})}
-  end
-
-  step "I call {string} from {string} to {string} out to {string}",
-       %{args: [name, from, to, out]} = context do
-    {:ok, call(context, name, %{"from" => from, "to" => to, "out" => out})}
   end
 
   step "I write the document {string} with the message {string}:",

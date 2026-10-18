@@ -54,11 +54,10 @@ Feature: Only the household reaches the meal plan
     And the output lists:
       | README.md       |
       | config/         |
-      | meals/          |
       | pantry/         |
+      | plans/          |
       | preferences/    |
       | recipes/        |
-      | shopping-lists/ |
 
   Scenario: The token still works after the server restarts
     Given the household has approved a client

@@ -30,12 +30,13 @@ defmodule Mealplan.Recheck do
 
   @task_instruction "Once a week you are asked one question: given " <>
                       "pantry/consumables.md, the last week of this meal plan's " <>
-                      "history, and the meal plans and shopping lists that history " <>
+                      "history, and the meal plans that history " <>
                       "touched, which \"stocked\" consumables have probably run out " <>
                       "and should be marked \"needs recheck\"?\n\n" <>
                       "Use history and read_file to look at what changed: the " <>
-                      "recent changes, the day documents and shopping lists they " <>
-                      "name, and pantry/consumables.md " <>
+                      "recent changes, the meal plans in plans/ they name — each " <>
+                      "holds the week's meals and its shopping list — and " <>
+                      "pantry/consumables.md " <>
                       "itself. A consumable that shows up across several of the " <>
                       "week's meals and is still marked \"stocked\" is a candidate; " <>
                       "one that was just bought (a recent \"last bought\" date) " <>

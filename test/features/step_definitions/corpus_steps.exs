@@ -91,36 +91,6 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, FeatureCorpus.call(context, "validate", %{"path" => path})}
   end
 
-  step "I ask for the shopping list from {string} to {string}", %{args: [from, to]} = context do
-    {:ok, FeatureCorpus.call(context, "shopping_list", %{"from" => from, "to" => to})}
-  end
-
-  step "I ask for the shopping list from {string} to {string} including the staples",
-       %{args: [from, to]} = context do
-    {:ok,
-     FeatureCorpus.call(context, "shopping_list", %{
-       "from" => from,
-       "to" => to,
-       "include_staples" => true
-     })}
-  end
-
-  step "I ask for the shopping list from {string} to {string} including the consumables",
-       %{args: [from, to]} = context do
-    {:ok,
-     FeatureCorpus.call(context, "shopping_list", %{
-       "from" => from,
-       "to" => to,
-       "include_consumables" => true
-     })}
-  end
-
-  step "I write the shopping list from {string} to {string} to {string}",
-       %{args: [from, to, out]} = context do
-    {:ok,
-     FeatureCorpus.call(context, "shopping_list", %{"from" => from, "to" => to, "out" => out})}
-  end
-
   step "I edit {string} replacing {string} with {string} with the message {string}",
        %{args: [path, old, new, message]} = context do
     {:ok,
@@ -283,7 +253,8 @@ defmodule Mealplan.Features.CorpusSteps do
        record_recipe(
          acc,
          row["name"],
-         to_integer(Map.get(row, "servings", ""), @default_servings)
+         to_integer(Map.get(row, "servings", ""), @default_servings),
+         ingredients: split_ingredients(Map.get(row, "ingredients", ""))
        )
      end)}
   end
@@ -297,55 +268,6 @@ defmodule Mealplan.Features.CorpusSteps do
   end
 
   # --- planning days --------------------------------------------------------
-
-  step ~r/^I (?:have )?plan(?:ned)? dinner on "([^"]*)" with the recipe "([^"]*)" for (\d+) people$/,
-       %{args: [date, recipe, servings]} = context do
-    {:ok, plan_dinner(context, date, [recipe], servings: String.to_integer(servings))}
-  end
-
-  step ~r/^I (?:have )?plan(?:ned)? dinner on "([^"]*)" with the recipes "([^"]*)" and "([^"]*)"$/,
-       %{args: [date, first, second]} = context do
-    {:ok, plan_dinner(context, date, [first, second])}
-  end
-
-  step ~r/^I (?:have )?plan(?:ned)? dinner on "([^"]*)" with no recipes and the note "([^"]*)"$/,
-       %{args: [date, note]} = context do
-    {:ok, plan_dinner(context, date, [], note: note)}
-  end
-
-  step ~r/^I (?:have )?plan(?:ned)? dinner on "([^"]*)" with the recipe "([^"]*)"$/,
-       %{args: [date, recipe]} = context do
-    {:ok, plan_dinner(context, date, [recipe])}
-  end
-
-  step ~r/^I (?:have )?plan(?:ned)? the days:$/, context do
-    {:ok,
-     Enum.reduce(context.datatable.maps, context, fn row, acc ->
-       plan_dinner(acc, row["date"], split_recipes(Map.get(row, "recipes", "")))
-     end)}
-  end
-
-  step ~r/^I (?:have )?plan(?:ned)? the day "([^"]*)" with the meals:$/,
-       %{args: [date]} = context do
-    meals =
-      Enum.map(context.datatable.maps, fn row ->
-        servings = row |> Map.get("servings", "") |> String.trim()
-
-        %{
-          name: Map.get(row, "name", ""),
-          servings: if(servings == "", do: nil, else: to_integer(servings, nil)),
-          recipes: split_recipes(Map.get(row, "recipes", "")),
-          note: blank_to_nil(Map.get(row, "note", ""))
-        }
-      end)
-
-    {:ok,
-     write_file(
-       context,
-       Documents.day_path(date),
-       Documents.day_document(date: date, meals: meals)
-     )}
-  end
 
   # --- the pantry -----------------------------------------------------------
 
@@ -449,63 +371,6 @@ defmodule Mealplan.Features.CorpusSteps do
   step ~r/^the recipe "([^"]*)" has (\d+) ingredients?$/, %{args: [name, count]} = context do
     document = read!(context, Documents.recipe_path(name))
     assert length(Documents.ingredients_of(document)) == String.to_integer(count)
-    {:ok, context}
-  end
-
-  step ~r/^the (?:dinner|meal "[^"]*") on "([^"]*)" serves (\d+)$/,
-       %{args: [date, servings]} = context do
-    document = read!(context, Documents.day_path(date))
-    wanted = String.to_integer(servings)
-
-    case Documents.meal_servings(document) do
-      nil ->
-        # "A meal with no servings of its own feeds what its recipes feed."
-        each =
-          document
-          |> Documents.linked_recipes()
-          |> Enum.map(fn {_name, target} ->
-            recipe = read!(context, String.replace_prefix(target, "../", ""))
-            to_integer(Documents.front_matter(recipe)["servings"], @default_servings)
-          end)
-
-        assert Enum.max(each) == wanted
-
-      declared ->
-        assert declared == wanted
-    end
-
-    {:ok, context}
-  end
-
-  step ~r/^the dinner on "([^"]*)" uses (\d+) recipes?$/, %{args: [date, count]} = context do
-    document = read!(context, Documents.day_path(date))
-    assert length(Documents.linked_recipes(document)) == String.to_integer(count)
-    {:ok, context}
-  end
-
-  step ~r/^the meal "([^"]*)" on "([^"]*)" uses (\d+) recipes?$/,
-       %{args: [meal_name, date, count]} = context do
-    meals = meals_of(context, date)
-    meal = Enum.find(meals, &(&1.name == meal_name))
-
-    assert meal,
-           "no meal #{inspect(meal_name)} on #{date}, found #{inspect(Enum.map(meals, & &1.name))}"
-
-    assert length(meal.recipes) == String.to_integer(count)
-    {:ok, context}
-  end
-
-  step "the dinner on {string} uses the recipe {string}", %{args: [date, recipe]} = context do
-    document = read!(context, Documents.day_path(date))
-    targets = Documents.linked_recipes(document) |> Enum.map(fn {_, target} -> target end)
-    wanted = "../" <> Documents.recipe_path(recipe)
-    assert wanted in targets, "#{date} does not link #{recipe}; it links #{inspect(targets)}"
-    {:ok, context}
-  end
-
-  step ~r/^the meal plan has (\d+) day documents?$/, %{args: [count]} = context do
-    days = Enum.filter(FeatureCorpus.paths(context), &String.starts_with?(&1, "meals/"))
-    assert length(days) == String.to_integer(count), "meals/ holds #{inspect(days)}"
     {:ok, context}
   end
 
@@ -629,54 +494,6 @@ defmodule Mealplan.Features.CorpusSteps do
 
   # --- serving-size warnings from config/household.md -----------------------
 
-  step "the output warns that the meal {string} on {string} serves too few",
-       %{args: [meal, date]} = context do
-    lines = output_lines(context)
-
-    assert Enum.any?(lines, fn line ->
-             String.contains?(line, meal) and String.contains?(line, date) and
-               line =~ ~r/too few/i
-           end),
-           "no \"too few\" warning for #{meal} on #{date}:\n#{output(context)}"
-
-    {:ok, context}
-  end
-
-  step "the output warns that the meal {string} on {string} serves more than double",
-       %{args: [meal, date]} = context do
-    lines = output_lines(context)
-
-    assert Enum.any?(lines, fn line ->
-             String.contains?(line, meal) and String.contains?(line, date) and
-               line =~ ~r/more than double/i
-           end),
-           "no \"more than double\" warning for #{meal} on #{date}:\n#{output(context)}"
-
-    {:ok, context}
-  end
-
-  step "the output does not warn that the meal {string} on {string} serves too few",
-       %{args: [meal, date]} = context do
-    lines = output_lines(context)
-
-    refute Enum.any?(lines, fn line ->
-             String.contains?(line, meal) and String.contains?(line, date) and
-               line =~ ~r/too few/i
-           end),
-           "there is still a \"too few\" warning for #{meal} on #{date}:\n#{output(context)}"
-
-    {:ok, context}
-  end
-
-  step "the output does not warn about any meal's servings", context do
-    text = output(context)
-
-    refute text =~ ~r/too few|more than double/i,
-           "there are serving warnings where there should be none:\n#{text}"
-
-    {:ok, context}
-  end
-
   step "the output says the family size needs both adults and children", context do
     text = output(context)
 
@@ -718,12 +535,6 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  step "the output suggests the expected servings format", context do
-    assert output(context) =~ ~r/servings/i, output(context)
-    assert output(context) =~ ~r/whole number|for example/i, output(context)
-    {:ok, context}
-  end
-
   step "the output describes the ingredient line format", context do
     assert output(context) =~ ~r/-\s*<quantity>\s*\[unit\]\s*<item>/, output(context)
     {:ok, context}
@@ -731,17 +542,6 @@ defmodule Mealplan.Features.CorpusSteps do
 
   step "the output describes the {string} folder", %{args: [folder]} = context do
     assert String.contains?(output(context), folder), "README.md never mentions #{folder}"
-    {:ok, context}
-  end
-
-  step "the output says the filename and the date do not match", context do
-    assert output(context) =~ ~r/filename.*date|date.*filename/is, output(context)
-    {:ok, context}
-  end
-
-  step "the output says the filename is not a date", context do
-    assert output(context) =~ ~r/filename/i, output(context)
-    assert output(context) =~ ~r/YYYY-MM-DD|not a date/i, output(context)
     {:ok, context}
   end
 
@@ -755,54 +555,8 @@ defmodule Mealplan.Features.CorpusSteps do
     {:ok, context}
   end
 
-  step "the output says {string} is missing", %{args: [target]} = context do
-    text = output(context)
-    assert String.contains?(text, target), "the message never names #{target}:\n#{text}"
-    assert text =~ ~r/missing|not there|does not exist|no such/i, text
-    {:ok, context}
-  end
-
-  step "the output says no meals are planned in that range", context do
-    assert output(context) =~ ~r/no meals/i, output(context)
-    {:ok, context}
-  end
-
-  step "the output says the end date is before the start date", context do
-    assert output(context) =~ ~r/before the start|end date/i, output(context)
-    {:ok, context}
-  end
-
-  step "the output says a date must be written as YYYY-MM-DD", context do
-    assert output(context) =~ ~r/YYYY-MM-DD/, output(context)
-    {:ok, context}
-  end
-
   step "the output says the folder was initialised", context do
     assert output(context) =~ ~r/initialis|initializ/i, output(context)
-    {:ok, context}
-  end
-
-  step "the output says {string} was left out as a pantry staple",
-       %{args: [item]} = context do
-    text = output(context)
-    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
-    assert text =~ ~r/stapl/i, text
-    {:ok, context}
-  end
-
-  step "the output says {string} was left out as a pantry consumable",
-       %{args: [item]} = context do
-    text = output(context)
-    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
-    assert text =~ ~r/consumable/i, text
-    {:ok, context}
-  end
-
-  step "the output says to check with the household about {string}",
-       %{args: [item]} = context do
-    text = output(context)
-    assert String.contains?(text, item), "the message never names #{item}:\n#{text}"
-    assert text =~ ~r/check/i, text
     {:ok, context}
   end
 
@@ -817,101 +571,6 @@ defmodule Mealplan.Features.CorpusSteps do
   # The list is not stored anywhere, so there is no file to assert against.
   # What these steps read is what the housewife reads: the output of the
   # command she ran.
-
-  step "the shopping list is empty", context do
-    assert item_lines(context) == []
-    {:ok, context}
-  end
-
-  step "the shopping list has {int} items", %{args: [count]} = context do
-    lines = item_lines(context)
-    assert length(lines) == count, "the list was:\n#{Enum.join(lines, "\n")}"
-    {:ok, context}
-  end
-
-  step "the shopping list includes {string}", %{args: [entry]} = context do
-    lines = item_lines(context)
-
-    assert Enum.any?(lines, &String.starts_with?(&1, "- #{entry}")),
-           "#{inspect(entry)} is not on the list:\n#{Enum.join(lines, "\n")}"
-
-    {:ok, context}
-  end
-
-  step "the shopping list does not include {string}", %{args: [entry]} = context do
-    lines = item_lines(context)
-
-    refute Enum.any?(lines, &String.contains?(&1, entry)),
-           "#{inspect(entry)} should not be on the list:\n#{Enum.join(lines, "\n")}"
-
-    {:ok, context}
-  end
-
-  step "the shopping list marks {string} for a check", %{args: [item]} = context do
-    lines = item_lines(context)
-
-    assert Enum.any?(lines, &(String.contains?(&1, item) and String.ends_with?(&1, "(check)"))),
-           "no line for #{inspect(item)} is marked (check):\n#{Enum.join(lines, "\n")}"
-
-    {:ok, context}
-  end
-
-  step "the shopping list does not mark {string} for a check", %{args: [item]} = context do
-    line = Enum.find(item_lines(context), &String.contains?(&1, item))
-    assert line, "no line for #{inspect(item)} on the list"
-    refute String.ends_with?(line, "(check)"), "#{inspect(item)} is marked (check):\n#{line}"
-    {:ok, context}
-  end
-
-  step "the line {string} is in the {string} section", %{args: [item, section]} = context do
-    found =
-      last(context).stdout
-      |> String.split("\n")
-      |> Enum.reduce_while({nil, :not_found}, fn raw, {current, _} ->
-        line = String.trim(raw)
-
-        case Regex.run(~r/^##\s+(.*)$/, line) do
-          [_, heading] ->
-            {:cont, {String.trim(heading), :not_found}}
-
-          _ ->
-            if String.starts_with?(line, "- ") and String.contains?(line, item) do
-              {:halt, {current, :found}}
-            else
-              {:cont, {current, :not_found}}
-            end
-        end
-      end)
-
-    case found do
-      {found_section, :found} ->
-        assert found_section == section, "#{inspect(item)} is under #{inspect(found_section)}"
-
-      _ ->
-        flunk("no line for #{inspect(item)} in:\n#{last(context).stdout}")
-    end
-
-    {:ok, context}
-  end
-
-  step "the line {string} is needed for the dinner on {string}",
-       %{args: [item, date]} = context do
-    assert String.contains?(line_for(context, item), date),
-           "the line does not say it is for #{date}"
-
-    {:ok, context}
-  end
-
-  step "the line {string} is needed for the dinners on {string} and {string}",
-       %{args: [item, first, second]} = context do
-    line = line_for(context, item)
-
-    for date <- [first, second] do
-      assert String.contains?(line, date), "the line does not say it is for #{date}:\n#{line}"
-    end
-
-    {:ok, context}
-  end
 
   # --- the history ------------------------------------------------------------
 
@@ -984,6 +643,14 @@ defmodule Mealplan.Features.CorpusSteps do
     context
   end
 
+  # "1.5 lb chicken thighs, 12 corn tortillas" — the column reads the way a
+  # recipe reads, so the scenario does not have to spell out quantity and unit.
+  defp split_ingredients(""), do: []
+
+  defp split_ingredients(text) do
+    text |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
+
   defp record_recipe(context, name, servings, opts \\ []) do
     write_file(
       context,
@@ -995,72 +662,6 @@ defmodule Mealplan.Features.CorpusSteps do
         ingredients: Keyword.get(opts, :ingredients, [])
       )
     )
-  end
-
-  defp plan_dinner(context, date, recipes, opts \\ [])
-
-  # A day with no cooking is a note and no meals at all.
-  defp plan_dinner(context, date, [], opts) do
-    write_file(
-      context,
-      Documents.day_path(date),
-      Documents.day_document(date: date, note: Keyword.get(opts, :note))
-    )
-  end
-
-  defp plan_dinner(context, date, recipes, opts) do
-    servings =
-      Keyword.get(opts, :servings) ||
-        Enum.max([@default_servings | Enum.map(recipes, &servings_of(context, &1))])
-
-    write_file(
-      context,
-      Documents.day_path(date),
-      Documents.dinner_document(
-        date: date,
-        servings: servings,
-        recipes: recipes,
-        note: Keyword.get(opts, :note)
-      )
-    )
-  end
-
-  # What a recipe serves, read from the folder. Unrecorded recipes feed four.
-  defp servings_of(context, name) do
-    case FeatureCorpus.read(context, Documents.recipe_path(name)) do
-      document when is_binary(document) ->
-        case Documents.front_matter(document)["servings"] do
-          nil -> @default_servings
-          value -> to_integer(value, @default_servings)
-        end
-
-      _ ->
-        @default_servings
-    end
-  end
-
-  # The `## <name>` sections a day document holds, in order.
-  defp meals_of(context, date) do
-    context
-    |> read!(Documents.day_path(date))
-    |> String.split("\n")
-    |> Enum.reduce([], fn raw, meals ->
-      line = String.trim(raw)
-
-      cond do
-        match = Regex.run(~r/^##\s+(.*)$/, line) ->
-          [_, name] = match
-          meals ++ [%{name: String.trim(name), recipes: []}]
-
-        (match = Regex.run(~r/^-\s*\[([^\]]+)\]\(([^)]+)\)\s*$/, line)) && meals != [] ->
-          [_, _name, target] = match
-          {front, [current]} = Enum.split(meals, -1)
-          front ++ [%{current | recipes: current.recipes ++ [target]}]
-
-        true ->
-          meals
-      end
-    end)
   end
 
   defp staples_document(items) do
@@ -1094,10 +695,6 @@ defmodule Mealplan.Features.CorpusSteps do
     end)
   end
 
-  defp split_recipes(text) do
-    text |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-  end
-
   defp last(%{last: nil}), do: flunk("no command has been run in this scenario yet")
   defp last(%{last: result}), do: result
 
@@ -1106,23 +703,6 @@ defmodule Mealplan.Features.CorpusSteps do
   defp output(context) do
     result = last(context)
     String.trim_trailing(result.stdout <> "\n" <> result.stderr)
-  end
-
-  defp output_lines(context), do: output(context) |> String.split("\n")
-
-  # Every "- ..." line of the printed list, without its section heading.
-  defp item_lines(context) do
-    last(context).stdout
-    |> String.split("\n")
-    |> Enum.map(&String.trim/1)
-    |> Enum.filter(&String.starts_with?(&1, "- "))
-  end
-
-  # The line for an item, wherever it is in the list.
-  defp line_for(context, item) do
-    found = item_lines(context) |> Enum.filter(&String.contains?(&1, item))
-    assert found != [], "no line for #{inspect(item)} in:\n#{last(context).stdout}"
-    Enum.join(found, "\n")
   end
 
   # The description the MCP tool list advertises, which is what an agent reads.
@@ -1181,13 +761,6 @@ defmodule Mealplan.Features.CorpusSteps do
     case Integer.parse(String.trim(to_string(text))) do
       {n, _} -> n
       :error -> default
-    end
-  end
-
-  defp blank_to_nil(text) do
-    case String.trim(text) do
-      "" -> nil
-      other -> other
     end
   end
 end

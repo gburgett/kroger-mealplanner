@@ -1,14 +1,15 @@
 # The meal plan
 
-Markdown documents, laid out like a folder. Explore them with `list_files`,
+Documents, laid out like a folder: markdown for the recipes, the pantry, the
+preferences and the shops, and one meal-plan document per week. Explore them with `list_files`,
 `grep` and `read_file`, and change them with `write_file`, `edit_file` and
 `delete_file`. The path is the primary key, so uniqueness and ordering come
 from the layout and there is no index to keep in step.
 
 Every change is recorded with the message you give. `history` lists the
 changes and `restore_file` puts any document back as it was after any of them,
-so nothing is ever lost by overwriting it. A recipe or a day that does not
-match the format below is refused when you write it, naming the line.
+so nothing is ever lost by overwriting it. A recipe that does not match the
+format below is refused when you write it, naming the line.
 
 ## recipes/
 
@@ -34,45 +35,6 @@ tags: [quick, kid-friendly]
 
 Sear the chicken, shred it, warm the tortillas in a dry skillet.
 ```
-
-## meals/
-
-One document per day. The filename is the ISO date, so `list_files meals` is
-the calendar in order and there is one day per file by construction. A day holds
-as many meals as this household plans — one `## <meal>` section each.
-
-```markdown
----
-date: 2026-08-25
----
-
-# Meals for Tuesday, August 25, 2026
-
-## Dinner
-
-servings: 4
-
-- [Chicken Tacos](../recipes/chicken-tacos.md)
-```
-
-A meal may link to no recipes at all — carry the note as prose under its
-heading. A day with no cooking is the front matter, a title and a note, with
-no meals:
-
-```markdown
----
-date: 2026-08-27
----
-
-# Meals for Thursday, August 27, 2026
-
-Leftovers night.
-```
-
-A meal's `servings:` line says how many people it feeds. Without one, the
-meal feeds what its recipes feed. Which meals a household plans, and how
-many, is written in `preferences/household.md` — read it before writing a
-new day.
 
 ## pantry/
 
@@ -152,41 +114,51 @@ household. The household's *preferences* stay prose-only in
 `preferences/household.md`; this file exists only because the validator needs
 one number family it can read.
 
-## shopping-lists/
+## plans/
 
-One document per range of nights, named for the range:
-`shopping-lists/2026-08-25--2026-08-31.md`, written by `shopping_list` with
-`out`. The list itself is still derived from the meal plan every time — writing it down is not storing it, it is the sheet
-of paper the Kroger products get written onto.
+A meal plan for a range of days, as one HTML document that holds each day's
+meals and carries the week's shopping list: `plans/2026-08-25--2026-08-31.html`, and a second plan over the
+same days needs a name, `plans/2026-08-25--2026-08-31-cheap-week.html`. Start
+one with `start_meal_plan` and change it with `save_meal_plan` — never with
+`write_file`, because the save does the arithmetic. A day holds as many meals
+as this household plans; which, and what they are called, is written in
+`preferences/household.md` — read it before planning a day. A meal names its
+recipes, may carry its own servings and a note, and a night with no cooking
+is a meal with a note and no recipes. `recipes/` fills a meal the first time;
+after that the meal keeps what you wrote, and `regenerate` asks for a section
+back. The first line of every
+plan is a summary, so `grep` in `plans/` for `<!-- plantrify plan` is the
+index.
 
-```markdown
----
-from: 2026-08-25
-to: 2026-08-31
-store: 01400513
-modality: pickup
----
+The shopping list is rebuilt from the plan's meals on every save. Each line is
+an `<li data-mp-item="…">`, and the Kroger and Walmart tools write the products
+they find under it as **candidate products**:
 
-# Shopping list for 2026-08-25 to 2026-08-31
-
-## Dairy
-
-- 8 oz shredded cheddar — 2026-08-25
-  - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
+```html
+<li data-mp-item="8 oz shredded cheddar — 2026-08-25" data-mp-search="shredded cheddar">
+<span data-mp-item-text>8 oz shredded cheddar — 2026-08-25</span>
+<ul class="cand">
+<li data-mp-candidate="0001111050158" data-mp-count="1"
+    data-mp-description="Kroger Sharp Cheddar Shredded Cheese"
+    data-mp-size="8 oz" data-mp-price="2.00">…</li>
+</ul>
+</li>
 ```
 
-An indented list item under a line is a **candidate product**, and the shape is
-fixed so that grep for `` `[0-9]{13}` `` lists every Kroger UPC in play:
-
-    - <count> `<product id>` <description> — <size> — <price>
-
 The id says which shop the product came from: a Kroger candidate carries a
-13-digit UPC, a Walmart one carries the item id as `walmart:<id>` — grep for
-`` `walmart:[0-9]+` `` lists every Walmart product in play.
+13-digit UPC, a Walmart one carries the item id as `walmart:<id>`. A price is a
+plain decimal, never `$`, so a bill can be added up.
 
 Nothing is ever chosen for you. Choose by deleting the candidates you do not
-want, until one is left. Set `<count>` yourself, by comparing what the line
-needs against the package size — three 8 oz bags is `3`, not `1`.
+want, until one is left, and save the plan. Set `data-mp-count` yourself, by
+comparing what the line needs against the package size — three 8 oz bags is
+`3`, not `1`.
+
+A line marked `data-mp-check` reads "(check)": pantry/consumables.md says the
+household may still have it, and the cart tools refuse to send while one is
+unanswered. Ask. If they have it, mark it `stocked` in pantry/consumables.md
+and the line leaves the list. If they need it, add `data-mp-confirmed` to the
+line and save the plan — the answer is for this plan only.
 
 ## The ingredient line
 
@@ -202,15 +174,16 @@ This is the format `grep` has to find and the parser has to read. If a line
 does not match it, `write_file` refuses it and `validate` reports it, naming the
 document and the line.
 
-## The two jobs that are not exploration
+## The jobs that are not exploration
 
-Everything else is reading and writing documents. These two are not, because
-neither should be done from memory:
+Everything else is reading and writing documents. These are not, because
+none of them should be done from memory:
 
     validate [path]                  check the meal plan, or one document
-    shopping_list from, to [, out]   one list for a range of days
+    start_meal_plan from, to         a plan for a range of days, in plans/
+    save_meal_plan path [, html]     check a plan and do its arithmetic
 
-`shopping_list` reads the days in the range, follows every meal's links,
-scales each recipe to that meal's servings and adds the quantities up with the
-units. It is derived from the meal plan every time and stored only when `out`
-names a document in `shopping-lists/`.
+A save fills each meal from its recipes the first time, scales it to that
+meal's servings, adds the week's quantities up with their units, and leaves
+out what the pantry has. It keeps what you wrote, and warns when a meal feeds
+too few people for the household or more than double.

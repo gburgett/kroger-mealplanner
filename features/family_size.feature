@@ -11,13 +11,13 @@ Feature: Cooking for the household size
   purpose, and `mealplan validate` never opens it, so the one number the
   validator needs lives in its own document.
 
-  `mealplan validate` compares every meal's servings against `adults` +
-  `children` and WARNS — it does not fail — when a meal serves too few, or
+  Saving a meal plan compares every meal's servings against `adults` +
+  `children` and WARNS — it does not refuse — when a meal serves too few, or
   more than double the household. The warning belongs to the change in front
-  of the assistant, not to every day ever planned: it is emitted only for the
-  day being written, or a day the latest change touched.
-  A standing plan whose Tuesday lunch serves one is not re-flagged on every
-  later validate that has nothing to do with it.
+  of the assistant, not to every night ever planned: it is given only for a
+  meal the save filled in or rescaled. A standing plan whose Tuesday lunch
+  serves one is not re-flagged on every later save that has nothing to do
+  with it.
 
   Background:
     Given a meal plan
@@ -29,89 +29,34 @@ Feature: Cooking for the household size
 
   Scenario: A meal that feeds everyone draws no warning
     Given the household cooks for 2 adults and 2 children
-    When I write the file "meals/2026-08-25.md":
-      """
-      ---
-      date: 2026-08-25
-      ---
-
-      # Meals for Tuesday, August 25, 2026
-
-      ## Dinner
-
-      servings: 4
-
-      - [Chicken Tacos](../recipes/chicken-tacos.md)
-      """
-    And I validate the meal plan
-    Then the command succeeds
-    And the output does not warn about any meal's servings
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 4        |
+    Then the meal plan does not warn about any meal's servings
 
   Scenario: A meal that feeds too few people is warned about
     Given the household cooks for 2 adults and 2 children
-    When I write the file "meals/2026-08-25.md":
-      """
-      ---
-      date: 2026-08-25
-      ---
-
-      # Meals for Tuesday, August 25, 2026
-
-      ## Dinner
-
-      servings: 1
-
-      - [Chicken Tacos](../recipes/chicken-tacos.md)
-      """
-    And I validate the meal plan
-    Then the command succeeds
-    And the output warns that the meal "Dinner" on "2026-08-25" serves too few
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 1        |
+    Then the meal plan warns that the meal "Dinner" on "2026-08-25" serves too few
 
   Scenario: A meal that serves more than double the household is warned about
     Given the household cooks for 2 adults and 2 children
-    When I write the file "meals/2026-08-25.md":
-      """
-      ---
-      date: 2026-08-25
-      ---
-
-      # Meals for Tuesday, August 25, 2026
-
-      ## Dinner
-
-      servings: 9
-
-      - [Sunday Pot Roast](../recipes/sunday-pot-roast.md)
-      """
-    And I validate the meal plan
-    Then the command succeeds
-    And the output warns that the meal "Dinner" on "2026-08-25" serves more than double
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes          | servings |
+      | 2026-08-25 | Dinner | Sunday Pot Roast | 9        |
+    Then the meal plan warns that the meal "Dinner" on "2026-08-25" serves more than double
 
   Scenario: A meal with no servings of its own is judged by its recipes
     Given the household cooks for 2 adults and 2 children
     And I have recorded the recipe "Toast For One" serving 1
-    When I write the file "meals/2026-08-25.md":
-      """
-      ---
-      date: 2026-08-25
-      ---
-
-      # Meals for Tuesday, August 25, 2026
-
-      ## Breakfast
-
-      - [Toast For One](../recipes/toast-for-one.md)
-
-      ## Dinner
-
-      servings: 4
-
-      - [Chicken Tacos](../recipes/chicken-tacos.md)
-      """
-    And I validate the meal plan
-    Then the command succeeds
-    And the output warns that the meal "Breakfast" on "2026-08-25" serves too few
-    And the output does not warn that the meal "Dinner" on "2026-08-25" serves too few
+    And a meal plan from "2026-08-24" to "2026-08-30"
+    When I plan "Breakfast" on "2026-08-25" with the recipe "Toast For One"
+    And I plan "Dinner" on "2026-08-25" with the recipe "Chicken Tacos" for 4 people
+    And I save the meal plan
+    Then the meal plan warns that the meal "Breakfast" on "2026-08-25" serves too few
+    And the meal plan does not warn that the meal "Dinner" on "2026-08-25" serves too few
 
   Scenario: A household size written with only one number is called out
     When I write the file "config/household.md":
@@ -137,34 +82,20 @@ Feature: Cooking for the household size
     And the output says the family size must be whole numbers
 
   Scenario: A meal plan that never answered the family size is not warned about servings
-    When I write the file "meals/2026-08-25.md":
-      """
-      ---
-      date: 2026-08-25
-      ---
+    Given a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 1        |
+    Then the meal plan does not warn about any meal's servings
 
-      # Meals for Tuesday, August 25, 2026
-
-      ## Dinner
-
-      servings: 1
-
-      - [Chicken Tacos](../recipes/chicken-tacos.md)
-      """
-    And I validate the meal plan
-    Then the command succeeds
-    And the output does not warn about any meal's servings
-
-  Scenario: A serving warning is not repeated once some other file is the change
+  Scenario: A serving warning is not repeated by a save that did not touch the meal
     Given the household cooks for 2 adults and 2 children
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos" for 1 people
-    When I validate the meal plan
-    Then the command succeeds
-    And the output warns that the meal "Dinner" on "2026-08-25" serves too few
-    When I have recorded the recipe "Toast For One" serving 1
-    And I validate the meal plan
-    Then the command succeeds
-    And the output does not warn about any meal's servings
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       | servings |
+      | 2026-08-25 | Dinner | Chicken Tacos | 1        |
+    Then the meal plan warns that the meal "Dinner" on "2026-08-25" serves too few
+    When I plan "Dinner" on "2026-08-26" with the recipe "Sunday Pot Roast"
+    And I save the meal plan
+    Then the meal plan does not warn about any meal's servings
 
   Scenario: The household-size template ships in a new meal plan
     When I read "config/household.md"

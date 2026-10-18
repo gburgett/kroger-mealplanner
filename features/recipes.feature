@@ -132,41 +132,28 @@ Feature: Keeping recipes
     Then the command succeeds
     And the file "recipes/liver-and-onions.md" does not exist in the meal plan
 
-  Scenario: Deleting a recipe a planned meal still points at is refused
-    The day would be left pointing at nothing, and the shopping list would fail
-    on it later. The refusal names each day, so the links can be moved first.
+  Scenario: Deleting a recipe a meal plan uses leaves the plan its ingredients
+    A meal plan carries its own ingredients once a meal is filled in (ADR 0040),
+    so the recipe is not holding the plan up. Deleting it is allowed; the plan
+    warns on its next save and its shopping list stays right.
 
-    Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
+    Given I have recorded the recipe "Chicken Tacos" serving 4 with the ingredients:
+      | quantity | unit | item           |
+      | 1.5      | lb   | chicken thighs |
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       |
+      | 2026-08-25 | Dinner | Chicken Tacos |
     When I delete the document "recipes/chicken-tacos.md"
-    Then the command fails
-    And the output names the file "meals/2026-08-25.md"
-    And the file "recipes/chicken-tacos.md" exists in the meal plan
-
-  Scenario: Checking before deleting
-    Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned the days:
-      | date       | recipes       |
-      | 2026-08-25 | Chicken Tacos |
-    When I find the documents in "meals" that mention "chicken-tacos.md"
-    Then the output lists:
-      | meals/2026-08-25.md |
-
-  Scenario: Renaming a recipe means recording it anew and fixing what points at it
-    Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned dinner on "2026-08-25" with the recipe "Chicken Tacos"
-    When I record the recipe "Taco Night" serving 4
-    And I edit "meals/2026-08-25.md" replacing "[Chicken Tacos](../recipes/chicken-tacos.md)" with "[Taco Night](../recipes/taco-night.md)"
-    And I delete the document "recipes/chicken-tacos.md"
-    And I validate the meal plan
     Then the command succeeds
-    And the output says the folder is valid
+    When I save the meal plan
+    Then the meal plan reports a warning naming "recipes/chicken-tacos.md"
+    And the plan's shopping list includes "1.5 lb chicken thighs"
 
-  Scenario: Seeing when we last made something so the week is not repetitive
+  Scenario: Checking which plans use a recipe before deleting it
     Given I have recorded the recipe "Chicken Tacos" serving 4
-    And I have planned the days:
-      | date       | recipes       |
-      | 2026-08-10 | Chicken Tacos |
-      | 2026-08-17 | Chicken Tacos |
-    When I find the documents in "meals" that mention "chicken-tacos.md"
-    Then the last line of the output is "meals/2026-08-17.md"
+    And a meal plan from "2026-08-24" to "2026-08-30" with:
+      | date       | meal   | recipes       |
+      | 2026-08-25 | Dinner | Chicken Tacos |
+    When I find the documents in "plans" that mention "recipes/chicken-tacos.md"
+    Then the output lists:
+      | plans/2026-08-24--2026-08-30.html |

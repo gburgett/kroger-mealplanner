@@ -6,8 +6,9 @@ defmodule Mealplan.Mcp.Tools do
   `anubis_mcp` (ADR 0020). Everything a client actually reads or an agent acts
   on stays here:
 
-  - the meal plan's own tools — the file verbs, `validate` and
-    `shopping_list` — which live in `Mealplan.Mcp.DocumentTools` (ADR 0038);
+  - the meal plan's own tools — the file verbs, `validate`, `start_meal_plan`
+    and `save_meal_plan` — which live in `Mealplan.Mcp.DocumentTools`
+    (ADR 0038, ADR 0041);
   - the network tools, which the documents cannot do by construction
     (ADR 0010, ADR 0017), with their descriptions, hand-authored schemas and
     "name the argument" refusals.
@@ -31,32 +32,33 @@ defmodule Mealplan.Mcp.Tools do
   # cart-link description already ends with `Mealplan.Walmart.Help.how_to/0`.
 
   @find_products_description """
-  Find Kroger products for the lines on a shopping list.
+  Find Kroger products for the lines on a meal plan's shopping list.
 
-  Give it a list written by shopping_list with "out" set to
-  "shopping-lists/<from>--<to>.md". It reads the range and the store out of the
-  document's front matter, searches Kroger once for each line, and writes the
-  products it found underneath that line, like this:
+  Give it a meal plan from start_meal_plan, for example
+  "plans/2026-08-24--2026-08-30.html". It searches Kroger once for each line of
+  the plan's shopping list, at the shop config/kroger.md names, and writes the
+  products it found under that line, like this:
 
-      - 8 oz shredded cheddar — 2026-08-25
-        - 1 `0001111050158` Kroger Sharp Cheddar Shredded Cheese — 8 oz — $2.00
-        - 1 `0001111050170` Kroger Mild Cheddar Shredded Cheese — 8 oz — $2.00
+      <li data-mp-item="8 oz shredded cheddar — 2026-08-25" data-mp-search="shredded cheddar">
+        ...
+        <li data-mp-candidate="0001111050158" data-mp-count="1"
+            data-mp-description="Kroger Sharp Cheddar Shredded Cheese"
+            data-mp-size="8 oz" data-mp-price="2.00">…</li>
+        <li data-mp-candidate="0001111050170" ...>…</li>
 
   AN ITEM NOBODY IS COOKING STILL GETS SEARCHED. Not every line traces back to
   a recipe — toothpaste, a salmon pouch, whatever the household just wants
-  bought. Add it yourself: write "- <item>" under any heading in the document
-  with edit_file or write_file, then run this tool again. It is searched by its own
-  words exactly like any other line, and its candidates land under it the same
-  way. Do not fake a recipe to get an item onto the list, and do not regenerate
-  the whole document with shopping_list and "out" to add one line — that
-  overwrites every candidate already chosen and everything already sent.
+  bought. Add it to the plan's shopping list as a line of its own (see
+  save_meal_plan), save the plan, then run this tool again. It is searched by
+  its own words exactly like any other line. Do not fake a recipe to get an
+  item onto the list.
 
   IT CHOOSES NOTHING. Searching for "boneless chicken thighs" returns noise as
   well as thighs. Two or more candidates on a line means nobody has
   chosen yet, and kroger_send_to_cart will refuse that line rather than guess.
 
-  To choose, DELETE the candidate lines you do not want, with edit_file or
-  write_file, until one is left. Showing the household the candidates and
+  To choose, DELETE the data-mp-candidate elements you do not want until one
+  is left, and save the plan with save_meal_plan. Showing the household the candidates and
   letting them say which is the right move when it is a real judgement — a brand
   they care about, a size that is nearly double the price.
 
@@ -76,16 +78,18 @@ defmodule Mealplan.Mcp.Tools do
   is not asked again next week. That file is theirs to shape — add a heading,
   reword a line, restructure it however it reads best.
 
-  EVERY COUNT IS WRITTEN AS 1, AND THAT IS OFTEN WRONG. Set it yourself by
-  comparing what the line needs against the package size: a line that wants 24 oz
-  matched to an 8 oz bag is a count of 3, not 1.
+  EVERY COUNT IS WRITTEN AS 1, AND THAT IS OFTEN WRONG. Set data-mp-count
+  yourself by comparing what the line needs against the package size: a line
+  that wants 24 oz matched to an 8 oz bag is a count of 3, not 1.
 
-  Lines Kroger has nothing for are moved to a "## Not found at this store"
-  section, listed rather than guessed at, so nothing goes quietly missing.
+  A line Kroger has nothing for is marked data-mp-not-found, listed rather than
+  guessed at, so nothing goes quietly missing. data-mp-search is the term that
+  was tried.
 
   Lines that already have candidates are left alone, so running this again never
-  undoes a choice. To search for something again, move its line back out of "##
-  Not found at this store" first.
+  undoes a choice. To search for something again, change that line's
+  data-mp-search to better words — and delete its candidates if it has any —
+  save the plan, and run this again.
 
   It needs a chosen store, because Kroger returns no price at all without one.
   read_file "config/kroger.md" says which shop is set, and how to change it.\
@@ -99,14 +103,16 @@ defmodule Mealplan.Mcp.Tools do
   cart cannot be walked back. A line with none is skipped and reported.
 
   With "items", it sends only those, and it REFUSES ANY UPC THAT IS NOT WRITTEN IN
-  THAT FILE. So "add that cheese back, my husband deleted it" is an ordinary call:
+  THAT PLAN. So "add that cheese back, my husband deleted it" is an ordinary call:
   pick the UPC off the line you can already see in the document.
 
   IT REFUSES THE WHOLE SEND IF ANY LINE ON THE LIST IS STILL MARKED "(check)".
   That marker means pantry/consumables.md says the household might already have
-  the item, and nobody has said either way. Ask the household: delete the line
-  if they still have it, or remove "(check)" from the line if they need it —
-  either is an ordinary edit — then send again.
+  the item, and nobody has said either way. Ask the household. If they still
+  have it, mark it "stocked" in pantry/consumables.md and the line leaves the
+  list. If they need it, add data-mp-confirmed to that line's <li> and save the
+  plan with save_meal_plan — the answer holds for this plan only. Then send
+  again.
 
   TWO THINGS TO SAY OUT LOUD RATHER THAN GUESS AT:
 
@@ -117,8 +123,8 @@ defmodule Mealplan.Mcp.Tools do
       the cart, only what was sent. Never tell the household the cart "now
       contains" anything.
 
-  What was sent is appended to the document under "## Sent", as a record of what
-  was asked for. That is not a claim about what the cart holds either.
+  What was sent is recorded on the plan's shopping list, as a record of what was
+  asked for. That is not a claim about what the cart holds either.
 
   Any item sent that matches a line in pantry/consumables.md is marked "stocked"
   there, with today's date, so a pantry item bought this way needs no hand edit
@@ -152,14 +158,15 @@ defmodule Mealplan.Mcp.Tools do
   """
 
   @find_walmart_products_description """
-  Find Walmart products for the lines on a shopping list.
+  Find Walmart products for the lines on a meal plan's shopping list.
 
-  Give it a list written by shopping_list with "out" set to
-  "shopping-lists/<from>--<to>.md". It searches Walmart once for each line and
-  writes the products it found underneath that line, like this:
+  Give it a meal plan from start_meal_plan, for example
+  "plans/2026-08-24--2026-08-30.html". It searches Walmart once for each line
+  and writes the products it found under that line, like this:
 
-      - 8 oz shredded cheddar — 2026-08-25
-        - 1 `walmart:10449042` Great Value Finely Shredded Sharp Cheddar — size unknown — $2.22
+      <li data-mp-candidate="walmart:10449042" data-mp-count="1"
+          data-mp-description="Great Value Finely Shredded Sharp Cheddar"
+          data-mp-price="2.22">…</li>
 
   The "walmart:" prefix is the Walmart item id. It is NOT a UPC, and the prefix
   is what keeps it from being mistaken for one: a list may hold both shops'
@@ -169,19 +176,19 @@ defmodule Mealplan.Mcp.Tools do
   written "size unknown" — the size is usually in the product name.
 
   IT CHOOSES NOTHING, exactly as the Kroger tool does. Delete the candidates you
-  do not want until one is left; READ preferences/household.md FIRST, because
+  do not want until one is left and save the plan with save_meal_plan; READ preferences/household.md FIRST, because
   that is where this household has written down how it chooses; and ASK when it
   does not settle the line, then write the answer into that file. Set each count
   yourself by comparing what the line needs against the package size — every
   count is written as 1, and that is often wrong.
 
-  Lines Walmart has nothing for are moved to a "## Not found at this store"
-  section, listed rather than guessed at. Lines that already have candidates are
-  left alone, so running this again never undoes a choice.\
+  Lines Walmart has nothing for are marked data-mp-not-found, listed rather
+  than guessed at. Lines that already have candidates are left alone, so
+  running this again never undoes a choice.\
   """
 
   @cart_link_description """
-  Build the link that fills the household's Walmart cart with the chosen products on a shopping list.
+  Build the link that fills the household's Walmart cart with the chosen products on a meal plan's shopping list.
 
   With no "items", the link covers every line that has exactly ONE Walmart
   candidate left. A line with two or more stops the whole build and names the
@@ -189,12 +196,13 @@ defmodule Mealplan.Mcp.Tools do
   a Kroger UPC is skipped as belonging to Kroger.
 
   With "items", the link covers only those, and it REFUSES ANY ITEM ID THAT IS
-  NOT WRITTEN IN THAT FILE — every product in the link has to have come from a
+  NOT WRITTEN IN THAT PLAN — every product in the link has to have come from a
   search and be recorded on the list.
 
   IT REFUSES THE WHOLE LINK IF ANY LINE IS STILL MARKED "(check)", exactly as
   kroger_send_to_cart refuses to send one: nobody has confirmed the household is
-  actually out. Ask, then delete the line or remove "(check)".
+  actually out. Ask, then mark the item "stocked" in pantry/consumables.md, or
+  add data-mp-confirmed to the line and save the plan.
 
   THREE THINGS TO SAY OUT LOUD RATHER THAN GUESS AT:
 
@@ -210,20 +218,20 @@ defmodule Mealplan.Mcp.Tools do
       household says the cart has them, flip the lines in pantry/consumables.md
       yourself — an ordinary edit.
 
-  The link is written into the list under "## Cart link" as a record. Building
+  The link is recorded on the plan's shopping list. Building
   it again is harmless — nothing is added until a link is opened — so there is
   no at-most-once rule here as there is for Kroger.\
   """
 
   # --- network-tool "name the argument" refusals, verbatim ---------------
 
-  @fp_path_required ~s|the "kroger_find_products" tool needs a "path": the shopping list to search from, | <>
-                      ~s|relative to the meal-plan root.|
+  @fp_path_required ~s|the "kroger_find_products" tool needs a "path": the meal plan to search from, | <>
+                      ~s|for example "plans/2026-08-24--2026-08-30.html".|
   @fp_message_required ~s|the "kroger_find_products" tool needs a "message": a message describing | <>
                          ~s|what this search is for. The candidates written to the list are recorded with it.|
 
-  @stc_path_required ~s|the "kroger_send_to_cart" tool needs a "path": the shopping list to send from, | <>
-                       ~s|relative to the meal-plan root.|
+  @stc_path_required ~s|the "kroger_send_to_cart" tool needs a "path": the meal plan to send from, | <>
+                       ~s|for example "plans/2026-08-24--2026-08-30.html".|
   @stc_message_required ~s|the "kroger_send_to_cart" tool needs a "message": a message describing | <>
                           ~s|what is being sent. The sent status written to the list is recorded with it.|
   @stc_upc_required ~s|an entry in "items" for "kroger_send_to_cart" needs a "upc": a UPC already | <>
@@ -232,13 +240,13 @@ defmodule Mealplan.Mcp.Tools do
   @fs_zip_required ~s|the "walmart_find_stores" tool needs a "zip": the postcode to search near.|
   @fs_zip_bad ~s|the "walmart_find_stores" tool needs "zip" to be a five-digit US postcode.|
 
-  @fwp_path_required ~s|the "walmart_find_products" tool needs a "path": the shopping list to search from, | <>
-                       ~s|relative to the meal-plan root.|
+  @fwp_path_required ~s|the "walmart_find_products" tool needs a "path": the meal plan to search from, | <>
+                       ~s|for example "plans/2026-08-24--2026-08-30.html".|
   @fwp_message_required ~s|the "walmart_find_products" tool needs a "message": a message describing | <>
                           ~s|what this search is for. The candidates written to the list are recorded with it.|
 
-  @cl_path_required ~s|the "walmart_cart_link" tool needs a "path": the shopping list to build from, | <>
-                      ~s|relative to the meal-plan root.|
+  @cl_path_required ~s|the "walmart_cart_link" tool needs a "path": the meal plan to build from, | <>
+                      ~s|for example "plans/2026-08-24--2026-08-30.html".|
   @cl_message_required ~s|the "walmart_cart_link" tool needs a "message": a message describing | <>
                          ~s|what this link is for. The link recorded on the list is recorded with it.|
   @cl_id_required ~s|an entry in "items" for "walmart_cart_link" needs an "id": a "walmart:<item id>" | <>
@@ -249,8 +257,8 @@ defmodule Mealplan.Mcp.Tools do
   @list_path_property %{
     "type" => "string",
     "description" =>
-      "The shopping list, relative to the meal-plan root, for example " <>
-        "\"shopping-lists/2026-08-25--2026-08-31.md\"."
+      "The meal plan whose shopping list to work on, for example " <>
+        "\"plans/2026-08-24--2026-08-30.html\"."
   }
 
   @find_products_input_schema %{
@@ -288,10 +296,7 @@ defmodule Mealplan.Mcp.Tools do
   @send_to_cart_input_schema %{
     "type" => "object",
     "properties" => %{
-      "path" => %{
-        "type" => "string",
-        "description" => "The shopping list, relative to the meal-plan root."
-      },
+      "path" => @list_path_property,
       "message" => %{
         "type" => "string",
         "description" =>
@@ -306,7 +311,7 @@ defmodule Mealplan.Mcp.Tools do
           "properties" => %{
             "upc" => %{
               "type" => "string",
-              "description" => "A 13-character UPC already written in that list."
+              "description" => "A 13-character UPC already written in that plan."
             },
             "quantity" => %{
               "type" => "integer",
@@ -407,10 +412,7 @@ defmodule Mealplan.Mcp.Tools do
   @cart_link_input_schema %{
     "type" => "object",
     "properties" => %{
-      "path" => %{
-        "type" => "string",
-        "description" => "The shopping list, relative to the meal-plan root."
-      },
+      "path" => @list_path_property,
       "message" => %{
         "type" => "string",
         "description" =>
@@ -425,7 +427,7 @@ defmodule Mealplan.Mcp.Tools do
           "properties" => %{
             "id" => %{
               "type" => "string",
-              "description" => "A \"walmart:<item id>\" already written in that list."
+              "description" => "A \"walmart:<item id>\" already written in that plan."
             },
             "quantity" => %{
               "type" => "integer",
@@ -565,7 +567,13 @@ defmodule Mealplan.Mcp.Tools do
   @retired ~w(bash close)
   @no_shell "there is no shell: the meal plan is documents, and nothing an assistant writes " <>
               "is run (ADR 0039). Explore with list_files, read_file and grep; change with " <>
-              "write_file, edit_file and delete_file; shopping_list derives the grocery list."
+              "write_file, edit_file and delete_file; start_meal_plan plans a week, and its " <>
+              "shopping list is inside it."
+
+  # Retired by ADR 0040: the list is inside a meal plan, rebuilt on every save.
+  @no_shopping_list "there is no shopping_list tool any more: the shopping list is inside a " <>
+                      "meal plan, and every save_meal_plan rebuilds it (ADR 0040). Plan the week " <>
+                      "with start_meal_plan; read_file on the plan shows its list."
 
   @doc """
   Run one tool. `args` is the decoded `params.arguments` map (string keys).
@@ -590,6 +598,9 @@ defmodule Mealplan.Mcp.Tools do
 
         name in @retired ->
           {:ok, error_result(@no_shell)}
+
+        name == "shopping_list" ->
+          {:ok, error_result(@no_shopping_list)}
 
         true ->
           do_call(name, args, tenant, now)

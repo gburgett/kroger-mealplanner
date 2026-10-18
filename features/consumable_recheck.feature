@@ -10,7 +10,7 @@ Feature: A weekly job rechecks consumables nobody has updated by hand
   a real assistant talks to — hands an LLM the same tools the household's
   assistant is served (history, list_files, read_file, grep, write_file and
   edit_file), and asks it one question: given pantry/consumables.md, the last
-  week of history, and the meal plans and shopping lists that history touched,
+  week of history, and the meal plans that history touched,
   which "stocked" consumables have probably run out?
 
   It exits without asking anything if the meal plan has not changed in over a
@@ -59,19 +59,13 @@ Feature: A weekly job rechecks consumables nobody has updated by hand
     Then the last change is named "weekly recheck: bump eggs"
 
   Scenario: The job asks with the week's activity in view
-    Given the file "meals/2026-08-25.md" contains:
-      """
-      ---
-      date: 2026-08-25
-      ---
-      # Meals for Tuesday, August 25, 2026
-      """
+    Given a meal plan from "2026-08-24" to "2026-08-30"
     And the pantry consumable "eggs" is "stocked"
     And the LLM gateway is scripted to end its turn with no tool calls
     And the last change to the meal plan was made on "2026-08-27"
     When the weekly recheck job runs
     Then the LLM gateway's request mentions "pantry/consumables.md"
-    And the LLM gateway's request mentions "meals/2026-08-25.md"
+    And the LLM gateway's request mentions "2026-08-24--2026-08-30.html"
 
   Scenario: The job gives up after too many turns rather than hang
     Given the last change to the meal plan was made on "2026-08-27"

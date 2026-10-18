@@ -3,16 +3,24 @@
 //! Reports EVERY problem, not the first. An agent that fixes one thing and is
 //! told about the next one is doing the validator's bookkeeping for it.
 
-use std::collections::HashSet;
 use std::path::Path;
 
-use crate::corpus::{check_servings, load, Corpus};
+use crate::corpus::{load, Corpus};
 use crate::json;
+use crate::plan;
 use crate::quantity::to_display_number;
 
-pub fn run(root: &Path, only: Option<&str>, as_json: bool, changed: Option<&HashSet<String>>) -> i32 {
+pub fn run(root: &Path, only: Option<&str>, as_json: bool) -> i32 {
+    // One path that is a plan is checked as a plan. `mealplan validate` with no
+    // path checks the whole folder, and plans/ is part of the folder.
+    if let Some(path) = only {
+        if path.ends_with(".html") {
+            return plan::run_validate(root, path, as_json) as i32;
+        }
+    }
+
     let mut corpus = load(root, only);
-    check_servings(&mut corpus, changed);
+    let plans = if only.is_none() { plan::check_all(root, &mut corpus) } else { 0 };
 
     if as_json {
         println!("{}", describe(&corpus));
@@ -26,12 +34,10 @@ pub fn run(root: &Path, only: Option<&str>, as_json: bool, changed: Option<&Hash
         match only {
             Some(path) => println!("{path} is valid."),
             None => {
-                let meals: usize = corpus.days.iter().map(|day| day.meals.len()).sum();
                 println!(
-                    "The meal plan folder is valid: {} recipes, {} days, {} meals.",
+                    "The meal plan folder is valid: {} recipes, {} plans.",
                     corpus.recipes.len(),
-                    corpus.days.len(),
-                    meals
+                    plans
                 );
             }
         }
@@ -91,51 +97,6 @@ fn describe(corpus: &Corpus) -> String {
         })
         .collect();
 
-    let days = corpus
-        .days
-        .iter()
-        .map(|day| {
-            json::object(vec![
-                json::field("path", json::string(&day.path)),
-                json::field("date", json::string(&day.date)),
-                json::field(
-                    "meals",
-                    json::array(
-                        day.meals
-                            .iter()
-                            .map(|meal| {
-                                json::object(vec![
-                                    json::field("name", json::string(&meal.name)),
-                                    json::field(
-                                        "servings",
-                                        match meal.servings {
-                                            Some(servings) => json::string(&to_display_number(servings)),
-                                            None => json::null(),
-                                        },
-                                    ),
-                                    json::field(
-                                        "recipes",
-                                        json::array(
-                                            meal.recipes
-                                                .iter()
-                                                .map(|link| {
-                                                    json::object(vec![
-                                                        json::field("name", json::string(&link.name)),
-                                                        json::field("target", json::string(&link.target)),
-                                                    ])
-                                                })
-                                                .collect(),
-                                        ),
-                                    ),
-                                ])
-                            })
-                            .collect(),
-                    ),
-                ),
-            ])
-        })
-        .collect();
-
     let problems = corpus
         .problems
         .iter()
@@ -175,7 +136,6 @@ fn describe(corpus: &Corpus) -> String {
     json::object(vec![
         json::field("valid", json::boolean(corpus.problems.is_empty())),
         json::field("recipes", json::array(recipes)),
-        json::field("days", json::array(days)),
         json::field(
             "staples",
             json::array(corpus.staples.iter().map(|item| json::string(item)).collect()),

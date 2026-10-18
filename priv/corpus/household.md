@@ -18,8 +18,8 @@ write the answer down here. That is how this document gets good.
 - breakfast, lunch and dinner — NOT CONFIRMED
 
 Some households plan one meal a day and some plan five. Write here which
-meals this household plans and what it calls them, then write those into
-`meals/<date>.md` as one `## <meal>` section each.
+meals this household plans and what it calls them, then plan those into the
+week's meal plan as one meal each.
 
 ## The usual
 

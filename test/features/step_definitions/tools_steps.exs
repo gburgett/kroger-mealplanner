@@ -16,7 +16,7 @@ defmodule Mealplan.Features.ToolsSteps do
   # "with a blank <argument>" ever vary only the one argument the scenario is
   # about. None of these paths need to exist: a missing or blank required
   # argument is refused before any tool reads the meal plan.
-  @list "shopping-lists/2026-08-25--2026-08-31.md"
+  @list "plans/2026-08-25--2026-08-31.html"
   @valid_args %{
     "open" => %{},
     "read_file" => %{"path" => "README.md"},
@@ -34,7 +34,12 @@ defmodule Mealplan.Features.ToolsSteps do
     },
     "delete_file" => %{"path" => "pantry/tools-scenario.md", "message" => "tools scenario"},
     "restore_file" => %{"path" => "README.md", "change" => 1, "message" => "tools scenario"},
-    "shopping_list" => %{"from" => "2026-08-25", "to" => "2026-08-31"},
+    "start_meal_plan" => %{
+      "from" => "2026-08-25",
+      "to" => "2026-08-31",
+      "message" => "tools scenario"
+    },
+    "save_meal_plan" => %{"path" => @list, "message" => "tools scenario"},
     "kroger_find_products" => %{"path" => @list, "message" => "tools scenario"},
     "kroger_send_to_cart" => %{"path" => @list, "message" => "tools scenario"},
     "walmart_find_stores" => %{"zip" => "45202"},
@@ -81,7 +86,7 @@ defmodule Mealplan.Features.ToolsSteps do
   step "the {string} tool description explains the layout", %{args: [name]} = context do
     description = tool_description(name)
 
-    for landmark <- ["README.md", "recipes/", "meals/", "pantry/", "preferences/", "config/"] do
+    for landmark <- ["README.md", "recipes/", "plans/", "pantry/", "preferences/", "config/"] do
       assert String.contains?(description, landmark),
              ~s(the "#{name}" description never mentions #{landmark})
     end

@@ -24,7 +24,7 @@ decision, write a new record. Give the old record the status
 | [0007](0007-build-the-mealplan-cli-for-native-linux.md) | Build the mealplan CLI for native Linux | accepted |
 | [0008](0008-use-bubblewrap-for-the-sandbox.md) | Use bubblewrap for the sandbox, and leave multi-tenancy open | superseded by ADR-0039 |
 | [0009](0009-authenticate-the-mcp-server-with-oauth.md) | Authenticate the MCP server with OAuth, and guard the consent page with exe.dev | accepted; the exe.dev gate superseded by ADR-0028 |
-| [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012 |
+| [0010](0010-send-the-shopping-list-to-a-kroger-cart.md) | Send the shopping list to a Kroger cart from the server, not from the sandbox | accepted; open item closed by ADR-0012; tool test amended by ADR-0035 and ADR-0041 |
 | [0011](0011-ask-kroger-for-only-the-cart-scope.md) | Ask Kroger for only the cart scope | accepted |
 | [0012](0012-refuse-a-second-send-of-a-shopping-list.md) | Refuse a second send of a shopping list, because Kroger adds to the quantity | accepted |
 | [0013](0013-record-household-preferences-as-prose-with-no-schema.md) | Record household preferences as prose with no schema | accepted |
@@ -54,6 +54,8 @@ decision, write a new record. Give the old record the status
 | [0037](0037-hide-the-walmart-tools-until-the-server-has-a-credential.md) | Hide the Walmart tools until the server has a credential | accepted |
 | [0038](0038-store-the-meal-plan-as-documents-in-the-database.md) | Store the meal plan as documents in the database, and give the agent file verbs instead of a shell | accepted; the folder store and MEALPLAN_STORE superseded by ADR-0039 |
 | [0039](0039-retire-the-folder-store-and-the-sandbox.md) | Retire the folder store and the sandbox | accepted |
+| [0040](0040-make-the-meal-plan-one-html-document.md) | Make the meal plan one HTML document, and make that document the store | accepted |
+| [0041](0041-admit-a-tool-to-start-and-save-a-meal-plan.md) | Admit a tool to start a meal plan and a tool to save one | accepted |
 
 Longer investigations that feed a decision live beside this folder as trade studies
 and spikes: `../sandbox-trade-study.md`, `../agent-runtime-spike.md`,

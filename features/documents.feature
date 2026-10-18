@@ -8,21 +8,21 @@ Feature: The meal plan is documents in the database, behind file verbs
   database, with the layout, the paths and the markdown a folder had — README.md
   is still the schema — but no shell. The agent gets file verbs instead:
   list_files, read_file, grep, write_file, edit_file, delete_file, history and
-  restore_file, plus validate and shopping_list, which run the `mealplan`
-  parser over the documents.
+  restore_file, plus validate, start_meal_plan and save_meal_plan, which run
+  the `mealplan` parser over the documents.
 
   Nothing the agent writes is executed, so there is no sandbox to boot and no
   session to keep warm. What used to be containment is now a rule the store
   enforces: a path names a document inside this household's meal plan, and
   nothing else.
 
-  A recipe or a day that does not match the document format is refused before
-  it is stored, naming the line. The folder found that drift after the fact;
+  A recipe or a meal plan that does not match the document format is refused
+  before it is stored, naming the line. The folder found that drift after the fact;
   the document store never holds it.
 
   Scenario: The household is offered file verbs, not a shell
     Then the tools offered include "list_files", "read_file", "grep", "write_file" and "edit_file"
-    And the tools offered include "delete_file", "history", "restore_file", "validate" and "shopping_list"
+    And the tools offered include "delete_file", "history", "restore_file", "validate" and "save_meal_plan"
     And the tools offered do not include "bash" or "close"
 
   Scenario: Asking for a shell is told what to use instead
@@ -30,17 +30,24 @@ Feature: The meal plan is documents in the database, behind file verbs
     Then the tool call is refused
     And the output mentions "list_files"
 
+  Scenario: Asking for the old shopping_list tool is told where the list is now
+    A client holding a tool list from before ADR 0040 may still call it. The
+    list is inside a meal plan, so the answer names the tool that starts one.
+
+    When I call "shopping_list"
+    Then the tool call is refused
+    And the output mentions "start_meal_plan"
+
   Scenario: The layout is discoverable without a shell
     When I call "list_files"
     Then the output is:
       """
       README.md
       config/
-      meals/
       pantry/
+      plans/
       preferences/
       recipes/
-      shopping-lists/
       """
 
   Scenario: Opening shows the tree and where the documents that matter live
@@ -97,31 +104,14 @@ Feature: The meal plan is documents in the database, behind file verbs
     And the output mentions "- <quantity> [unit] <item>"
     And the document "recipes/chicken-tacos.md" does not exist
 
-  Scenario: A day that links to a recipe the meal plan does not hold is refused
-    When I write the document "meals/2026-08-25.md" with the message "plan tuesday":
-      """
-      ---
-      date: 2026-08-25
-      ---
-
-      # Meals for Tuesday, August 25, 2026
-
-      ## Dinner
-
-      - [Pot Roast](../recipes/pot-roast.md)
-      """
-    Then the tool call is refused
-    And the output mentions "recipes/pot-roast.md is missing"
-    And the document "meals/2026-08-25.md" does not exist
-
   Scenario: Grep answers "when did we last make this"
     Given the recipe "Chicken Tacos" serving 4 is stored as a document
-    And dinner on "2026-08-25" is stored as a document with the recipe "Chicken Tacos"
-    And dinner on "2026-08-28" is stored as a document with the recipe "Chicken Tacos"
-    When I call "grep" for "chicken-tacos.md" in "meals" listing files only
+    And a meal plan from "2026-08-24" to "2026-08-30" with "Chicken Tacos" for dinner on "2026-08-25"
+    And a meal plan from "2026-08-31" to "2026-09-06" with "Chicken Tacos" for dinner on "2026-09-01"
+    When I call "grep" for "recipes/chicken-tacos.md" in "plans" listing files only
     Then the output lists:
-      | meals/2026-08-25.md |
-      | meals/2026-08-28.md |
+      | plans/2026-08-24--2026-08-30.html |
+      | plans/2026-08-31--2026-09-06.html |
 
   Scenario: Grep prints the path, the line and the text
     Given the recipe "Chicken Tacos" serving 4 is stored as a document
@@ -145,14 +135,6 @@ Feature: The meal plan is documents in the database, behind file verbs
     When I edit "pantry/staples.md" replacing "salt" with "kosher salt"
     Then the tool call is refused
     And the output mentions "appears 2 times"
-
-  Scenario: A recipe a planned day still links to is not deleted
-    Given the recipe "Chicken Tacos" serving 4 is stored as a document
-    And dinner on "2026-08-25" is stored as a document with the recipe "Chicken Tacos"
-    When I delete the document "recipes/chicken-tacos.md"
-    Then the tool call is refused
-    And the output mentions "meals/2026-08-25.md"
-    And the document "recipes/chicken-tacos.md" exists
 
   Scenario: An overwrite can always be walked back
     Given the recipe "Chicken Tacos" serving 4 is stored as a document
@@ -196,32 +178,20 @@ Feature: The meal plan is documents in the database, behind file verbs
     And the output mentions "changed after you read it"
     And the document "recipes/chicken-tacos.md" mentions "servings: 4"
 
-  Scenario: The shopping list is derived from the documents and stored on request
-    Given the recipe "Chicken Tacos" serving 4 is stored as a document with the ingredients:
-      | quantity | unit | item           |
-      | 1        | lb   | chicken thighs |
-      | 2        | cup  | salsa          |
-    And dinner on "2026-08-25" is stored as a document with the recipe "Chicken Tacos"
-    When I call "shopping_list" from "2026-08-25" to "2026-08-31" out to "shopping-lists/2026-08-25--2026-08-31.md"
-    Then the tool call succeeds
-    And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "1 lb chicken thighs"
-    And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "2 cup salsa"
-    And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "from: 2026-08-25"
-
-  Scenario: Kroger candidates land on a document list
+  Scenario: Kroger candidates land on the meal plan's shopping list
     Given my Kroger account is connected
     And the household shops at Kroger store "Kroger On the Rhine" for pickup
     And the recipe "Chicken Tacos" serving 4 is stored as a document with the ingredients:
       | quantity | unit | item           |
       | 1        | lb   | chicken thighs |
-    And dinner on "2026-08-25" is stored as a document with the recipe "Chicken Tacos"
+    And a meal plan from "2026-08-25" to "2026-08-31" with "Chicken Tacos" for dinner on "2026-08-25"
     And Kroger sells at my store:
       | search         | upc           | description                    | size | price |
       | chicken thighs | 0001111000123 | Kroger Boneless Chicken Thighs | 1 lb | 3.99  |
-    When I call "shopping_list" from "2026-08-25" to "2026-08-31" out to "shopping-lists/2026-08-25--2026-08-31.md"
-    And I call "kroger_find_products" on "shopping-lists/2026-08-25--2026-08-31.md"
+    When I call "kroger_find_products" on "plans/2026-08-25--2026-08-31.html"
     Then the tool call succeeds
-    And the document "shopping-lists/2026-08-25--2026-08-31.md" mentions "`0001111000123` Kroger Boneless Chicken Thighs"
+    And the document "plans/2026-08-25--2026-08-31.html" mentions "0001111000123"
+    And the document "plans/2026-08-25--2026-08-31.html" mentions "Kroger Boneless Chicken Thighs"
 
   @security
   Scenario Outline: A path cannot leave the household's meal plan

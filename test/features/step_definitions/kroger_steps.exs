@@ -7,10 +7,11 @@ defmodule Mealplan.Features.KrogerSteps do
 
   EVERYTHING ELSE IS REAL. A `When` that finds products goes through the real
   tool handler, which runs the real `mealplan` parser over the household's
-  documents, makes a real HTTP request over a real socket, and records the
-  result as a change. A `Then` reads the document that was stored, or the
-  mock's record of what was sent — which is the only record there can be,
-  because Kroger's cart cannot be read back.
+  meal plan, makes a real HTTP request over a real socket, and records the
+  result as a change. A `Then` reads the plan's shopping list as the CLI
+  derives it from the stored document (ADR 0040), or the mock's record of what
+  was sent — which is the only record there can be, because Kroger's cart
+  cannot be read back.
   """
 
   use Cucumber.StepDefinition
@@ -22,8 +23,6 @@ defmodule Mealplan.Features.KrogerSteps do
   alias Mealplan.Features.BrowserSteps, as: Browser
   alias Mealplan.Mcp.Tools
   alias Mealplan.Mock.Kroger
-
-  @list "shopping-lists/2026-08-25--2026-08-31.md"
 
   # --- the account and the store --------------------------------------------
 
@@ -97,15 +96,10 @@ defmodule Mealplan.Features.KrogerSteps do
 
   # --- the list --------------------------------------------------------------
 
-  step "the shopping list for {string} to {string} has been written",
-       %{args: [from, to]} = context do
-    {:ok, write_list(context, from, to)}
-  end
-
-  step "the shopping list for {string} to {string} has been matched against Kroger",
-       %{args: [from, to]} = context do
-    context = write_list(context, from, to)
-    context = find_products(context, context.list_path)
+  # The plan comes from "a meal plan from … with …", which goes through
+  # start_meal_plan and save_meal_plan. This finds the products for it.
+  step "the meal plan has been matched against Kroger", context do
+    context = find_products(context, list_path(context))
 
     refute error_of(context),
            "finding products failed:\n#{text_of(context)}"
@@ -129,31 +123,13 @@ defmodule Mealplan.Features.KrogerSteps do
     {:ok, context |> Map.put(:list_path, target) |> find_products(target)}
   end
 
-  # Choosing is deleting, and it goes through the real write_file tool.
+  # Choosing is deleting, and it goes through the real save_meal_plan tool.
   #
-  # That is exactly what an agent does: read the document, take out the lines it
-  # does not want, write it back. There is no "choose" call, and there should
-  # not be one — the file IS the interface.
+  # That is exactly what an agent does: take the document, remove the
+  # candidates it does not want, post it back. There is no "choose" call, and
+  # there should not be one — the document IS the interface.
   step "I keep only the candidate {string} for {string}", %{args: [upc, item]} = context do
-    target = list_path(context)
-
-    {kept, _} =
-      context
-      |> list_text()
-      |> String.split("\n")
-      |> Enum.map_reduce(false, fn line, beneath ->
-        beneath = if Regex.match?(~r/^-\s/, line), do: String.contains?(line, item), else: beneath
-
-        if beneath and Regex.match?(~r/^\s+-\s/, line) and
-             not Regex.match?(~r/^\s+-\s+search:/i, line) and
-             not String.contains?(line, "`#{upc}`") do
-          {nil, beneath}
-        else
-          {line, beneath}
-        end
-      end)
-
-    {:ok, write_file(context, target, kept |> Enum.reject(&is_nil/1) |> Enum.join("\n"))}
+    {:ok, keep_only(context, upc, item)}
   end
 
   # --- sending ---------------------------------------------------------------
@@ -190,27 +166,17 @@ defmodule Mealplan.Features.KrogerSteps do
 
   # --- what the list says ----------------------------------------------------
 
-  step ~r/^the shopping list (?:file )?contains the line "(.*)"$/,
-       %{args: [line]} = context do
-    document = list_text(context)
-    lines = document |> String.split("\n") |> Enum.map(&String.trim/1)
-    assert String.trim(line) in lines, ~s(no line "#{line}" in:\n#{document})
+  step ~r/^the shopping list has the line "(.*)"$/, %{args: [line]} = context do
+    lines = Enum.map(FeatureCorpus.plan_list(context).items, & &1.line)
+    assert line in lines, ~s(no line "#{line}" in:\n#{Enum.join(lines, "\n")})
     {:ok, context}
   end
 
-  step ~r/^the shopping list front matter says the (\w+) is "(.*)"$/,
+  step ~r/^the shopping list says the (store|modality) is "(.*)"$/,
        %{args: [field, value]} = context do
-    document = list_text(context)
-
-    case Regex.run(~r/^---\n(.*?)\n---/s, document) do
-      [_, front] ->
-        assert Enum.any?(String.split(front, "\n"), &(String.trim(&1) == "#{field}: #{value}")),
-               ~s(the front matter does not say "#{field}: #{value}":\n#{front})
-
-      _ ->
-        flunk("the list has no front matter:\n#{document}")
-    end
-
+    list = FeatureCorpus.plan_list(context)
+    said = Map.fetch!(list, String.to_existing_atom(field))
+    assert said == value, ~s(the plan's list says the #{field} is "#{said}", not "#{value}")
     {:ok, context}
   end
 
@@ -219,7 +185,7 @@ defmodule Mealplan.Features.KrogerSteps do
     found = candidates_for(context, item)
 
     assert length(found) == String.to_integer(count),
-           "the candidates were:\n#{Enum.join(found, "\n")}"
+           "the candidates were:\n#{Enum.map_join(found, "\n", &inspect/1)}"
 
     {:ok, context}
   end
@@ -235,39 +201,29 @@ defmodule Mealplan.Features.KrogerSteps do
        %{args: [upc, item]} = context do
     found = candidates_for(context, item)
 
-    assert Enum.any?(found, &String.contains?(&1, "`#{upc}`")),
-           ~s(#{upc} is not under "#{item}":\n#{Enum.join(found, "\n")})
+    assert Enum.any?(found, &(&1.product_id == upc)),
+           ~s(#{upc} is not under "#{item}":\n#{Enum.map_join(found, "\n", &inspect/1)})
 
     {:ok, context}
   end
 
   step "every candidate on the shopping list is written as a count of 1", context do
-    candidates =
-      context
-      |> list_text()
-      |> String.split("\n")
-      |> Enum.filter(&Regex.match?(~r/^\s+-\s/, &1))
-      |> Enum.reject(&Regex.match?(~r/^\s+-\s+search:/i, &1))
-
+    candidates = all_candidates(context)
     assert candidates != [], "there are no candidates on the list at all"
 
-    for line <- candidates do
-      assert Regex.match?(~r/^\s+-\s1\s+`/, line),
-             "this candidate was written with a count the meal planner chose:\n#{line}"
+    for candidate <- candidates do
+      assert candidate.count == "1",
+             "this candidate was written with a count the meal planner chose:\n#{inspect(candidate)}"
     end
 
     {:ok, context}
   end
 
   step "every UPC on the shopping list is a 13-character string", context do
-    quoted =
-      ~r/`([^`]+)`/
-      |> Regex.scan(list_text(context))
-      |> Enum.map(fn [_, upc] -> upc end)
+    upcs = Enum.map(all_candidates(context), & &1.product_id)
+    assert upcs != [], "there are no UPCs on the list at all"
 
-    assert quoted != [], "there are no UPCs on the list at all"
-
-    for upc <- quoted do
+    for upc <- upcs do
       assert Regex.match?(~r/^[0-9]{13}$/, upc),
              ~s("#{upc}" is not a 13-character zero-padded UPC)
     end
@@ -277,7 +233,7 @@ defmodule Mealplan.Features.KrogerSteps do
 
   step "every product Kroger offered for {string} is still on the shopping list",
        %{args: [term]} = context do
-    document = list_text(context)
+    on_the_list = Mealplan.Shopping.Plan.product_ids_in(FeatureCorpus.plan_list(context))
 
     offered =
       Map.get(Mealplan.Mock.Server.state(context.kroger).catalogue, String.downcase(term), [])
@@ -286,8 +242,8 @@ defmodule Mealplan.Features.KrogerSteps do
            ~s("#{term}" has only #{length(offered)} product, so nothing is being chosen between)
 
     for product <- offered do
-      assert String.contains?(document, product.upc),
-             "#{product.upc} was dropped, so something chose for the household:\n#{document}"
+      assert MapSet.member?(on_the_list, product.upc),
+             "#{product.upc} was dropped, so something chose for the household"
     end
 
     {:ok, context}
@@ -295,16 +251,14 @@ defmodule Mealplan.Features.KrogerSteps do
 
   step "the shopping list lists {string} as not found at this store",
        %{args: [item]} = context do
-    after_heading = section(context, "## Not found at this store")
-
-    assert String.contains?(after_heading, item),
-           ~s("#{item}" is not listed there:\n#{after_heading})
+    assert FeatureCorpus.plan_line(context, item).not_found,
+           ~s("#{item}" is not marked not found at this store)
 
     {:ok, context}
   end
 
   step "the shopping list records what was sent", context do
-    sent = section(context, "## Sent")
+    sent = Enum.join(FeatureCorpus.plan_list(context).sent, "\n")
 
     for item <- Kroger.sent_items(context.kroger) do
       assert String.contains?(sent, item.upc), "#{item.upc} was sent but not recorded:\n#{sent}"
@@ -433,6 +387,13 @@ defmodule Mealplan.Features.KrogerSteps do
        %{args: [where]} = context do
     assert String.contains?(refusal(context), where),
            "the refusal does not say where to go:\n#{refusal(context)}"
+
+    {:ok, context}
+  end
+
+  step "the refusal says to call {string}", %{args: [tool]} = context do
+    assert String.contains?(refusal(context), tool),
+           "the refusal does not name #{tool}:\n#{refusal(context)}"
 
     {:ok, context}
   end
@@ -835,45 +796,34 @@ defmodule Mealplan.Features.KrogerSteps do
     context
   end
 
-  defp write_list(context, from, to) do
-    target = "shopping-lists/#{from}--#{to}.md"
+  # Remove every candidate under the line except `upc`, and save the plan.
+  defp keep_only(context, upc, item) do
+    FeatureCorpus.edit_plan(
+      context,
+      fn document ->
+        line = FeatureCorpus.item_element(document, item)
 
-    context
-    |> FeatureCorpus.write_list(from, to, target)
-    |> Map.put(:list_path, target)
+        kept =
+          Regex.replace(
+            ~r/<li data-mp-candidate="([^"]*)"[^>]*>.*?<\/li>\n?/su,
+            line,
+            fn whole, id -> if id == upc, do: whole, else: "" end
+          )
+
+        String.replace(document, line, kept)
+      end,
+      "keep #{upc} for #{item}"
+    )
   end
 
   # --- reading it back -------------------------------------------------------
 
-  defp list_path(context), do: context[:list_path] || @list
+  defp list_path(context), do: FeatureCorpus.plan_path(context)
 
-  defp list_text(context), do: FeatureCorpus.read!(context, list_path(context))
+  defp candidates_for(context, item), do: FeatureCorpus.plan_line(context, item).candidates
 
-  defp section(context, heading) do
-    document = list_text(context)
-
-    case :binary.match(document, heading) do
-      {at, _} -> binary_part(document, at, byte_size(document) - at)
-      :nomatch -> flunk(~s(there is no "#{heading}" section:\n#{document}))
-    end
-  end
-
-  defp candidates_for(context, item) do
-    context
-    |> list_text()
-    |> String.split("\n")
-    |> Enum.reduce({[], false}, fn line, {found, beneath} ->
-      cond do
-        Regex.match?(~r/^-\s/, line) -> {found, String.contains?(line, item)}
-        beneath and Regex.match?(~r/^\s+-\s+search:/i, line) -> {found, beneath}
-        beneath and Regex.match?(~r/^\s+-\s/, line) -> {[line | found], beneath}
-        Regex.match?(~r/^#/, line) -> {found, false}
-        true -> {found, beneath}
-      end
-    end)
-    |> elem(0)
-    |> Enum.reverse()
-  end
+  defp all_candidates(context),
+    do: Enum.flat_map(FeatureCorpus.plan_list(context).items, & &1.candidates)
 
   defp wanted_items(context) do
     Enum.map(

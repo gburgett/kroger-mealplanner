@@ -28,8 +28,6 @@ defmodule Mealplan.Features.WalmartSteps do
   alias Mealplan.Mock.{Server, Walmart}
   alias Mealplan.Walmart.Config
 
-  @list "shopping-lists/2026-08-25--2026-08-31.md"
-
   # --- whether the server is even configured ---------------------------------
 
   # `corpus_hooks.exs` configures a Walmart credential for every scenario, on
@@ -97,14 +95,38 @@ defmodule Mealplan.Features.WalmartSteps do
 
   # --- finding products ------------------------------------------------------
 
-  step "the shopping list for {string} to {string} has been matched against Walmart",
-       %{args: [from, to]} = context do
-    target = "shopping-lists/#{from}--#{to}.md"
-    context = FeatureCorpus.write_list(context, from, to, target)
-
-    context = context |> Map.put(:list_path, target) |> find_products(target)
+  # The plan comes from "a meal plan from … with …", which goes through
+  # start_meal_plan and save_meal_plan. This finds the products for it.
+  step "the meal plan has been matched against Walmart", context do
+    context = find_products(context, list_path(context))
     refute error_of(context), "finding products failed:\n#{text_of(context)}"
     {:ok, context}
+  end
+
+  # One plan holding both shops' products is the household's own arrangement,
+  # so the candidates are written straight onto the lines and saved, the way
+  # an assistant would write them.
+  step "the shopping list has the candidates:", context do
+    {:ok,
+     FeatureCorpus.edit_plan(
+       context,
+       fn document ->
+         Enum.reduce(context.datatable.maps, document, fn row, document ->
+           line = FeatureCorpus.item_element(document, row["line"])
+
+           candidate =
+             ~s(<ul class="cand">\n<li data-mp-candidate="#{row["product"]}" data-mp-count="1" ) <>
+               ~s(data-mp-description="#{row["description"]}">#{row["description"]}</li>\n</ul>\n)
+
+           String.replace(
+             document,
+             line,
+             String.replace_suffix(line, "</li>", candidate <> "</li>")
+           )
+         end)
+       end,
+       "candidates from both shops"
+     )}
   end
 
   step "I ask Walmart for the products on the shopping list", context do
@@ -117,15 +139,15 @@ defmodule Mealplan.Features.WalmartSteps do
 
   step "every product Walmart offered for {string} is still on the shopping list",
        %{args: [term]} = context do
-    document = list_text(context)
+    on_the_list = Mealplan.Shopping.Plan.product_ids_in(FeatureCorpus.plan_list(context))
     offered = Map.get(Server.state(context.walmart).catalogue, String.downcase(term), [])
 
     assert length(offered) > 1,
            ~s("#{term}" has only #{length(offered)} product, so nothing is being chosen between)
 
     for product <- offered do
-      assert String.contains?(document, "walmart:#{product.item_id}"),
-             "walmart:#{product.item_id} was dropped, so something chose for the household:\n#{document}"
+      assert MapSet.member?(on_the_list, "walmart:#{product.item_id}"),
+             "walmart:#{product.item_id} was dropped, so something chose for the household"
     end
 
     {:ok, context}
@@ -190,29 +212,25 @@ defmodule Mealplan.Features.WalmartSteps do
   end
 
   step "no Walmart cart link was built", context do
-    document = list_text_or_empty(context)
+    link =
+      case FeatureCorpus.read(context, list_path(context)) do
+        nil -> nil
+        _ -> FeatureCorpus.plan_list(context).cart_link
+      end
 
-    refute String.contains?(document, "## Cart link"),
-           "a cart link was recorded on the list:\n#{document}"
+    refute link, "a cart link was recorded on the plan: #{link}"
 
     {:ok, context}
   end
 
   step "the shopping list records the cart link", context do
-    document = list_text(context)
-
-    after_heading =
-      case :binary.match(document, "## Cart link") do
-        {at, _} -> binary_part(document, at, byte_size(document) - at)
-        :nomatch -> flunk(~s(there is no "Cart link" section:\n#{document}))
-      end
-
-    assert String.contains?(after_heading, cart_link(context)),
-           "the link the tool returned is not recorded:\n#{after_heading}"
+    assert FeatureCorpus.plan_list(context).cart_link == cart_link(context),
+           "the link the tool returned is not recorded on the plan"
 
     # The record must say what it is NOT, or an agent reading it a week later
     # will tell the household the items are in a cart nobody can see.
-    assert Regex.match?(~r/building it added nothing/i, after_heading)
+    document = FeatureCorpus.read!(context, list_path(context))
+    assert Regex.match?(~r/building this link added nothing/i, document)
     {:ok, context}
   end
 
@@ -397,11 +415,7 @@ defmodule Mealplan.Features.WalmartSteps do
     end
   end
 
-  defp list_path(context), do: context[:list_path] || @list
-
-  defp list_text(context), do: FeatureCorpus.read!(context, list_path(context))
-
-  defp list_text_or_empty(context), do: FeatureCorpus.read(context, list_path(context)) || ""
+  defp list_path(context), do: FeatureCorpus.plan_path(context)
 
   defp text_of(context), do: (context[:last_tool] || %{})[:text] || ""
   defp error_of(context), do: (context[:last_tool] || %{})[:error]
